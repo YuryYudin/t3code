@@ -3,11 +3,21 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectCollectionId,
+  ProjectCollectionProjectKey,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type ProjectCollectionsDocument,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildHomeProjectScopes,
+  buildHomeThreadListModel,
   buildHomeThreadGroups,
   sortHomeProjectScopes,
 } from "./homeThreadList";
@@ -779,5 +789,202 @@ describe("buildHomeThreadGroups", () => {
     expect(groups[0]?.projects).toHaveLength(2);
     expect(groups[0]?.newThreadTarget?.environmentId).toBe(desktopEnv);
     expect(groups[0]?.newThreadTarget?.id).toBe(desktopProject.id);
+  });
+});
+
+describe("buildHomeThreadListModel project collection scopes", () => {
+  const workId = ProjectCollectionId.make("00000000-0000-4000-8000-000000000001");
+  const personalId = ProjectCollectionId.make("00000000-0000-4000-8000-000000000002");
+  const emptyId = ProjectCollectionId.make("00000000-0000-4000-8000-000000000003");
+  const projectCollections: ProjectCollectionsDocument = {
+    schemaVersion: 1,
+    collections: [
+      { id: workId, name: "Work", visual: { kind: "lucide", name: "briefcase", color: "blue" } },
+      {
+        id: personalId,
+        name: "Personal",
+        visual: { kind: "emoji", emoji: "🏠" },
+      },
+      {
+        id: emptyId,
+        name: "Alpha",
+        visual: { kind: "lucide", name: "folder-code", color: "gray" },
+      },
+    ],
+    assignments: [
+      {
+        projectKey: ProjectCollectionProjectKey.make("repository:github.com/acme/work"),
+        collectionId: workId,
+      },
+      {
+        projectKey: ProjectCollectionProjectKey.make("repository:github.com/acme/personal"),
+        collectionId: personalId,
+      },
+    ],
+  };
+
+  const laptopEnvironmentId = EnvironmentId.make("environment-laptop");
+  const desktopEnvironmentId = EnvironmentId.make("environment-desktop");
+  const repositoryIdentity = {
+    canonicalKey: "github.com/acme/work",
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "git@github.com:acme/work.git",
+    },
+  };
+  const laptopWork = makeProject({
+    environmentId: laptopEnvironmentId,
+    id: ProjectId.make("work-laptop"),
+    title: "Work laptop",
+    repositoryIdentity,
+    updatedAt: "2026-06-26T00:00:00.000Z",
+  });
+  const desktopWork = makeProject({
+    environmentId: desktopEnvironmentId,
+    id: ProjectId.make("work-desktop"),
+    title: "Work desktop",
+    workspaceRoot: "/different/checkout",
+    repositoryIdentity,
+    updatedAt: "2026-06-27T00:00:00.000Z",
+  });
+  const personal = makeProject({
+    environmentId: laptopEnvironmentId,
+    id: ProjectId.make("personal"),
+    title: "Personal",
+    repositoryIdentity: {
+      ...repositoryIdentity,
+      canonicalKey: "github.com/acme/personal",
+      locator: { ...repositoryIdentity.locator, remoteUrl: "git@github.com:acme/personal.git" },
+    },
+    updatedAt: "2026-06-29T00:00:00.000Z",
+  });
+  const scratch = makeProject({
+    environmentId: laptopEnvironmentId,
+    id: ProjectId.make("scratch"),
+    title: "Scratch",
+    workspaceRoot: "/scratch",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+  });
+  const projects = [laptopWork, desktopWork, personal, scratch];
+  const threads = [
+    makeThread({
+      environmentId: desktopEnvironmentId,
+      id: ThreadId.make("work-new"),
+      projectId: desktopWork.id,
+      title: "Newest work thread",
+      updatedAt: "2026-06-28T12:00:00.000Z",
+    }),
+    makeThread({
+      environmentId: laptopEnvironmentId,
+      id: ThreadId.make("personal-newest"),
+      projectId: personal.id,
+      title: "Newest personal thread",
+      updatedAt: "2026-06-29T00:00:00.000Z",
+    }),
+    makeThread({
+      environmentId: laptopEnvironmentId,
+      id: ThreadId.make("work-old"),
+      projectId: laptopWork.id,
+      title: "Older work thread",
+      updatedAt: "2026-06-27T12:00:00.000Z",
+    }),
+    makeThread({
+      environmentId: laptopEnvironmentId,
+      id: ThreadId.make("scratch-thread"),
+      projectId: scratch.id,
+      title: "Scratch thread",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+    }),
+  ];
+
+  function buildCollectionModel(
+    scope: Parameters<typeof buildHomeThreadListModel>[0]["projectCollectionScope"],
+    projectGroupingMode: SidebarProjectGroupingMode = "repository",
+  ) {
+    return buildHomeThreadListModel({
+      projects,
+      threads,
+      projectCollections,
+      projectCollectionScope: scope,
+      environmentId: null,
+      searchQuery: "",
+      projectSortOrder: "updated_at",
+      threadSortOrder: "updated_at",
+      projectGroupingMode,
+      now: NOW,
+    });
+  }
+
+  it("filters All, named collection, Unfiled, and project scopes without changing recency order", () => {
+    const all = buildCollectionModel({ kind: "all" });
+    const work = buildCollectionModel({ kind: "collection", collectionId: workId });
+    const unfiled = buildCollectionModel({ kind: "unfiled" });
+    const project = buildCollectionModel({
+      kind: "project",
+      projectKey: "repository:github.com/acme/work",
+    });
+
+    expect(all.groups).toEqual(buildGroups(projects, threads));
+    expect(all.groups.flatMap((group) => group.threads.map((thread) => thread.id))).toEqual([
+      "personal-newest",
+      "work-new",
+      "work-old",
+      "scratch-thread",
+    ]);
+    expect(work.groups).toHaveLength(1);
+    expect(work.groups[0]?.threads.map((thread) => thread.id)).toEqual(["work-new", "work-old"]);
+    expect(project.groups).toEqual(work.groups);
+    expect(unfiled.groups.flatMap((group) => group.threads.map((thread) => thread.id))).toEqual([
+      "scratch-thread",
+    ]);
+  });
+
+  it.each(["repository", "repository_path", "separate"] as const)(
+    "keeps repository-family collection membership in %s grouping mode",
+    (projectGroupingMode) => {
+      const model = buildCollectionModel(
+        { kind: "collection", collectionId: workId },
+        projectGroupingMode,
+      );
+
+      expect(model.groups.flatMap((group) => group.threads.map((thread) => thread.id))).toEqual([
+        "work-new",
+        "work-old",
+      ]);
+    },
+  );
+
+  it("returns unique family counts and shared collection ordering from current project order", () => {
+    const model = buildCollectionModel({ kind: "all" });
+
+    expect(model.collectionCounts).toEqual({
+      allProjects: 3,
+      unfiled: 1,
+      byCollectionId: { [workId]: 1, [personalId]: 1, [emptyId]: 0 },
+    });
+    expect(model.scopeOptions.map((option) => [option.label, option.count])).toEqual([
+      ["All projects", 3],
+      ["Personal", 1],
+      ["Work", 1],
+      ["Alpha", 0],
+      ["Unfiled", 1],
+    ]);
+  });
+
+  it("sanitizes stale collection and project scopes to All projects", () => {
+    const staleCollection = buildCollectionModel({
+      kind: "collection",
+      collectionId: ProjectCollectionId.make("00000000-0000-4000-8000-000000000099"),
+    });
+    const staleProject = buildCollectionModel({
+      kind: "project",
+      projectKey: "repository:github.com/acme/gone",
+    });
+
+    expect(staleCollection.activeScope).toEqual({ kind: "all" });
+    expect(staleProject.activeScope).toEqual({ kind: "all" });
+    expect(staleCollection.groups).toEqual(buildCollectionModel({ kind: "all" }).groups);
+    expect(staleProject.groups).toEqual(buildCollectionModel({ kind: "all" }).groups);
   });
 });

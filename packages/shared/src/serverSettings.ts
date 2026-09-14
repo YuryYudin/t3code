@@ -175,6 +175,9 @@ export function applyServerSettingsPatch(
     usagePriceOverrides: usagePriceOverridesPatch,
     projectAgentBrowserAccessOverrides: projectAgentBrowserAccessOverridesPatch,
     projectAutoPullOverrides: projectAutoPullOverridesPatch,
+    // A collection patch is a complete versioned document. Keep it out of
+    // deepMerge so removed collections and assignments cannot survive.
+    projectCollections: projectCollectionsPatch,
     ...patchForMerge
   } = patch;
   const currentBackgroundActivity = normalizeServerBackgroundActivitySettings(current);
@@ -246,6 +249,9 @@ export function applyServerSettingsPatch(
             projectAutoPullOverridesPatch,
           ),
         }
+      : {}),
+    ...(projectCollectionsPatch !== undefined
+      ? { projectCollections: projectCollectionsPatch }
       : {}),
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }

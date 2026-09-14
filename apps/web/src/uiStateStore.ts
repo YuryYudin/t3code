@@ -1,4 +1,15 @@
 import { Debouncer } from "@tanstack/react-pacer";
+import {
+  EnvironmentId as EnvironmentIdSchema,
+  MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH,
+  ProjectCollectionId as ProjectCollectionIdSchema,
+  type EnvironmentId,
+} from "@t3tools/contracts";
+import {
+  ALL_PROJECTS_COLLECTION_SCOPE,
+  type ProjectCollectionScope,
+} from "@t3tools/client-runtime/state/project-collections";
+import * as Schema from "effect/Schema";
 import { create } from "zustand";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 
@@ -27,6 +38,8 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarProjectScopeKey?: string | null;
+  projectCollectionScope?: unknown;
+  projectCollectionsPreferredReferenceEnvironmentId?: string | null;
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
 }
@@ -38,6 +51,8 @@ export interface UiProjectState {
   // projects". Lives here so routes that unmount the sidebar (Settings)
   // cannot reset the filter.
   sidebarProjectScopeKey: string | null;
+  projectCollectionScope: ProjectCollectionScope;
+  projectCollectionsPreferredReferenceEnvironmentId: EnvironmentId | null;
 }
 
 export interface UiThreadState {
@@ -55,6 +70,8 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
+  projectCollectionScope: ALL_PROJECTS_COLLECTION_SCOPE,
+  projectCollectionsPreferredReferenceEnvironmentId: null,
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -92,6 +109,44 @@ function sanitizeBooleanRecord(value: unknown): Record<string, boolean> {
 
 function sanitizeOptionalKey(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+const isEnvironmentId = Schema.is(EnvironmentIdSchema);
+const isProjectCollectionId = Schema.is(ProjectCollectionIdSchema);
+
+function isPersistedEnvironmentId(value: unknown): value is EnvironmentId {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.trim() === value &&
+    isEnvironmentId(value)
+  );
+}
+
+function sanitizePersistedProjectCollectionScope(value: unknown): ProjectCollectionScope {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return ALL_PROJECTS_COLLECTION_SCOPE;
+  }
+  if (value.kind === "all") return ALL_PROJECTS_COLLECTION_SCOPE;
+  if (value.kind === "unfiled") return { kind: "unfiled" };
+  if (value.kind === "collection" && "collectionId" in value) {
+    const collectionId =
+      typeof value.collectionId === "string" ? value.collectionId.toLowerCase() : null;
+    if (isProjectCollectionId(collectionId)) {
+      return { kind: "collection", collectionId };
+    }
+  }
+  if (
+    value.kind === "project" &&
+    "projectKey" in value &&
+    typeof value.projectKey === "string" &&
+    value.projectKey.trim().length > 0 &&
+    value.projectKey.trim() === value.projectKey &&
+    value.projectKey.length <= MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH
+  ) {
+    return { kind: "project", projectKey: value.projectKey };
+  }
+  return ALL_PROJECTS_COLLECTION_SCOPE;
 }
 
 function sanitizeTimestampRecord(value: unknown): Record<string, string> {
@@ -132,6 +187,13 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     parsed.projectOrder === undefined
       ? sanitizeStringArray(parsed.projectOrderCwds).map(legacyProjectCwdPreferenceKey)
       : sanitizeStringArray(parsed.projectOrder);
+  const sidebarProjectScopeKey = sanitizeOptionalKey(parsed.sidebarProjectScopeKey);
+  const projectCollectionScope =
+    parsed.projectCollectionScope === undefined
+      ? sidebarProjectScopeKey === null
+        ? ALL_PROJECTS_COLLECTION_SCOPE
+        : { kind: "project" as const, projectKey: sidebarProjectScopeKey }
+      : sanitizePersistedProjectCollectionScope(parsed.projectCollectionScope);
 
   return {
     projectExpandedById,
@@ -142,7 +204,14 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
-    sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarProjectScopeKey:
+      projectCollectionScope.kind === "project" ? projectCollectionScope.projectKey : null,
+    projectCollectionScope,
+    projectCollectionsPreferredReferenceEnvironmentId: isPersistedEnvironmentId(
+      parsed.projectCollectionsPreferredReferenceEnvironmentId,
+    )
+      ? parsed.projectCollectionsPreferredReferenceEnvironmentId
+      : null,
   };
 }
 
@@ -214,6 +283,9 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        projectCollectionScope: state.projectCollectionScope,
+        projectCollectionsPreferredReferenceEnvironmentId:
+          state.projectCollectionsPreferredReferenceEnvironmentId,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
       } satisfies PersistedUiState),
@@ -315,13 +387,65 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
 
 export function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
   const nextKey = sanitizeOptionalKey(projectKey);
-  if (state.sidebarProjectScopeKey === nextKey) {
+  const projectCollectionScope: ProjectCollectionScope =
+    nextKey === null ? ALL_PROJECTS_COLLECTION_SCOPE : { kind: "project", projectKey: nextKey };
+  if (
+    state.sidebarProjectScopeKey === nextKey &&
+    projectCollectionScopesEqual(state.projectCollectionScope, projectCollectionScope)
+  ) {
     return state;
   }
   return {
     ...state,
     sidebarProjectScopeKey: nextKey,
+    projectCollectionScope,
   };
+}
+
+function projectCollectionScopesEqual(
+  left: ProjectCollectionScope,
+  right: ProjectCollectionScope,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "collection" && right.kind === "collection") {
+    return left.collectionId === right.collectionId;
+  }
+  if (left.kind === "project" && right.kind === "project") {
+    return left.projectKey === right.projectKey;
+  }
+  return true;
+}
+
+export function setProjectCollectionScope(
+  state: UiState,
+  projectCollectionScope: ProjectCollectionScope,
+): UiState {
+  const sidebarProjectScopeKey =
+    projectCollectionScope.kind === "project" ? projectCollectionScope.projectKey : null;
+  if (
+    projectCollectionScopesEqual(state.projectCollectionScope, projectCollectionScope) &&
+    state.sidebarProjectScopeKey === sidebarProjectScopeKey
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    sidebarProjectScopeKey,
+    projectCollectionScope,
+  };
+}
+
+export function setProjectCollectionsPreferredReferenceEnvironmentId(
+  state: UiState,
+  projectCollectionsPreferredReferenceEnvironmentId: EnvironmentId | null,
+): UiState {
+  if (
+    state.projectCollectionsPreferredReferenceEnvironmentId ===
+    projectCollectionsPreferredReferenceEnvironmentId
+  ) {
+    return state;
+  }
+  return { ...state, projectCollectionsPreferredReferenceEnvironmentId };
 }
 
 export function resolveProjectExpanded(
@@ -407,6 +531,10 @@ interface UiStateStore extends UiState {
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setProjectCollectionScope: (scope: ProjectCollectionScope) => void;
+  setProjectCollectionsPreferredReferenceEnvironmentId: (
+    environmentId: EnvironmentId | null,
+  ) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -427,6 +555,9 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setProjectCollectionScope: (scope) => set((state) => setProjectCollectionScope(state, scope)),
+  setProjectCollectionsPreferredReferenceEnvironmentId: (environmentId) =>
+    set((state) => setProjectCollectionsPreferredReferenceEnvironmentId(state, environmentId)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>

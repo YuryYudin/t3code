@@ -3,6 +3,17 @@ import {
   derivePhysicalProjectKey,
   deriveProjectGroupLabel,
 } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  deriveProjectCollectionCounts,
+  deriveProjectCollectionProjectKey,
+  deriveProjectCollectionScopeOptions,
+  filterItemsByProjectCollectionScope,
+  sanitizeProjectCollectionScope,
+  type ProjectCollectionCounts,
+  type ProjectCollectionProjectKeyCandidate,
+  type ProjectCollectionScope,
+  type ProjectCollectionScopeOption,
+} from "@t3tools/client-runtime/state/project-collections";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -19,6 +30,7 @@ import type {
   SidebarProjectGroupingMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
+  ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -37,6 +49,11 @@ export interface HomeProjectScope {
   readonly projectRefs: ReadonlyArray<ScopedProjectRef>;
 }
 
+interface HomeProjectScopeEntry {
+  readonly scope: HomeProjectScope;
+  readonly projectCollectionKey: ProjectCollectionProjectKeyCandidate;
+}
+
 function getProjectSortTimestamp(
   project: EnvironmentProject,
   sortOrder: HomeProjectSortOrder,
@@ -48,11 +65,11 @@ function getProjectSortTimestamp(
         Number.NEGATIVE_INFINITY);
 }
 
-export function buildHomeProjectScopes(input: {
+function buildHomeProjectScopeEntries(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly environmentId: EnvironmentId | null;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
-}): ReadonlyArray<HomeProjectScope> {
+}): ReadonlyArray<HomeProjectScopeEntry> {
   const projects = input.projects.filter(
     (project) => input.environmentId === null || project.environmentId === input.environmentId,
   );
@@ -62,15 +79,24 @@ export function buildHomeProjectScopes(input: {
       sidebarProjectGroupingMode: input.projectGroupingMode,
       sidebarProjectGroupingOverrides: {},
     },
-  }).map((group) => {
-    return {
+  }).map((group) => ({
+    scope: {
       key: group.key,
       title: group.label,
       representative: group.representative,
       projects: group.members.map((member) => member.project),
       projectRefs: group.memberProjectRefs,
-    };
-  });
+    },
+    projectCollectionKey: deriveProjectCollectionProjectKey({ group, projects }),
+  }));
+}
+
+export function buildHomeProjectScopes(input: {
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly environmentId: EnvironmentId | null;
+  readonly projectGroupingMode: SidebarProjectGroupingMode;
+}): ReadonlyArray<HomeProjectScope> {
+  return buildHomeProjectScopeEntries(input).map(({ scope }) => scope);
 }
 
 export function sortHomeProjectScopes(input: {
@@ -203,7 +229,7 @@ function selectRecentThreads(
   return recent.length > 0 ? recent : sortedThreads.slice(0, RECENT_THREAD_FALLBACK_COUNT);
 }
 
-export function buildHomeThreadGroups(input: {
+export interface HomeThreadGroupsInput {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly pendingTasks?: ReadonlyArray<PendingNewTask>;
@@ -217,13 +243,18 @@ export function buildHomeThreadGroups(input: {
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   /** Current time used for the recency window; defaults to now. Injectable for tests. */
   readonly now?: number;
-}): ReadonlyArray<HomeThreadGroup> {
+}
+
+function buildHomeThreadGroupsFromScopes(
+  input: HomeThreadGroupsInput,
+  projectScopes: ReadonlyArray<HomeProjectScope>,
+): ReadonlyArray<HomeThreadGroup> {
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
   const groupTitleByKey = new Map<string, string>();
   const groupKeyByProjectKey = new Map<string, string>();
 
-  for (const scope of buildHomeProjectScopes(input)) {
+  for (const scope of projectScopes) {
     groupTitleByKey.set(scope.key, scope.title);
     groups.set(scope.key, {
       key: scope.key,
@@ -385,4 +416,73 @@ export function buildHomeThreadGroups(input: {
       }),
     ),
   );
+}
+
+export function buildHomeThreadGroups(
+  input: HomeThreadGroupsInput,
+): ReadonlyArray<HomeThreadGroup> {
+  return buildHomeThreadGroupsFromScopes(input, buildHomeProjectScopes(input));
+}
+
+export interface HomeThreadListModel {
+  /** Existing flat, recency-ranked mobile rows after applying the active scope. */
+  readonly groups: ReadonlyArray<HomeThreadGroup>;
+  /** The requested local scope after missing collection/project selections fall back to All. */
+  readonly activeScope: ProjectCollectionScope;
+  /** All, derived-order named collections, and Unfiled with their unique family counts. */
+  readonly scopeOptions: ReadonlyArray<ProjectCollectionScopeOption>;
+  readonly collectionCounts: ProjectCollectionCounts;
+}
+
+export function buildHomeThreadListModel(
+  input: HomeThreadGroupsInput & {
+    readonly projectCollections: ProjectCollectionsDocument;
+    readonly projectCollectionScope: ProjectCollectionScope;
+  },
+): HomeThreadListModel {
+  const scopeEntries = buildHomeProjectScopeEntries(input);
+  const collectionKeyByGroupKey = new Map(
+    scopeEntries.map(({ scope, projectCollectionKey }) => [scope.key, projectCollectionKey]),
+  );
+  const orderedProjectKeys = sortHomeProjectScopes({
+    scopes: scopeEntries.map(({ scope }) => scope),
+    threads: input.threads,
+    pendingTasks: input.pendingTasks ?? [],
+    projectSortOrder: input.projectSortOrder,
+  }).map((scope) => collectionKeyByGroupKey.get(scope.key)!);
+  const activeScope = sanitizeProjectCollectionScope(
+    input.projectCollections,
+    input.projectCollectionScope,
+    orderedProjectKeys,
+  );
+  const groups = filterItemsByProjectCollectionScope({
+    document: input.projectCollections,
+    items: buildHomeThreadGroupsFromScopes(
+      input,
+      scopeEntries.map(({ scope }) => scope),
+    ),
+    scope: activeScope,
+    projectKey: (group) => {
+      const projectCollectionKey = collectionKeyByGroupKey.get(group.key);
+      if (projectCollectionKey !== undefined) return projectCollectionKey;
+
+      // Pending-only groups have no loaded project shell. They remain usable in
+      // All and Unfiled while still going through the shared identity derivation.
+      const project = group.representative;
+      return deriveProjectCollectionProjectKey({
+        group: {
+          members: [{ project, physicalProjectKey: derivePhysicalProjectKey(project) }],
+          memberProjectRefs: [{ environmentId: project.environmentId, projectId: project.id }],
+        },
+        projects: [project],
+      });
+    },
+  });
+
+  return {
+    groups,
+    activeScope,
+    scopeOptions: deriveProjectCollectionScopeOptions(input.projectCollections, orderedProjectKeys),
+    collectionCounts: deriveProjectCollectionCounts(input.projectCollections, orderedProjectKeys),
+  };
 }

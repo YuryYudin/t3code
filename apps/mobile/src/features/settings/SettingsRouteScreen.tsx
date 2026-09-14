@@ -44,7 +44,6 @@ import {
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import {
-  filterSharedServerPatch,
   findSharedSettingsMismatches,
   pickSharedServerSettings,
   supportsSharedSettingsSync,
@@ -60,7 +59,11 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
-import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { ProjectCollectionsSettingsSection } from "./ProjectCollectionsSettingsSection";
+import {
+  planGenericSharedSettingsFanout,
+  resolveAgentAwarenessPlatformPresentation,
+} from "./SettingsRouteScreen.logic";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -543,11 +546,14 @@ function ConfiguredSettingsRouteScreen() {
 
 function GeneralSettingsSection() {
   return (
-    <SettingsSection title="General">
-      <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
-      <AutoSettleSettingsRows />
-      <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-    </SettingsSection>
+    <>
+      <SettingsSection title="General">
+        <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+        <AutoSettleSettingsRows />
+        <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
+      </SettingsSection>
+      <ProjectCollectionsSettingsSection />
+    </>
   );
 }
 
@@ -577,8 +583,15 @@ function AutoSettleSettingsRows() {
   }
 
   const writeToAll = (patch: ServerSettingsPatch) => {
-    for (const environment of syncTargets) {
-      void updateSettings({ environmentId: environment.environmentId, input: { patch } });
+    for (const write of planGenericSharedSettingsFanout({
+      patch,
+      targets: syncTargets.map((environment) => ({
+        environmentId: environment.environmentId,
+        capabilities: environment.serverConfig?.environment.capabilities,
+        settings: environment.serverConfig?.settings,
+      })),
+    })) {
+      void updateSettings({ environmentId: write.environmentId, input: { patch: write.patch } });
     }
   };
 
@@ -659,18 +672,28 @@ function AutoSettleSettingsRows() {
                 referenceSettings,
                 reference.serverConfig?.environment.capabilities,
               );
-              for (const mismatch of mismatches) {
+              const targets = mismatches.flatMap((mismatch) => {
                 const target = environments.find(
                   (candidate) => candidate.environmentId === mismatch.environmentId,
                 );
+                return target === undefined
+                  ? []
+                  : [
+                      {
+                        environmentId: target.environmentId,
+                        capabilities: target.serverConfig?.environment.capabilities,
+                        settings: target.serverConfig?.settings,
+                      },
+                    ];
+              });
+              for (const write of planGenericSharedSettingsFanout({
+                patch,
+                targets,
+                sourceSettings: referenceSettings,
+              })) {
                 void updateSettings({
-                  environmentId: mismatch.environmentId,
-                  input: {
-                    patch: filterSharedServerPatch(
-                      patch,
-                      target?.serverConfig?.environment.capabilities,
-                    ),
-                  },
+                  environmentId: write.environmentId,
+                  input: { patch: write.patch },
                 });
               }
             }}

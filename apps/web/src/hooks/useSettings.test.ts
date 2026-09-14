@@ -1,9 +1,14 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ProjectCollectionId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS, type ClientSettings } from "@t3tools/contracts/settings";
+import { act, createElement, useLayoutEffect } from "react";
+import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const persistenceMocks = vi.hoisted(() => ({
@@ -11,8 +16,41 @@ const persistenceMocks = vi.hoisted(() => ({
   setClientSettings: vi.fn<(settings: ClientSettings) => Promise<void>>(),
 }));
 
+const settingsHookState = vi.hoisted(() => ({
+  environments: [] as Array<{
+    environmentId: EnvironmentId;
+    label: string;
+    connection: { phase: "connected" };
+    serverConfig: {
+      environment: {
+        capabilities: { threadAutoSettlement: true; threadRestartContinuation: true };
+      };
+      settings: typeof DEFAULT_SERVER_SETTINGS;
+    };
+  }>,
+  primaryEnvironmentId: null as EnvironmentId | null,
+  updateSettings: vi.fn(),
+}));
+
 vi.mock("~/localApi", () => ({
   ensureLocalApi: () => ({ persistence: persistenceMocks }),
+}));
+
+vi.mock("~/state/environments", () => ({
+  useEnvironments: () => ({ environments: settingsHookState.environments }),
+  usePrimaryEnvironment: () =>
+    settingsHookState.environments.find(
+      ({ environmentId }) => environmentId === settingsHookState.primaryEnvironmentId,
+    ) ?? null,
+}));
+
+vi.mock("~/state/server", () => ({
+  primaryServerSettingsAtom: {},
+  serverEnvironment: { updateSettings: { label: "test:update-settings" } },
+}));
+
+vi.mock("~/state/use-atom-command", () => ({
+  useAtomCommand: () => settingsHookState.updateSettings,
 }));
 
 import {
@@ -24,16 +62,142 @@ import {
   persistClientSettingsPatch,
   persistClientSettingsUpdate,
   resolveEnvironmentIdentificationMode,
+  useSharedSettingsSync,
+  useUpdateEnvironmentSettings,
+  useUpdatePrimarySettings,
 } from "./useSettings";
 
 beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   persistenceMocks.getClientSettings.mockReset().mockResolvedValue(null);
   persistenceMocks.setClientSettings.mockReset().mockResolvedValue(undefined);
   __resetClientSettingsPersistenceForTests();
+  settingsHookState.environments = [];
+  settingsHookState.primaryEnvironmentId = null;
+  settingsHookState.updateSettings.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: undefined,
+  });
+  latestEnvironmentUpdate = null;
+  latestPrimaryUpdate = null;
+  latestSharedSync = null;
 });
 
-afterEach(() => {
+const WORK_COLLECTIONS: ProjectCollectionsDocument = {
+  schemaVersion: 1,
+  collections: [
+    {
+      id: ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb"),
+      name: "Work",
+      visual: { kind: "lucide", name: "briefcase", color: "blue" },
+    },
+  ],
+  assignments: [],
+};
+
+const primaryId = EnvironmentId.make("environment-primary");
+const secondaryId = EnvironmentId.make("environment-secondary");
+
+function syncEnvironment(
+  environmentId: EnvironmentId,
+  projectCollections: ProjectCollectionsDocument,
+) {
+  return {
+    environmentId,
+    label: environmentId,
+    connection: { phase: "connected" as const },
+    serverConfig: {
+      environment: {
+        capabilities: {
+          threadAutoSettlement: true as const,
+          threadRestartContinuation: true as const,
+        },
+      },
+      settings: { ...DEFAULT_SERVER_SETTINGS, projectCollections },
+    },
+  };
+}
+
+let settingsRenderer: ReactTestRenderer | undefined;
+let latestEnvironmentUpdate:
+  | ((patch: { projectCollections: ProjectCollectionsDocument }) => void)
+  | null;
+let latestPrimaryUpdate:
+  | ((patch: { projectCollections: ProjectCollectionsDocument }) => void)
+  | null;
+let latestSharedSync: ReturnType<typeof useSharedSettingsSync> | null;
+
+function EnvironmentUpdateProbe() {
+  const update = useUpdateEnvironmentSettings(secondaryId);
+  useLayoutEffect(() => {
+    latestEnvironmentUpdate = update;
+  }, [update]);
+  return null;
+}
+
+function PrimaryUpdateProbe() {
+  const update = useUpdatePrimarySettings();
+  useLayoutEffect(() => {
+    latestPrimaryUpdate = update;
+  }, [update]);
+  return null;
+}
+
+function SharedSyncProbe() {
+  const sync = useSharedSettingsSync();
+  useLayoutEffect(() => {
+    latestSharedSync = sync;
+  }, [sync]);
+  return null;
+}
+
+afterEach(async () => {
+  await act(() => settingsRenderer?.unmount());
+  settingsRenderer = undefined;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("dedicated project collection settings isolation", () => {
+  beforeEach(() => {
+    settingsHookState.primaryEnvironmentId = primaryId;
+    settingsHookState.environments = [
+      syncEnvironment(primaryId, WORK_COLLECTIONS),
+      syncEnvironment(secondaryId, DEFAULT_SERVER_SETTINGS.projectCollections),
+    ];
+  });
+
+  it("rejects collection documents from environment-local and shared fanout updates", async () => {
+    await act(() => {
+      settingsRenderer = create(createElement(EnvironmentUpdateProbe));
+    });
+
+    await act(() => latestEnvironmentUpdate?.({ projectCollections: WORK_COLLECTIONS }));
+
+    expect(settingsHookState.updateSettings).not.toHaveBeenCalled();
+    expect(persistenceMocks.setClientSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects collection documents from primary settings updates", async () => {
+    await act(() => {
+      settingsRenderer = create(createElement(PrimaryUpdateProbe));
+    });
+
+    await act(() => latestPrimaryUpdate?.({ projectCollections: WORK_COLLECTIONS }));
+
+    expect(settingsHookState.updateSettings).not.toHaveBeenCalled();
+    expect(persistenceMocks.setClientSettings).not.toHaveBeenCalled();
+  });
+
+  it("omits collection-only drift from generic mismatch and Apply-to-all", async () => {
+    await act(() => {
+      settingsRenderer = create(createElement(SharedSyncProbe));
+    });
+
+    expect(latestSharedSync?.mismatches).toEqual([]);
+    await act(() => latestSharedSync?.applyToAll());
+    expect(settingsHookState.updateSettings).not.toHaveBeenCalled();
+  });
 });
 
 describe("client settings hydration", () => {
