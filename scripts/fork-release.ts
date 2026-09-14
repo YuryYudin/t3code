@@ -507,8 +507,13 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
   const preferred = dispatchT3(payload, baseUrl, token);
   if (preferred.status !== 400) return t3Receipt(preferred);
 
-  // v0.0.40 predates the atomic external-alert command. Keep escalation useful
-  // while that server is still running by composing the two commands it knows.
+  // v0.0.40 predates the atomic external-alert command and does not expose its
+  // internal activity append over HTTP. Keep escalation passive by creating a
+  // normal thread and reflecting incident state in its title.
+  const legacyTitle =
+    state === "failing"
+      ? `${record.title} (#${record.issueNumber})`
+      : `Recovered: ${record.title} (#${record.issueNumber})`;
   if (state === "failing") {
     t3Receipt(
       dispatchT3(
@@ -517,7 +522,7 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
           commandId: `${commandId}:legacy-create`,
           threadId: payload.threadId,
           projectId,
-          title: record.title,
+          title: legacyTitle,
           modelSelection: legacyT3ModelSelection(),
           runtimeMode: "full-access",
           interactionMode: "default",
@@ -533,24 +538,10 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
   return t3Receipt(
     dispatchT3(
       {
-        type: "thread.activity.append",
+        type: "thread.meta.update",
         commandId,
         threadId: payload.threadId,
-        activity: {
-          id: `ci-incident:${commandId}`,
-          tone: state === "failing" ? "error" : "info",
-          kind: "ci.incident",
-          summary: payload.summary,
-          payload: {
-            incidentKey: record.incidentKey,
-            state,
-            ...(record.detail ? { detail: record.detail } : {}),
-            url: record.evidenceUrl,
-          },
-          turnId: null,
-          createdAt,
-        },
-        createdAt,
+        title: legacyTitle,
       },
       baseUrl,
       token,
