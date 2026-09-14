@@ -88,12 +88,22 @@ def buildMac(String slug, String candidateRef, String version) {
                             corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 --signed --verbose
                             corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 --signed --verbose
                         """
+                        sh '''
+                            for dmg in artifacts/mac-arm64/*.dmg artifacts/mac-x64/*.dmg; do
+                                xcrun notarytool submit "$dmg" \
+                                    --key-id "$APPLE_API_KEY_ID" \
+                                    --key "$APPLE_API_KEY" \
+                                    --issuer "$APPLE_API_ISSUER" \
+                                    --wait \
+                                    --timeout 20m
+                                xcrun stapler staple "$dmg"
+                            done
+                        '''
                     }
                     sh '''
                         test -f artifacts/mac-arm64/latest-mac.yml
                         test -f artifacts/mac-x64/latest-mac.yml
                         mv artifacts/mac-x64/latest-mac.yml artifacts/mac-x64/latest-mac-x64.yml
-                        codesign --verify --deep --strict artifacts/mac-arm64/*.app 2>/dev/null || true
                         xcrun stapler validate artifacts/mac-arm64/*.dmg
                         xcrun stapler validate artifacts/mac-x64/*.dmg
                     '''
