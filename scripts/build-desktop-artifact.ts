@@ -1829,6 +1829,35 @@ function windowsPowerShellExecutable(): string {
   return `${windowsRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 
+export function ensureWindowsPowerShellOnPath(environment: NodeJS.ProcessEnv): void {
+  const pathEntry = Object.entries(environment).find(
+    ([key, value]) => key.toLowerCase() === "path" && value,
+  );
+  const windowsRoot =
+    Object.entries(environment).find(
+      ([key, value]) =>
+        (key.toLowerCase() === "systemroot" || key.toLowerCase() === "windir") && value,
+    )?.[1] ?? String.raw`C:\Windows`;
+  const powerShellDirectory = `${windowsRoot.replace(/[\\/]+$/, "")}\\System32\\WindowsPowerShell\\v1.0`;
+  const normalizedPowerShellDirectory = powerShellDirectory.toLowerCase();
+  const pathEntries = (pathEntry?.[1] ?? "").split(";").filter(Boolean);
+
+  if (
+    !pathEntries.some(
+      (entry) => entry.replace(/[\\/]+$/, "").toLowerCase() === normalizedPowerShellDirectory,
+    )
+  ) {
+    pathEntries.unshift(powerShellDirectory);
+  }
+
+  for (const key of Object.keys(environment)) {
+    if (key.toLowerCase() === "path") {
+      delete environment[key];
+    }
+  }
+  environment.PATH = pathEntries.join(";");
+}
+
 export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBuild")(
   function* (input: { readonly arch: typeof BuildArch.Type; readonly bundlesWslRuntime: boolean }) {
     const rustTarget = resolveResourceMonitorRustTargets("win", input.arch)[0]!;
@@ -3773,6 +3802,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   if (hostPlatform === "win32") {
+    ensureWindowsPowerShellOnPath(buildEnv);
     const python = yield* resolvePythonForNodeGyp();
     if (python) {
       buildEnv.PYTHON = python;
