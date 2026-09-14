@@ -13,6 +13,7 @@ import {
   incidentMarker,
   isIncidentRecoverable,
   outboxRecordId,
+  publishedReleaseVersions,
   readJsonFile,
   recoveryCommandId,
   requiredReleaseAssets,
@@ -37,6 +38,15 @@ describe("fork release versions", () => {
         existingVersions: ["v0.0.41-1", "0.0.41-3", "v0.0.42-8", "v0.0.41-nightly.9"],
       }),
     ).toBe("0.0.41-4");
+  });
+
+  it("does not treat draft releases as published version history", () => {
+    expect(
+      publishedReleaseVersions([
+        { tagName: "v0.0.41-1", isDraft: true },
+        { tagName: "v0.0.40-2", isDraft: false },
+      ]),
+    ).toEqual(["v0.0.40-2"]);
   });
 });
 
