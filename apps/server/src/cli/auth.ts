@@ -1,5 +1,6 @@
 import {
   AuthAdministrativeScopes,
+  AuthEnvironmentScope,
   AuthSessionId,
   AuthStandardClientScopes,
 } from "@t3tools/contracts";
@@ -79,6 +80,13 @@ const baseUrlFlag = Flag.string("base-url").pipe(
 const tokenOnlyFlag = Flag.boolean("token-only").pipe(
   Flag.withDescription("Print only the issued bearer token."),
   Flag.withDefault(false),
+);
+
+const scopeFlag = Flag.choice("scope", AuthEnvironmentScope.literals).pipe(
+  Flag.withDescription(
+    "Session scope. Repeat to grant multiple scopes; omitted keeps administrative defaults.",
+  ),
+  Flag.atMost(AuthAdministrativeScopes.length),
 );
 
 const pairingCreateCommand = Command.make("create", {
@@ -164,6 +172,7 @@ const sessionIssueCommand = Command.make("issue", {
   ttl: ttlFlag,
   label: labelFlag,
   subject: subjectFlag,
+  scope: scopeFlag,
   tokenOnly: tokenOnlyFlag,
   json: jsonFlag,
 }).pipe(
@@ -173,8 +182,10 @@ const sessionIssueCommand = Command.make("issue", {
       flags,
       (environmentAuth) =>
         Effect.gen(function* () {
+          const scopes =
+            flags.scope.length === 0 ? AuthAdministrativeScopes : Array.from(new Set(flags.scope));
           const issued = yield* environmentAuth.issueSession({
-            scopes: AuthAdministrativeScopes,
+            scopes,
             ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
             ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
             ...(Option.isSome(flags.subject) ? { subject: flags.subject.value } : {}),
