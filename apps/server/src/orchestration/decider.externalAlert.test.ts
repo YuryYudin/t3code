@@ -125,6 +125,55 @@ it.layer(NodeServices.layer)("external alert decider", (it) => {
     }),
   );
 
+  it.effect("adopts an empty passive incident thread created by a v0.0.40 server", () =>
+    Effect.gen(function* () {
+      const legacyThreadId = ThreadId.make("t3-fork-incident-42");
+      const readModel = makeReadModel();
+      const created = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.create",
+          commandId: CommandId.make("jenkins:issue:42:legacy-create"),
+          threadId: legacyThreadId,
+          projectId,
+          title: "Fork maintenance failed (#42)",
+          modelSelection: readModel.projects[0]!.defaultModelSelection!,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: NOW,
+        },
+        readModel,
+      });
+      const createdEvent = Array.isArray(created) ? created[0] : created;
+      if (createdEvent?.type !== "thread.created") {
+        throw new Error("Expected one thread.created event");
+      }
+      const withLegacyThread = yield* projectEvent(readModel, {
+        ...createdEvent,
+        sequence: 1,
+      });
+
+      const recovered = yield* decideOrchestrationCommand({
+        command: command({
+          commandId: CommandId.make("jenkins:issue:42:recovered:stable:0.0.41:validation"),
+          threadId: legacyThreadId,
+          state: "recovered",
+          summary: "Stable validation recovered",
+        }),
+        readModel: withLegacyThread,
+      });
+      const events = Array.isArray(recovered) ? recovered : [recovered];
+
+      expect(events.map((event) => event.type)).toEqual(["thread.activity-appended"]);
+      const activity = events[0];
+      if (activity?.type !== "thread.activity-appended") {
+        throw new Error("Expected thread.activity-appended");
+      }
+      expect(activity.payload.activity.payload).toMatchObject({ state: "recovered" });
+    }),
+  );
+
   it.effect("rejects recovery before the incident thread exists", () =>
     Effect.gen(function* () {
       const error = yield* decideOrchestrationCommand({
