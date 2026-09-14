@@ -5,7 +5,18 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { ProviderInstanceId, SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  EnvironmentId as EnvironmentIdSchema,
+  MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH,
+  ProjectCollectionId as ProjectCollectionIdSchema,
+  type EnvironmentId,
+  type ProviderInstanceId,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
+import {
+  ALL_PROJECTS_COLLECTION_SCOPE,
+  type ProjectCollectionScope,
+} from "@t3tools/client-runtime/state/project-collections";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 import * as MobileDatabase from "./mobile-database";
@@ -33,6 +44,16 @@ export interface Preferences {
   /** @deprecated Kept temporarily so older OTA bundles retain the selected mode. */
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
+  readonly projectCollectionScope?: ProjectCollectionScope;
+  readonly projectCollectionsPreferredReferenceEnvironmentId?: EnvironmentId | null;
+  /**
+   * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
+   * no client-settings sync, so the legacy grouped thread list is opted into
+   * per device. Deliberately a fresh key (was `threadListV2Enabled`, an
+   * opt-out): sanitizing drops the old key, so every device resets to the
+   * default flat list — see `resolveThreadListV2Enabled`.
+   */
+  readonly legacyThreadListEnabled?: boolean;
   /** Device-local counterpart of desktop's `planModeEnabled` legacy flag. */
   readonly planModeEnabled?: boolean;
   /** Model favorites belong to this device, like the web client setting. */
@@ -82,6 +103,44 @@ export class MobilePreferencesStore extends Context.Service<
   }
 >()("@t3tools/mobile/persistence/MobilePreferencesStore") {}
 
+const isEnvironmentId = Schema.is(EnvironmentIdSchema);
+const isProjectCollectionId = Schema.is(ProjectCollectionIdSchema);
+
+function isPersistedEnvironmentId(value: unknown): value is EnvironmentId {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.trim() === value &&
+    isEnvironmentId(value)
+  );
+}
+
+function sanitizeProjectCollectionScope(value: unknown): ProjectCollectionScope {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return ALL_PROJECTS_COLLECTION_SCOPE;
+  }
+  if (value.kind === "all") return ALL_PROJECTS_COLLECTION_SCOPE;
+  if (value.kind === "unfiled") return { kind: "unfiled" };
+  if (value.kind === "collection" && "collectionId" in value) {
+    const collectionId =
+      typeof value.collectionId === "string" ? value.collectionId.toLowerCase() : null;
+    if (isProjectCollectionId(collectionId)) {
+      return { kind: "collection", collectionId };
+    }
+  }
+  if (
+    value.kind === "project" &&
+    "projectKey" in value &&
+    typeof value.projectKey === "string" &&
+    value.projectKey.trim().length > 0 &&
+    value.projectKey.trim() === value.projectKey &&
+    value.projectKey.length <= MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH
+  ) {
+    return { kind: "project", projectKey: value.projectKey };
+  }
+  return ALL_PROJECTS_COLLECTION_SCOPE;
+}
+
 function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     liveActivitiesEnabled?: boolean;
@@ -99,6 +158,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     composerEnterBehavior?: ComposerEnterBehavior;
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
+    projectCollectionScope?: ProjectCollectionScope;
+    projectCollectionsPreferredReferenceEnvironmentId?: EnvironmentId | null;
+    legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     modelFavorites?: Preferences["modelFavorites"];
     threadListSettledShelfExpanded?: boolean;
@@ -166,6 +228,21 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     parsed.projectGroupingMode === "separate"
   ) {
     preferences.projectGroupingMode = parsed.projectGroupingMode;
+  }
+  if (parsed.projectCollectionScope !== undefined) {
+    preferences.projectCollectionScope = sanitizeProjectCollectionScope(
+      parsed.projectCollectionScope,
+    );
+  }
+  if (parsed.projectCollectionsPreferredReferenceEnvironmentId !== undefined) {
+    preferences.projectCollectionsPreferredReferenceEnvironmentId = isPersistedEnvironmentId(
+      parsed.projectCollectionsPreferredReferenceEnvironmentId,
+    )
+      ? parsed.projectCollectionsPreferredReferenceEnvironmentId
+      : null;
+  }
+  if (typeof parsed.legacyThreadListEnabled === "boolean") {
+    preferences.legacyThreadListEnabled = parsed.legacyThreadListEnabled;
   }
   if (typeof parsed.planModeEnabled === "boolean") {
     preferences.planModeEnabled = parsed.planModeEnabled;

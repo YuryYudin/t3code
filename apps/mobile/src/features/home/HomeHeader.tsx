@@ -10,17 +10,17 @@ import {
 } from "../layout/native-mail-search-toolbar";
 import { buildHomeListFilterMenu } from "./home-list-filter-menu";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
 export function HomeHeader(props: HomeHeaderProps) {
   const searchBarRef = useRef<SearchBarCommands>(null);
   const iconColor = useUniwindTheme()["--color-icon"];
-  // The list uses a fixed creation order and ignores sort/group options, so
-  // the filter menu only carries the filters and the "customized" icon state
-  // keys off those alone.
+  // Collection scopes narrow the list just like a project filter.
   const hasCustomListOptions =
-    props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
+    props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const focusSearch = useCallback(() => {
     searchBarRef.current?.focus();
     return searchBarRef.current !== null;
@@ -86,6 +86,8 @@ export function HomeHeader(props: HomeHeaderProps) {
         }}
       />
 
+      <ProjectCollectionScopeStrip {...props} />
+
       {NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED ? null : (
         <NativeHeaderToolbar placement="bottom">
           <NativeHeaderToolbar.Menu
@@ -118,11 +120,31 @@ export function HomeHeader(props: HomeHeaderProps) {
               ))}
             </NativeHeaderToolbar.Menu>
 
+            {props.projectCollectionsAvailable ? (
+              <NativeHeaderToolbar.Menu title="Collections">
+                <NativeHeaderToolbar.Label>Collections</NativeHeaderToolbar.Label>
+                {props.projectCollectionScopeOptions.map((option) => (
+                  <NativeHeaderToolbar.MenuAction
+                    key={mobileProjectCollectionScopeKey(option.scope)}
+                    isOn={
+                      mobileProjectCollectionScopeKey(option.scope) ===
+                      mobileProjectCollectionScopeKey(props.projectCollectionScope)
+                    }
+                    onPress={() => props.onProjectCollectionScopeChange(option.scope)}
+                  >
+                    <NativeHeaderToolbar.Label>
+                      {option.label} ({option.count})
+                    </NativeHeaderToolbar.Label>
+                  </NativeHeaderToolbar.MenuAction>
+                ))}
+              </NativeHeaderToolbar.Menu>
+            ) : null}
+
             {props.projects.length > 0 ? (
               <NativeHeaderToolbar.Menu title="Project">
                 <NativeHeaderToolbar.Label>Project</NativeHeaderToolbar.Label>
                 <NativeHeaderToolbar.MenuAction
-                  isOn={props.selectedProjectKey === null}
+                  isOn={props.projectCollectionScope.kind === "all"}
                   onPress={() => props.onProjectChange(null)}
                   subtitle="Show threads from every project"
                 >

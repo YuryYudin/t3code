@@ -13,8 +13,14 @@ describe("buildHomeListFilterMenu", () => {
       ],
       selectedEnvironmentId: null,
       selectedProjectKey: "environment-1:project-1",
+      projectCollectionScope: { kind: "project", projectKey: "environment-1:project-1" },
+      projectCollectionScopeOptions: [],
+      projectCollectionsAvailable: false,
+      canManageProjectCollections: false,
       onEnvironmentChange: vi.fn(),
       onProjectChange,
+      onProjectCollectionScopeChange: vi.fn(),
+      onManageProjectCollections: vi.fn(),
     });
 
     const projectMenu = menu.items.find(
