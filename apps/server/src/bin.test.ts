@@ -688,6 +688,47 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
+  it.effect("issues a restricted session and normalizes duplicate scopes", () =>
+    Effect.gen(function* () {
+      const baseDir = yield* Effect.acquireRelease(
+        Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-auth-scope-"))),
+        (path) => Effect.sync(() => NodeFS.rmSync(path, { recursive: true, force: true })),
+      );
+      const issuedOutput = yield* captureStdout(
+        runCli([
+          "auth",
+          "session",
+          "issue",
+          "--base-dir",
+          baseDir,
+          "--scope",
+          "orchestration:operate",
+          "--scope",
+          "orchestration:operate",
+          "--json",
+        ]),
+      );
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - assertion reads CLI JSON output.
+      const issued = JSON.parse(issuedOutput.output) as { readonly scopes: ReadonlyArray<string> };
+
+      assert.deepEqual(issued.scopes, ["orchestration:operate"]);
+    }).pipe(Effect.scoped, Effect.provide(DisconnectedLauncherChildLayer)),
+  );
+
+  it.effect("rejects unsupported session scopes before issuing a token", () =>
+    Effect.gen(function* () {
+      const error = yield* runCliWithRuntime([
+        "auth",
+        "session",
+        "issue",
+        "--scope",
+        "administrator:everything",
+      ]).pipe(Effect.flip);
+
+      assert.isTrue(CliError.isCliError(error));
+    }),
+  );
+
   it.effect("adds, renames, and removes projects offline through the orchestration engine", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
