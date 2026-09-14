@@ -93,8 +93,8 @@ def buildMac(String slug, String candidateRef, String version) {
                               --output .t3code-signing/t3code.provisionprofile
                             T3CODE_MACOS_PROVISIONING_PROFILE=\"\$WORKSPACE/.t3code-signing/t3code.provisionprofile\"
                             export T3CODE_MACOS_PROVISIONING_PROFILE
-                            node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 --signed --verbose
-                            node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 --signed --verbose
+                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 --signed --verbose
+                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 --signed --verbose
                         """
                     }
                     sh '''
@@ -122,7 +122,7 @@ def buildLinux(String slug, String candidateRef, String version) {
                 command -v convert
             '''
             withEnv(['T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code']) {
-                sh "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
+                sh "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
             }
             sh '''
                 pty_pkg=$(node -e "console.log(require.resolve('node-pty/package.json', { paths: [process.cwd() + '/apps/server'] }))")
@@ -160,7 +160,7 @@ def buildWindows(String slug, String candidateRef, String version) {
             unstash "artifacts-linux-${slug}"
             installWorkspace()
             withEnv(['T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code']) {
-                bat "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version ${version} --output-dir artifacts\\windows-x64 --wsl-prebuild artifacts\\wsl-prebuild\\pty.node --verbose"
+                bat "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version ${version} --output-dir artifacts\\windows-x64 --wsl-prebuild artifacts\\wsl-prebuild\\pty.node --verbose"
             }
             stash name: "artifacts-windows-${slug}", includes: 'artifacts/windows-x64/*'
         }
@@ -208,9 +208,11 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         parallel failFast: false,
             quality: { runQuality(slug, candidateRef) },
             macos: { buildMac(slug, candidateRef, version) },
-            linux: { buildLinux(slug, candidateRef, version) }
+            linuxWindows: {
+                buildLinux(slug, candidateRef, version)
+                buildWindows(slug, candidateRef, version)
+            }
         failureClass = 'packaging'
-        buildWindows(slug, candidateRef, version)
         node('built-in') {
             stage("${slug}: Assemble + verify") {
                 checkoutCandidate("candidate-${slug}", candidateRef)
