@@ -21,6 +21,7 @@ import {
   isIncidentRecoverable,
   normalizeStableVersion,
   outboxRecordId,
+  publishedReleaseVersions,
   readJsonFile,
   recoveryCommandId,
   requiredReleaseAssets,
@@ -186,9 +187,18 @@ function latestStableTag(): { tag: string; version: string; commit: string } {
 function githubReleaseVersions(): ReadonlyArray<string> {
   if (!process.env.GITHUB_TOKEN) return [];
   const releases = JSON.parse(
-    gh(["release", "list", "--repo", FORK_REPOSITORY, "--limit", "100", "--json", "tagName"]),
-  ) as Array<{ readonly tagName: string }>;
-  return releases.map(({ tagName }) => tagName);
+    gh([
+      "release",
+      "list",
+      "--repo",
+      FORK_REPOSITORY,
+      "--limit",
+      "100",
+      "--json",
+      "tagName,isDraft",
+    ]),
+  ) as Array<{ readonly tagName: string; readonly isDraft: boolean }>;
+  return publishedReleaseVersions(releases);
 }
 
 function resolveCommand(args: ParsedArguments): void {
