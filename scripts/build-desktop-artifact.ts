@@ -42,6 +42,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -1813,6 +1814,16 @@ function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
   ].join("; ");
 }
 
+function encodePowerShellCommand(input: string): string {
+  const bytes = new Uint8Array(input.length * 2);
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    bytes[index * 2] = code & 0xff;
+    bytes[index * 2 + 1] = code >>> 8;
+  }
+  return Encoding.encodeBase64(bytes);
+}
+
 export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBuild")(
   function* (input: { readonly arch: typeof BuildArch.Type; readonly bundlesWslRuntime: boolean }) {
     const rustTarget = resolveResourceMonitorRustTargets("win", input.arch)[0]!;
@@ -1836,8 +1847,8 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
-                "-Command",
-                windowsVswherePrerequisiteScript(input.arch),
+                "-EncodedCommand",
+                encodePowerShellCommand(windowsVswherePrerequisiteScript(input.arch)),
               ]),
               "Visual Studio Build Tools",
             ),

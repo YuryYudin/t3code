@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -992,10 +993,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
         const pythonPath = path.join(tempDir, "python.exe");
         yield* fs.writeFileString(pythonPath, "python");
+        let powershellArgs: ReadonlyArray<string> = [];
         const spawner = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make((command) => {
-            const childProcess = command as unknown as { readonly command: string };
+            const childProcess = command as unknown as {
+              readonly command: string;
+              readonly args: ReadonlyArray<string>;
+            };
+            if (childProcess.command === "powershell.exe") powershellArgs = childProcess.args;
             const fails =
               childProcess.command === "rustc" ||
               childProcess.command === "powershell.exe" ||
@@ -1022,6 +1028,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(error.missing, ["rust", "python", "msvc"]);
         assert.equal(error.rustTarget, "x86_64-pc-windows-msvc");
         assert.include(error.message, "Visual Studio Build Tools components");
+        assert.include(powershellArgs, "-EncodedCommand");
+        const encodedCommand = powershellArgs.at(-1)!;
+        const encodedBytes = yield* Effect.fromResult(Encoding.decodeBase64(encodedCommand));
+        const powershell = new TextDecoder("utf-16le").decode(encodedBytes);
+        assert.include(powershell, "Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+        assert.include(powershell, "lib\\spectre\\x64");
       }),
     ),
   );
