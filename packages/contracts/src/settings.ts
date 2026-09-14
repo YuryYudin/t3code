@@ -21,6 +21,7 @@ import {
 import {
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
+  ProjectIconColor,
   ProjectScript,
   RuntimeMode,
 } from "./orchestration.ts";
@@ -900,6 +901,200 @@ export const BackgroundActivityProfile = Schema.Literals([
 export type BackgroundActivityProfile = typeof BackgroundActivityProfile.Type;
 export const DEFAULT_BACKGROUND_ACTIVITY_PROFILE: BackgroundActivityProfile = "balanced";
 
+export const PROJECT_COLLECTION_ICON_NAMES = [
+  "briefcase",
+  "home",
+  "folder-code",
+  "code-2",
+  "terminal",
+  "globe-2",
+  "server",
+  "database",
+  "bot",
+  "sparkles",
+  "smartphone",
+  "monitor",
+  "cloud-cog",
+  "package",
+  "book-open",
+  "flask-conical",
+  "shield-check",
+  "rocket",
+  "gamepad-2",
+  "music",
+  "image",
+  "shopping-bag",
+  "layers",
+  "star",
+] as const;
+
+const CanonicalUuidString = TrimmedNonEmptyString.pipe(
+  Schema.decode(
+    SchemaTransformation.transform({
+      decode: (value) => value.toLowerCase(),
+      encode: (value) => value.toLowerCase(),
+    }),
+  ),
+).check(Schema.isUUID());
+export const ProjectCollectionId = CanonicalUuidString.pipe(Schema.brand("ProjectCollectionId"));
+export type ProjectCollectionId = typeof ProjectCollectionId.Type;
+
+export const MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH = 512;
+export const ProjectCollectionProjectKey = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MAX_PROJECT_COLLECTION_PROJECT_KEY_LENGTH),
+).pipe(Schema.brand("ProjectCollectionProjectKey"));
+export type ProjectCollectionProjectKey = typeof ProjectCollectionProjectKey.Type;
+
+export const MAX_PROJECT_COLLECTION_NAME_CODE_POINTS = 80;
+export const normalizeProjectCollectionName = (name: string): string =>
+  name.trim().normalize("NFKC").toLowerCase();
+const RESERVED_PROJECT_COLLECTION_NAMES = new Set(["all projects", "unfiled"]);
+export const ProjectCollectionName = TrimmedNonEmptyString.check(
+  Schema.makeFilter(
+    (name: string) =>
+      [...name].length <= MAX_PROJECT_COLLECTION_NAME_CODE_POINTS ||
+      `Collection name must not exceed ${MAX_PROJECT_COLLECTION_NAME_CODE_POINTS} Unicode code points.`,
+  ),
+  Schema.makeFilter(
+    (name: string) =>
+      !RESERVED_PROJECT_COLLECTION_NAMES.has(normalizeProjectCollectionName(name)) ||
+      "Collection name is reserved.",
+  ),
+);
+export type ProjectCollectionName = typeof ProjectCollectionName.Type;
+
+export const ProjectCollectionIconName = Schema.Literals(PROJECT_COLLECTION_ICON_NAMES);
+export type ProjectCollectionIconName = typeof ProjectCollectionIconName.Type;
+
+export const MAX_PROJECT_COLLECTION_EMOJI_LENGTH = 32;
+const projectCollectionEmojiSequence =
+  /^(?:\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?)(?:\u200D\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?)*$/u;
+const projectCollectionEmojiFlag = /^\p{Regional_Indicator}{2}$/u;
+const projectCollectionEmojiKeycap = /^[#*0-9]\uFE0F?\u20E3$/u;
+const projectCollectionEmojiTagSequence =
+  /^\p{Extended_Pictographic}\uFE0F?[\u{E0020}-\u{E007E}]+\u{E007F}$/u;
+const projectCollectionEmojiFilter = Schema.makeFilter((emoji: string) => {
+  if (emoji.length > MAX_PROJECT_COLLECTION_EMOJI_LENGTH) {
+    return `Collection emoji must not exceed ${MAX_PROJECT_COLLECTION_EMOJI_LENGTH} UTF-16 code units.`;
+  }
+  const isEmoji =
+    projectCollectionEmojiSequence.test(emoji) ||
+    projectCollectionEmojiFlag.test(emoji) ||
+    projectCollectionEmojiKeycap.test(emoji) ||
+    projectCollectionEmojiTagSequence.test(emoji);
+  return isEmoji || "Collection emoji must be one emoji grapheme.";
+});
+export const ProjectCollectionEmoji = TrimmedNonEmptyString.check(projectCollectionEmojiFilter);
+export type ProjectCollectionEmoji = typeof ProjectCollectionEmoji.Type;
+
+export const ProjectCollectionVisual = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("lucide"),
+    name: ProjectCollectionIconName,
+    color: ProjectIconColor,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("emoji"),
+    emoji: ProjectCollectionEmoji,
+  }),
+]);
+export type ProjectCollectionVisual = typeof ProjectCollectionVisual.Type;
+
+export const ProjectCollection = Schema.Struct({
+  id: ProjectCollectionId,
+  name: ProjectCollectionName,
+  visual: ProjectCollectionVisual,
+});
+export type ProjectCollection = typeof ProjectCollection.Type;
+
+export const ProjectCollectionAssignment = Schema.Struct({
+  projectKey: ProjectCollectionProjectKey,
+  collectionId: ProjectCollectionId,
+});
+export type ProjectCollectionAssignment = typeof ProjectCollectionAssignment.Type;
+
+export const MAX_PROJECT_COLLECTIONS = 128;
+export const MAX_PROJECT_COLLECTION_ASSIGNMENTS = 2_048;
+const ProjectCollectionsDocumentFields = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  collections: Schema.Array(ProjectCollection).check(Schema.isMaxLength(MAX_PROJECT_COLLECTIONS)),
+  assignments: Schema.Array(ProjectCollectionAssignment).check(
+    Schema.isMaxLength(MAX_PROJECT_COLLECTION_ASSIGNMENTS),
+  ),
+});
+type ProjectCollectionsDocumentFields = typeof ProjectCollectionsDocumentFields.Type;
+
+const canonicalProjectCollectionId = (id: string): string => id.toLowerCase();
+const canonicalProjectCollectionProjectKey = (projectKey: string): string => projectKey.trim();
+const projectCollectionsDocumentReferencesFilter = Schema.makeFilter(
+  (document: ProjectCollectionsDocumentFields) => {
+    const collectionIds = new Set<string>();
+    const normalizedNames = new Set<string>();
+    for (const collection of document.collections) {
+      const collectionId = canonicalProjectCollectionId(collection.id);
+      if (collectionIds.has(collectionId)) return "Collection IDs must be unique.";
+      collectionIds.add(collectionId);
+      const normalizedName = normalizeProjectCollectionName(collection.name);
+      if (normalizedNames.has(normalizedName)) return "Collection names must be unique.";
+      normalizedNames.add(normalizedName);
+    }
+
+    const projectKeys = new Set<string>();
+    for (const assignment of document.assignments) {
+      const projectKey = canonicalProjectCollectionProjectKey(assignment.projectKey);
+      if (projectKeys.has(projectKey)) {
+        return "Each collection project may have only one assignment.";
+      }
+      projectKeys.add(projectKey);
+      if (!collectionIds.has(canonicalProjectCollectionId(assignment.collectionId))) {
+        return "Collection assignments must reference an existing collection.";
+      }
+    }
+    return true;
+  },
+);
+const ValidProjectCollectionsDocument = ProjectCollectionsDocumentFields.check(
+  projectCollectionsDocumentReferencesFilter,
+);
+
+export const MAX_PROJECT_COLLECTION_DOCUMENT_BYTES = 512 * 1024;
+const utf8ByteLength = (value: string): number => {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+};
+const RawProjectCollectionsDocument = Schema.Record(Schema.String, Schema.Unknown).check(
+  Schema.makeFilter((document: Record<string, unknown>) => {
+    let json: string;
+    try {
+      json = JSON.stringify(document);
+    } catch {
+      return "Collection settings must be JSON serializable.";
+    }
+    return (
+      utf8ByteLength(json) <= MAX_PROJECT_COLLECTION_DOCUMENT_BYTES ||
+      `Collection settings must not exceed ${MAX_PROJECT_COLLECTION_DOCUMENT_BYTES} UTF-8 bytes.`
+    );
+  }),
+);
+
+export const ProjectCollectionsDocument = RawProjectCollectionsDocument.pipe(
+  Schema.decodeTo(
+    ValidProjectCollectionsDocument,
+    SchemaTransformation.passthrough({ strict: false }),
+  ),
+);
+export type ProjectCollectionsDocument = typeof ProjectCollectionsDocument.Type;
+
+export const DEFAULT_PROJECT_COLLECTIONS_DOCUMENT: ProjectCollectionsDocument = {
+  schemaVersion: 1,
+  collections: [],
+  assignments: [],
+};
+
 export const BackgroundActivityProfileSelection = Schema.Literals([
   "balanced",
   "performance",
@@ -1008,6 +1203,9 @@ export const ServerSettings = Schema.Struct({
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  projectCollections: ProjectCollectionsDocument.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROJECT_COLLECTIONS_DOCUMENT)),
   ),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
@@ -1329,6 +1527,7 @@ export const ServerSettingsPatch = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
+  projectCollections: Schema.optionalKey(ProjectCollectionsDocument),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(

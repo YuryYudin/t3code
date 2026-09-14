@@ -2,8 +2,10 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
+  ProjectCollectionId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
@@ -19,6 +21,17 @@ const primaryId = EnvironmentId.make("env-primary");
 const laptopId = EnvironmentId.make("env-laptop");
 const boxId = EnvironmentId.make("env-box");
 const restartCapabilities = { threadRestartContinuation: true };
+const workCollections: ProjectCollectionsDocument = {
+  schemaVersion: 1,
+  collections: [
+    {
+      id: ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb"),
+      name: "Work",
+      visual: { kind: "lucide", name: "briefcase", color: "blue" },
+    },
+  ],
+  assignments: [],
+};
 
 describe("supportsSharedSettingsSync", () => {
   it("accepts only connected servers that advertise the shared-settings capability", () => {
@@ -52,6 +65,20 @@ describe("splitSharedServerPatch", () => {
     expect(splitSharedServerPatch(patch)).toEqual({
       sharedPatch: { sidebarAutoSettleOnMerge: false },
       localPatch: { projectSettingsOverrides: patch.projectSettingsOverrides },
+    });
+  });
+
+  it("routes collection documents only to the dedicated acknowledged flow", () => {
+    expect(
+      splitSharedServerPatch({
+        projectCollections: workCollections,
+        sidebarAutoSettleAfterDays: 7,
+        enableAgentBrowserAccess: false,
+      }),
+    ).toEqual({
+      sharedPatch: { sidebarAutoSettleAfterDays: 7 },
+      localPatch: { enableAgentBrowserAccess: false },
+      dedicatedPatch: { projectCollections: workCollections },
     });
   });
 
@@ -131,9 +158,37 @@ describe("pickSharedServerSettings", () => {
       "textGenerationModelSelection",
     ]);
   });
+
+  it("keeps collection documents out of generic pick and apply planning", () => {
+    const primarySettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectCollections: workCollections,
+      sidebarAutoSettleAfterDays: 7,
+    };
+    const picked = pickSharedServerSettings(primarySettings, restartCapabilities);
+    const applyPatch = filterSharedServerPatch(
+      picked,
+      restartCapabilities,
+      DEFAULT_SERVER_SETTINGS,
+      primarySettings,
+    );
+
+    expect(picked).not.toHaveProperty("projectCollections");
+    expect(applyPatch).not.toHaveProperty("projectCollections");
+    expect(applyPatch).toHaveProperty("sidebarAutoSettleAfterDays", 7);
+  });
 });
 
 describe("filterSharedServerPatch", () => {
+  it("cannot pass collection documents into generic shared fanout", () => {
+    expect(
+      filterSharedServerPatch(
+        { projectCollections: workCollections, sidebarAutoSettleAfterDays: 7 },
+        restartCapabilities,
+      ),
+    ).toEqual({ sidebarAutoSettleAfterDays: 7 });
+  });
+
   it.each([true, false])(
     "resets a disabled default provider only on the originating environment (%s)",
     (targetIsSource) => {
@@ -237,6 +292,36 @@ describe("filterSharedServerPatch", () => {
 
 describe("findSharedSettingsMismatches", () => {
   const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+
+  it("leaves collection drift to the dedicated mismatch state machine", () => {
+    const collectionPrimary = { ...primarySettings, projectCollections: workCollections };
+    const environment = {
+      environmentId: boxId,
+      label: "Remote Box",
+      syncEligible: true,
+      settings: primarySettings,
+    };
+
+    expect(
+      findSharedSettingsMismatches({
+        primaryEnvironmentId: primaryId,
+        primarySettings: collectionPrimary,
+        environments: [environment],
+      }),
+    ).toEqual([]);
+    expect(
+      findSharedSettingsMismatches({
+        primaryEnvironmentId: primaryId,
+        primarySettings: collectionPrimary,
+        environments: [
+          {
+            ...environment,
+            settings: { ...primarySettings, sidebarAutoSettleAfterDays: 14 },
+          },
+        ],
+      }),
+    ).toEqual([{ environmentId: boxId, label: "Remote Box" }]);
+  });
 
   it.each([true, false])(
     "detects remote restart continuation drift when the preference is %s",

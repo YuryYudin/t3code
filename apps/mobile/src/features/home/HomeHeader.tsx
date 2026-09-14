@@ -1,17 +1,20 @@
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import type { EnvironmentId, SidebarThreadSortOrder } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
+import { HeaderHeightContext } from "@react-navigation/elements";
 import Constants from "expo-constants";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useCallback, useMemo, useRef } from "react";
-import { Platform, Pressable, Text as RNText, TextInput, View } from "react-native";
+import { useCallback, useContext, useMemo, useRef } from "react";
+import { Platform, Pressable, ScrollView, Text as RNText, TextInput, View } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ControlPillMenu } from "../../components/ControlPill";
+import { ProjectCollectionIcon } from "../../components/ProjectCollectionIcon";
 import { SymbolView } from "../../components/AppSymbol";
 import { T3Wordmark } from "../../components/T3Wordmark";
-import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
+import { HOME_HORIZONTAL_INSET, IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../../lib/mobileBranding";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
@@ -22,6 +25,10 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../layout/native-mail-search-toolbar";
 import type { HomeProjectSortOrder } from "./homeThreadList";
+import {
+  mobileProjectCollectionScopeKey,
+  type MobileProjectCollectionsModel,
+} from "./mobileProjectCollections";
 import { WorkspaceConnectionTitle } from "./WorkspaceConnectionTitle";
 import {
   buildHomeListFilterMenu,
@@ -42,16 +49,23 @@ export function HomeHeader(props: {
   readonly searchQuery: string;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly projectCollectionScope: ProjectCollectionScope;
+  readonly projectCollectionScopeOptions: MobileProjectCollectionsModel["scopeOptions"];
+  readonly projectCollectionsAvailable: boolean;
+  readonly canManageProjectCollections: boolean;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onProjectCollectionScopeChange: (scope: ProjectCollectionScope) => void;
+  readonly onManageProjectCollections: () => void;
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
   readonly onOpenEnvironments: () => void;
   readonly onOpenSettings: () => void;
   readonly onStartNewTask: () => void;
+  readonly onStartNewProject: () => void;
 }) {
   if (Platform.OS === "android") {
     return <AndroidHomeHeader {...props} />;
@@ -66,6 +80,108 @@ function checkedMenuState(checked: boolean) {
   return checked ? ("on" as const) : undefined;
 }
 
+function ProjectCollectionScopeStrip(props: HomeHeaderProps) {
+  const insets = useSafeAreaInsets();
+  const navigationHeaderHeight = useContext(HeaderHeightContext);
+  const addActions = useMemo<MenuAction[]>(
+    () => [
+      { id: "add:project", title: "New project" },
+      ...(props.canManageProjectCollections
+        ? [
+            { id: "add:collection", title: "New collection" },
+            { id: "add:manage", title: "Manage collections" },
+          ]
+        : []),
+    ],
+    [props.canManageProjectCollections],
+  );
+  const handleAddAction = useCallback(
+    ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
+      if (nativeEvent.event === "add:project") {
+        props.onStartNewProject();
+      } else if (nativeEvent.event === "add:collection" || nativeEvent.event === "add:manage") {
+        props.onManageProjectCollections();
+      }
+    },
+    [props.onManageProjectCollections, props.onStartNewProject],
+  );
+
+  return (
+    <View
+      testID="project-collection-scope-strip"
+      className="flex-row items-center gap-2 px-4 py-2"
+      // The native iOS navigation bar is translucent, so content begins behind
+      // it. Prefer the navigator's measured height and retain a safe fallback
+      // for previews and tests outside a header-providing screen.
+      style={
+        Platform.OS === "ios"
+          ? { paddingTop: (navigationHeaderHeight || insets.top + IOS_NAV_BAR_HEIGHT) + 8 }
+          : undefined
+      }
+    >
+      {props.projectCollectionsAvailable ? (
+        <ScrollView
+          horizontal
+          className="min-w-0 flex-1"
+          contentContainerClassName="gap-2"
+          showsHorizontalScrollIndicator={false}
+        >
+          {props.projectCollectionScopeOptions.map((option) => {
+            const selected =
+              mobileProjectCollectionScopeKey(option.scope) ===
+              mobileProjectCollectionScopeKey(props.projectCollectionScope);
+            return (
+              <Pressable
+                key={mobileProjectCollectionScopeKey(option.scope)}
+                accessibilityLabel={`Show ${option.label}`}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                className={
+                  selected
+                    ? "h-10 flex-row items-center gap-2 rounded-full bg-primary px-3"
+                    : "h-10 flex-row items-center gap-2 rounded-full bg-subtle px-3"
+                }
+                onPress={() => props.onProjectCollectionScopeChange(option.scope)}
+              >
+                {option.collection ? (
+                  <ProjectCollectionIcon size={16} visual={option.collection.visual} />
+                ) : (
+                  <SymbolView
+                    name={option.scope.kind === "unfiled" ? "tray" : "square.grid.2x2"}
+                    size={15}
+                    tintColorClassName={selected ? "accent-primary-foreground" : "accent-icon"}
+                    type="monochrome"
+                  />
+                )}
+                <RNText
+                  className={
+                    selected
+                      ? "text-xs font-t3-bold text-primary-foreground"
+                      : "text-xs font-t3-bold text-foreground"
+                  }
+                >
+                  {option.label} · {option.count}
+                </RNText>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : (
+        <View className="flex-1" />
+      )}
+      <ControlPillMenu actions={addActions} isAnchoredToRight onPressAction={handleAddAction}>
+        <Pressable
+          accessibilityLabel="Add project or collection"
+          accessibilityRole="button"
+          className="size-10 items-center justify-center rounded-full bg-subtle"
+        >
+          <SymbolView name="plus" size={17} tintColorClassName="accent-icon" type="monochrome" />
+        </Pressable>
+      </ControlPillMenu>
+    </View>
+  );
+}
+
 function AndroidHomeHeader(props: HomeHeaderProps) {
   const { materialYouStyleLayoutActive } = useAppearancePreferences();
   const insets = useSafeAreaInsets();
@@ -75,8 +191,14 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
   // key the "customized" icon state off the environment filter alone.
   const threadListV2Enabled = useThreadListV2Enabled();
   const hasCustomListOptions = threadListV2Enabled
-    ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
+    ? props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all"
+    : hasCustomHomeListOptions({
+        ...props,
+        selectedProjectKey:
+          props.projectCollectionScope.kind === "all"
+            ? null
+            : (props.selectedProjectKey ?? "collection"),
+      });
   const menuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -95,6 +217,22 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
           })),
         ],
       },
+      ...(props.projectCollectionsAvailable
+        ? ([
+            {
+              id: "collection-scope",
+              title: "Collections",
+              subactions: props.projectCollectionScopeOptions.map((option) => ({
+                id: `collection-scope:${mobileProjectCollectionScopeKey(option.scope)}`,
+                title: `${option.label} (${option.count})`,
+                state: checkedMenuState(
+                  mobileProjectCollectionScopeKey(option.scope) ===
+                    mobileProjectCollectionScopeKey(props.projectCollectionScope),
+                ),
+              })),
+            },
+          ] satisfies MenuAction[])
+        : []),
       ...(props.projects.length === 0
         ? []
         : ([
@@ -105,7 +243,7 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
                 {
                   id: "project:all",
                   title: "All projects",
-                  state: checkedMenuState(props.selectedProjectKey === null),
+                  state: checkedMenuState(props.projectCollectionScope.kind === "all"),
                 },
                 ...props.projects.map((project) => ({
                   id: `project:${project.key}`,
@@ -140,6 +278,9 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
     ],
     [
       props.environments,
+      props.projectCollectionScope,
+      props.projectCollectionScopeOptions,
+      props.projectCollectionsAvailable,
       props.projectSortOrder,
       props.projects,
       props.selectedEnvironmentId,
@@ -168,7 +309,16 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
       }
 
       if (id === "project:all") {
-        props.onProjectChange(null);
+        props.onProjectCollectionScopeChange({ kind: "all" });
+        return;
+      }
+
+      if (id.startsWith("collection-scope:")) {
+        const scopeKey = id.slice("collection-scope:".length);
+        const option = props.projectCollectionScopeOptions.find(
+          (candidate) => mobileProjectCollectionScopeKey(candidate.scope) === scopeKey,
+        );
+        if (option) props.onProjectCollectionScopeChange(option.scope);
         return;
       }
 
@@ -275,6 +425,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
             </Pressable>
           </View>
 
+          <ProjectCollectionScopeStrip {...props} />
+
           <View
             className={
               materialYouStyleLayoutActive
@@ -326,8 +478,14 @@ function IosHomeHeader(props: HomeHeaderProps) {
   // key the "customized" icon state off the environment filter alone.
   const threadListV2Enabled = useThreadListV2Enabled();
   const hasCustomListOptions = threadListV2Enabled
-    ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
+    ? props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all"
+    : hasCustomHomeListOptions({
+        ...props,
+        selectedProjectKey:
+          props.projectCollectionScope.kind === "all"
+            ? null
+            : (props.selectedProjectKey ?? "collection"),
+      });
   const focusSearch = useCallback(() => {
     searchBarRef.current?.focus();
     return searchBarRef.current !== null;
@@ -335,6 +493,10 @@ function IosHomeHeader(props: HomeHeaderProps) {
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const filterMenu = buildHomeListFilterMenu({
     ...props,
+    selectedProjectKey:
+      props.projectCollectionScope.kind === "all"
+        ? null
+        : (props.selectedProjectKey ?? "collection"),
     listOrganization: !threadListV2Enabled,
   });
 
@@ -399,6 +561,8 @@ function IosHomeHeader(props: HomeHeaderProps) {
         }}
       />
 
+      <ProjectCollectionScopeStrip {...props} />
+
       {NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED ? null : (
         <NativeHeaderToolbar placement="bottom">
           <NativeHeaderToolbar.Menu
@@ -435,7 +599,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
               <NativeHeaderToolbar.Menu title="Project">
                 <NativeHeaderToolbar.Label>Project</NativeHeaderToolbar.Label>
                 <NativeHeaderToolbar.MenuAction
-                  isOn={props.selectedProjectKey === null}
+                  isOn={props.projectCollectionScope.kind === "all"}
                   onPress={() => props.onProjectChange(null)}
                   subtitle="Show threads from every project"
                 >
@@ -484,6 +648,26 @@ function IosHomeHeader(props: HomeHeaderProps) {
             )}
           </NativeHeaderToolbar.Menu>
           <NativeHeaderToolbar.Spacer flexible />
+          <NativeHeaderToolbar.Menu
+            accessibilityLabel="Add project or collection"
+            icon="plus"
+            title="Add"
+            separateBackground
+          >
+            <NativeHeaderToolbar.MenuAction onPress={props.onStartNewProject}>
+              <NativeHeaderToolbar.Label>New project</NativeHeaderToolbar.Label>
+            </NativeHeaderToolbar.MenuAction>
+            {props.canManageProjectCollections ? (
+              <NativeHeaderToolbar.MenuAction onPress={props.onManageProjectCollections}>
+                <NativeHeaderToolbar.Label>New collection</NativeHeaderToolbar.Label>
+              </NativeHeaderToolbar.MenuAction>
+            ) : null}
+            {props.canManageProjectCollections ? (
+              <NativeHeaderToolbar.MenuAction onPress={props.onManageProjectCollections}>
+                <NativeHeaderToolbar.Label>Manage collections</NativeHeaderToolbar.Label>
+              </NativeHeaderToolbar.MenuAction>
+            ) : null}
+          </NativeHeaderToolbar.Menu>
           <NativeHeaderToolbar.Button
             accessibilityLabel="New task"
             icon="square.and.pencil"

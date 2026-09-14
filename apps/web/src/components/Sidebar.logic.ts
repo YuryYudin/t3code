@@ -5,8 +5,24 @@ import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { derivePhysicalProjectKey } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  ALL_PROJECTS_COLLECTION_SCOPE,
+  deriveProjectCollectionProjectKey,
+  deriveProjectCollectionScopeOptions,
+  filterItemsByProjectCollectionScope,
+  sanitizeProjectCollectionScope,
+  type ProjectCollectionIdentityInput,
+  type ProjectCollectionProjectKeyCandidate,
+  type ProjectCollectionScope,
+} from "@t3tools/client-runtime/state/project-collections";
 import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type {
+  ProjectCollectionsDocument,
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+} from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 import {
@@ -904,6 +920,296 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
     return projectItems.filter((item) => input.matches(item, query));
   }
   return input.activeScopeKey === null ? projectItems : input.items;
+}
+
+export interface SidebarProjectCollectionGroup<TProject extends EnvironmentProject> {
+  readonly displayName: string;
+  readonly memberProjects: ReadonlyArray<TProject & { readonly physicalProjectKey: string }>;
+  readonly memberProjectRefs: ReadonlyArray<{
+    readonly environmentId: TProject["environmentId"];
+    readonly projectId: TProject["id"];
+  }>;
+}
+
+export interface SidebarProjectCollectionProject<TProject extends EnvironmentProject> {
+  readonly projectKey: ProjectCollectionProjectKeyCandidate;
+  readonly label: string;
+  readonly identity: ProjectCollectionIdentityInput<TProject>;
+  readonly impact: { readonly checkoutCount: number; readonly threadCount: number };
+  readonly physicalProjectKeys: ReadonlySet<string>;
+}
+
+export interface SidebarProjectCollectionsModel<TProject extends EnvironmentProject, TItem> {
+  readonly scope: ProjectCollectionScope;
+  readonly scopeOptions: ReturnType<typeof deriveProjectCollectionScopeOptions>;
+  readonly projects: ReadonlyArray<SidebarProjectCollectionProject<TProject>>;
+  readonly projectByScopedProjectRef: ReadonlyMap<
+    string,
+    SidebarProjectCollectionProject<TProject>
+  >;
+  readonly filteredItems: ReadonlyArray<TItem>;
+  readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly selectedLabel: string;
+}
+
+function scopedSidebarProjectKey(environmentId: string, projectId: string): string {
+  return `${environmentId}:${projectId}`;
+}
+
+export const SIDEBAR_PROJECT_COLLECTION_DRAG_MIME = "application/x-t3-sidebar-project-collection";
+
+export function beginSidebarProjectCollectionDrag(input: {
+  readonly dataTransfer: Pick<DataTransfer, "effectAllowed" | "setData">;
+  readonly projectKey: ProjectCollectionProjectKeyCandidate;
+  readonly openPicker: () => void;
+}): void {
+  input.dataTransfer.effectAllowed = "move";
+  input.dataTransfer.setData(SIDEBAR_PROJECT_COLLECTION_DRAG_MIME, input.projectKey);
+  input.openPicker();
+}
+
+export function resolveSidebarProjectCollectionDragProject<
+  TProject extends EnvironmentProject,
+  TItem,
+>(input: {
+  readonly model: SidebarProjectCollectionsModel<TProject, TItem>;
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly canMutate: boolean;
+}): SidebarProjectCollectionProject<TProject> | null {
+  if (!input.canMutate || input.model.scope.kind !== "all") return null;
+  return (
+    input.model.projectByScopedProjectRef.get(
+      scopedSidebarProjectKey(input.environmentId, input.projectId),
+    ) ?? null
+  );
+}
+
+/**
+ * Builds the collection navigation model from the already-sorted sidebar
+ * groups. Stable collection-project identity is deliberately separate from
+ * the mutable presentation groups, so repository-path and separate modes do
+ * not split collection membership or alter the existing thread row order.
+ */
+export function deriveSidebarProjectCollections<
+  TProject extends EnvironmentProject,
+  TItem extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  readonly document: ProjectCollectionsDocument | null;
+  readonly groups: ReadonlyArray<SidebarProjectCollectionGroup<TProject>>;
+  readonly projects: ReadonlyArray<TProject>;
+  readonly threads: ReadonlyArray<TItem>;
+  readonly scope: ProjectCollectionScope;
+  readonly sanitizeUnavailableProjects: boolean;
+}): SidebarProjectCollectionsModel<TProject, TItem> {
+  const projectsByKey = new Map<
+    string,
+    {
+      label: string;
+      members: Array<TProject & { readonly physicalProjectKey: string }>;
+      memberPhysicalKeys: Set<string>;
+      memberProjectRefs: Array<{
+        environmentId: TProject["environmentId"];
+        projectId: TProject["id"];
+      }>;
+      memberProjectRefKeys: Set<string>;
+      identityProjects: Array<TProject>;
+      identityProjectSet: Set<TProject>;
+    }
+  >();
+
+  // Stable repository identity may live on an older duplicate registration
+  // hidden by the sidebar group's winner. Index those candidates once rather
+  // than asking the shared identity helper to rescan the full project catalog
+  // for every rendered group.
+  const identityProjectsByRefAndPhysicalKey = new Map<string, Map<string, Array<TProject>>>();
+  for (const project of input.projects) {
+    const refKey = scopedSidebarProjectKey(project.environmentId, project.id);
+    const physicalProjectKey = derivePhysicalProjectKey(project);
+    let byPhysicalKey = identityProjectsByRefAndPhysicalKey.get(refKey);
+    if (byPhysicalKey === undefined) {
+      byPhysicalKey = new Map();
+      identityProjectsByRefAndPhysicalKey.set(refKey, byPhysicalKey);
+    }
+    const candidates = byPhysicalKey.get(physicalProjectKey);
+    if (candidates === undefined) {
+      byPhysicalKey.set(physicalProjectKey, [project]);
+    } else {
+      candidates.push(project);
+    }
+  }
+  const threadCountByProjectRef = new Map<string, number>();
+  for (const thread of input.threads) {
+    const refKey = scopedSidebarProjectKey(thread.environmentId, thread.projectId);
+    threadCountByProjectRef.set(refKey, (threadCountByProjectRef.get(refKey) ?? 0) + 1);
+  }
+
+  for (const group of input.groups) {
+    const identityPhysicalProjectKey = group.memberProjects[0]?.physicalProjectKey;
+    const identityProjects =
+      identityPhysicalProjectKey === undefined
+        ? []
+        : group.memberProjectRefs.flatMap(
+            (projectRef) =>
+              identityProjectsByRefAndPhysicalKey
+                .get(scopedSidebarProjectKey(projectRef.environmentId, projectRef.projectId))
+                ?.get(identityPhysicalProjectKey) ?? [],
+          );
+    const groupIdentity: ProjectCollectionIdentityInput<TProject> = {
+      group: {
+        members: group.memberProjects.map((project) => ({
+          physicalProjectKey: project.physicalProjectKey,
+          project,
+        })),
+        memberProjectRefs: group.memberProjectRefs,
+      },
+      projects: identityProjects,
+    };
+    const projectKey = deriveProjectCollectionProjectKey(groupIdentity);
+    const existing = projectsByKey.get(projectKey);
+    if (existing) {
+      for (const project of group.memberProjects) {
+        if (!existing.memberPhysicalKeys.has(project.physicalProjectKey)) {
+          existing.memberPhysicalKeys.add(project.physicalProjectKey);
+          existing.members.push(project);
+        }
+      }
+      for (const projectRef of group.memberProjectRefs) {
+        const refKey = scopedSidebarProjectKey(projectRef.environmentId, projectRef.projectId);
+        if (!existing.memberProjectRefKeys.has(refKey)) {
+          existing.memberProjectRefKeys.add(refKey);
+          existing.memberProjectRefs.push(projectRef);
+        }
+      }
+      for (const project of identityProjects) {
+        if (!existing.identityProjectSet.has(project)) {
+          existing.identityProjectSet.add(project);
+          existing.identityProjects.push(project);
+        }
+      }
+      continue;
+    }
+    projectsByKey.set(projectKey, {
+      label: group.displayName,
+      members: [...group.memberProjects],
+      memberPhysicalKeys: new Set(
+        group.memberProjects.map((project) => project.physicalProjectKey),
+      ),
+      memberProjectRefs: [...group.memberProjectRefs],
+      memberProjectRefKeys: new Set(
+        group.memberProjectRefs.map((projectRef) =>
+          scopedSidebarProjectKey(projectRef.environmentId, projectRef.projectId),
+        ),
+      ),
+      identityProjects: [...identityProjects],
+      identityProjectSet: new Set(identityProjects),
+    });
+  }
+
+  const projects = [...projectsByKey].map(([projectKey, entry]) => {
+    const physicalProjectKeys = new Set(
+      entry.memberProjectRefs.map((projectRef) =>
+        scopedSidebarProjectKey(projectRef.environmentId, projectRef.projectId),
+      ),
+    );
+    const identity: ProjectCollectionIdentityInput<TProject> = {
+      group: {
+        members: entry.members.map((project) => ({
+          physicalProjectKey: project.physicalProjectKey,
+          project,
+        })),
+        memberProjectRefs: entry.memberProjectRefs,
+      },
+      projects: entry.identityProjects,
+    };
+    return {
+      projectKey,
+      label: entry.label,
+      identity,
+      impact: {
+        checkoutCount: entry.members.length,
+        threadCount: [...physicalProjectKeys].reduce(
+          (count, projectRefKey) => count + (threadCountByProjectRef.get(projectRefKey) ?? 0),
+          0,
+        ),
+      },
+      physicalProjectKeys,
+    } satisfies SidebarProjectCollectionProject<TProject>;
+  });
+  const availableProjectKeys = projects.map((project) => project.projectKey);
+  const projectByScopedProjectRef = new Map<string, SidebarProjectCollectionProject<TProject>>();
+  for (const project of projects) {
+    for (const scopedProjectRef of project.physicalProjectKeys) {
+      projectByScopedProjectRef.set(scopedProjectRef, project);
+    }
+  }
+  const scope =
+    input.document === null && input.scope.kind !== "project"
+      ? input.scope
+      : input.document === null
+        ? sanitizeProjectCollectionScope(
+            { schemaVersion: 1, collections: [], assignments: [] },
+            input.scope,
+            input.sanitizeUnavailableProjects ? availableProjectKeys : undefined,
+          )
+        : sanitizeProjectCollectionScope(
+            input.document,
+            input.scope,
+            input.sanitizeUnavailableProjects ? availableProjectKeys : undefined,
+          );
+  const scopeOptions =
+    input.document === null
+      ? [
+          {
+            scope: ALL_PROJECTS_COLLECTION_SCOPE,
+            label: "All projects",
+            count: projects.length,
+            collection: null,
+          },
+        ]
+      : deriveProjectCollectionScopeOptions(input.document, availableProjectKeys);
+  const document = input.document ?? {
+    schemaVersion: 1 as const,
+    collections: [],
+    assignments: [],
+  };
+  const filteringScope =
+    input.document === null && scope.kind !== "project" ? ALL_PROJECTS_COLLECTION_SCOPE : scope;
+  const filteredProjects = filterItemsByProjectCollectionScope({
+    document,
+    items: projects,
+    scope: filteringScope,
+    projectKey: (project) => project.projectKey,
+  });
+  const scopedProjectKeys =
+    filteringScope.kind === "all"
+      ? null
+      : new Set(filteredProjects.flatMap((project) => [...project.physicalProjectKeys]));
+  const filteredItems =
+    scopedProjectKeys === null
+      ? input.threads
+      : input.threads.filter((thread) =>
+          scopedProjectKeys.has(scopedSidebarProjectKey(thread.environmentId, thread.projectId)),
+        );
+  const selectedLabel =
+    scope.kind === "project"
+      ? (projects.find((project) => project.projectKey === scope.projectKey)?.label ??
+        "All projects")
+      : (scopeOptions.find((option) =>
+          scope.kind === "collection"
+            ? option.scope.kind === "collection" && option.scope.collectionId === scope.collectionId
+            : option.scope.kind === scope.kind,
+        )?.label ?? "All projects");
+
+  return {
+    scope,
+    scopeOptions,
+    projects,
+    projectByScopedProjectRef,
+    filteredItems,
+    scopedProjectKeys,
+    selectedLabel,
+  };
 }
 
 export interface SidebarProjectScopeMenuState {
