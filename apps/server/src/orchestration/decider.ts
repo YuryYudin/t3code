@@ -410,6 +410,115 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.external-alert.upsert": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is deleted and cannot receive an external alert.`,
+        });
+      }
+
+      const existingThread = readModel.threads.find((thread) => thread.id === command.threadId);
+      const activity = {
+        id: EventId.make(`ci-incident:${command.commandId}`),
+        tone: command.state === "failing" ? ("error" as const) : ("info" as const),
+        kind: "ci.incident",
+        summary: command.summary,
+        payload: {
+          incidentKey: command.incidentKey,
+          state: command.state,
+          ...(command.detail !== undefined ? { detail: command.detail } : {}),
+          url: command.url,
+        },
+        turnId: null,
+        createdAt: command.createdAt,
+      };
+
+      const activityEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.activity-appended" as const,
+        payload: {
+          threadId: command.threadId,
+          activity,
+        },
+      };
+
+      if (existingThread !== undefined && existingThread.deletedAt === null) {
+        if (existingThread.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread '${command.threadId}' does not belong to project '${command.projectId}'.`,
+          });
+        }
+        const firstIncident = existingThread.activities.find(
+          (entry) => entry.kind === "ci.incident",
+        );
+        if (
+          firstIncident === undefined ||
+          !Predicate.isObject(firstIncident.payload) ||
+          firstIncident.payload.incidentKey !== command.incidentKey
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread '${command.threadId}' is not owned by incident '${command.incidentKey}'.`,
+          });
+        }
+        return activityEvent;
+      }
+
+      if (command.state === "recovered") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Incident '${command.incidentKey}' cannot recover before its thread exists.`,
+        });
+      }
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (project.defaultModelSelection === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' requires a default model before receiving external alerts.`,
+        });
+      }
+
+      const threadCreatedEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created" as const,
+        payload: {
+          threadId: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          modelSelection: project.defaultModelSelection,
+          runtimeMode: "full-access" as const,
+          interactionMode: "default" as const,
+          branch: null,
+          worktreePath: null,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+
+      return [threadCreatedEvent, activityEvent];
+    }
+
     case "thread.delete": {
       yield* requireThread({
         readModel,
