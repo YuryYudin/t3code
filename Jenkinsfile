@@ -68,13 +68,13 @@ def buildMac(String slug, String candidateRef, String version) {
                     "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
                     'RUSTUP_TOOLCHAIN=stable',
                     'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
+                    'T3CODE_MACOS_PASSKEYS=false',
                 ]) {
                     installWorkspace()
                     sh 'rustup update stable --no-self-update'
                     withCredentials([
                         string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
                         string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
-                        string(credentialsId: 'apple-signing-identity', variable: 'APPLE_SIGNING_IDENTITY'),
                         string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
                         string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
                         file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
@@ -82,19 +82,8 @@ def buildMac(String slug, String candidateRef, String version) {
                         string(credentialsId: 't3code-clerk-jwt-template', variable: 'T3CODE_CLERK_JWT_TEMPLATE'),
                         string(credentialsId: 't3code-clerk-cli-oauth-client-id', variable: 'T3CODE_CLERK_CLI_OAUTH_CLIENT_ID'),
                         string(credentialsId: 't3code-relay-url', variable: 'T3CODE_RELAY_URL'),
-                        string(credentialsId: 't3code-clerk-passkey-rp-domains', variable: 'T3CODE_CLERK_PASSKEY_RP_DOMAINS'),
                     ]) {
                         sh """
-                            T3CODE_APPLE_TEAM_ID=\$(printf '%s' \"\$APPLE_SIGNING_IDENTITY\" | sed -nE 's/.*\\(([A-Z0-9]{10})\\).*/\\1/p')
-                            test -n \"\$T3CODE_APPLE_TEAM_ID\"
-                            export T3CODE_APPLE_TEAM_ID
-                            node scripts/apple-provisioning-profile.ts \
-                              --bundle-id com.tapnetix.t3code \
-                              --bundle-name 'T3 Code Fork' \
-                              --profile-name 'T3 Code Fork Developer ID' \
-                              --output .t3code-signing/t3code.provisionprofile
-                            T3CODE_MACOS_PROVISIONING_PROFILE=\"\$WORKSPACE/.t3code-signing/t3code.provisionprofile\"
-                            export T3CODE_MACOS_PROVISIONING_PROFILE
                             corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 --signed --verbose
                             corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 --signed --verbose
                         """
@@ -153,7 +142,7 @@ def runQuality(String slug, String candidateRef) {
             sh '''
                 node scripts/fork-release.ts verify-bootstrap
                 corepack pnpm run test:project-collections-acceptance
-                corepack pnpm exec vp test run scripts/fork-release.test.ts scripts/apple-provisioning-profile.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
+                corepack pnpm exec vp test run scripts/fork-release.test.ts scripts/build-desktop-artifact.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
                 corepack pnpm exec vp run --filter @t3tools/contracts --filter @t3tools/shared --filter @t3tools/client-runtime --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop typecheck
                 test -z "$(git status --porcelain)"
             '''
