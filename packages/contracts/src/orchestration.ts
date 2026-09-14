@@ -809,6 +809,30 @@ const ThreadCreateCommand = Schema.Struct({
   historyImport: Schema.optional(Schema.Literal(true)),
 });
 
+const ExternalAlertUrl = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
+    if (!URL.canParse(value)) return "url must be absolute";
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" || "url must use http or https";
+  }),
+);
+
+export const ThreadExternalAlertUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.external-alert.upsert"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  incidentKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  state: Schema.Literals(["failing", "recovered"]),
+  summary: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+  detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(16_000))),
+  url: ExternalAlertUrl,
+  createdAt: IsoDateTime,
+});
+export type ThreadExternalAlertUpsertCommand = typeof ThreadExternalAlertUpsertCommand.Type;
+
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
   commandId: CommandId,
@@ -1070,6 +1094,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadExternalAlertUpsertCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1100,6 +1125,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadExternalAlertUpsertCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
