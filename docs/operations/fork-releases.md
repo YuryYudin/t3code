@@ -18,7 +18,7 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 - macOS arm64 and cross-built x64: `macos` (`mbook`);
 - Windows x64: `pockeo-windows`.
 
-Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `g++-12` once on every Linux agent. The pipeline selects GCC/G++ 12 for Electron native modules without changing the host defaults. The Jenkins account does not need sudo after that provisioning step.
+Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. The Jenkins account does not need sudo after that provisioning step.
 
 Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It is the durable incident/promotion journal and contains no credentials.
 
