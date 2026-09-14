@@ -1,12 +1,14 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
+  ProjectCollectionsDocument,
   ProviderDriverKind,
   ProviderInstanceId,
   UsageLimitSourceId,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
 import { createModelSelection } from "./model.ts";
@@ -22,6 +24,8 @@ import {
 
 /** Settings after the server has folded legacy per-project fields into `projectSettingsOverrides`. */
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
+
+const decodeProjectCollectionsDocument = Schema.decodeUnknownSync(ProjectCollectionsDocument);
 
 describe("serverSettings helpers", () => {
   it("changes a cleanup rule without replacing the machine's other rules", () => {
@@ -49,6 +53,50 @@ describe("serverSettings helpers", () => {
     const edited = applyServerSettingsPatch(saved, { deviceHosts: [replacement] });
     expect(edited.deviceHosts).toEqual([replacement]);
     expect(applyServerSettingsPatch(edited, { deviceHosts: [] }).deviceHosts).toEqual([]);
+  });
+
+  it("persists a smaller project-collections document as one complete replacement", () => {
+    const projectCollections = decodeProjectCollectionsDocument({
+      schemaVersion: 1,
+      collections: [
+        {
+          id: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+          name: "Work",
+          visual: { kind: "lucide", name: "briefcase", color: "blue" },
+        },
+      ],
+      assignments: [
+        {
+          projectKey: "github.com/t3tools/t3code",
+          collectionId: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+        },
+      ],
+    });
+    const currentProjectCollections = decodeProjectCollectionsDocument({
+      schemaVersion: 1,
+      collections: [
+        ...projectCollections.collections,
+        {
+          id: "6826d7e2-7f87-4381-8d65-8b1333727d2e",
+          name: "Personal",
+          visual: { kind: "emoji", emoji: "🏠" },
+        },
+      ],
+      assignments: [
+        ...projectCollections.assignments,
+        {
+          projectKey: "github.com/example/removed",
+          collectionId: "6826d7e2-7f87-4381-8d65-8b1333727d2e",
+        },
+      ],
+    });
+    const current = { ...DEFAULT_SERVER_SETTINGS, projectCollections: currentProjectCollections };
+
+    const next = applyServerSettingsPatch(current, { projectCollections });
+
+    expect(next.projectCollections).toBe(projectCollections);
+    expect(next.projectCollections.collections).toHaveLength(1);
+    expect(next.projectCollections.assignments).toHaveLength(1);
   });
 
   it("inherits actions, preserves existing actions, and supports empty overrides and reset", () => {

@@ -16,6 +16,7 @@ import {
   THREAD_SORT_OPTIONS,
 } from "./home-list-options";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -26,9 +27,16 @@ export function HomeHeader(props: HomeHeaderProps) {
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
   const threadListV2Enabled = useThreadListV2Enabled();
+  // A collection scope narrows the list the same way a project filter does, so
+  // it has to count as a customized list even though it is not a project key.
+  const collectionAwareSelectedProjectKey =
+    props.projectCollectionScope.kind === "all" ? null : (props.selectedProjectKey ?? "collection");
   const hasCustomListOptions = threadListV2Enabled
-    ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
+    ? props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all"
+    : hasCustomHomeListOptions({
+        ...props,
+        selectedProjectKey: collectionAwareSelectedProjectKey,
+      });
   const focusSearch = useCallback(() => {
     searchBarRef.current?.focus();
     return searchBarRef.current !== null;
@@ -36,6 +44,7 @@ export function HomeHeader(props: HomeHeaderProps) {
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const filterMenu = buildHomeListFilterMenu({
     ...props,
+    selectedProjectKey: collectionAwareSelectedProjectKey,
     listOrganization: !threadListV2Enabled,
   });
 
@@ -97,6 +106,8 @@ export function HomeHeader(props: HomeHeaderProps) {
         }}
       />
 
+      <ProjectCollectionScopeStrip {...props} />
+
       {NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED ? null : (
         <NativeHeaderToolbar placement="bottom">
           <NativeHeaderToolbar.Menu
@@ -133,7 +144,7 @@ export function HomeHeader(props: HomeHeaderProps) {
               <NativeHeaderToolbar.Menu title="Project">
                 <NativeHeaderToolbar.Label>Project</NativeHeaderToolbar.Label>
                 <NativeHeaderToolbar.MenuAction
-                  isOn={props.selectedProjectKey === null}
+                  isOn={props.projectCollectionScope.kind === "all"}
                   onPress={() => props.onProjectChange(null)}
                   subtitle="Show threads from every project"
                 >
@@ -182,6 +193,26 @@ export function HomeHeader(props: HomeHeaderProps) {
             )}
           </NativeHeaderToolbar.Menu>
           <NativeHeaderToolbar.Spacer flexible />
+          <NativeHeaderToolbar.Menu
+            accessibilityLabel="Add project or collection"
+            icon="plus"
+            title="Add"
+            separateBackground
+          >
+            <NativeHeaderToolbar.MenuAction onPress={props.onStartNewProject}>
+              <NativeHeaderToolbar.Label>New project</NativeHeaderToolbar.Label>
+            </NativeHeaderToolbar.MenuAction>
+            {props.canManageProjectCollections ? (
+              <NativeHeaderToolbar.MenuAction onPress={props.onManageProjectCollections}>
+                <NativeHeaderToolbar.Label>New collection</NativeHeaderToolbar.Label>
+              </NativeHeaderToolbar.MenuAction>
+            ) : null}
+            {props.canManageProjectCollections ? (
+              <NativeHeaderToolbar.MenuAction onPress={props.onManageProjectCollections}>
+                <NativeHeaderToolbar.Label>Manage collections</NativeHeaderToolbar.Label>
+              </NativeHeaderToolbar.MenuAction>
+            ) : null}
+          </NativeHeaderToolbar.Menu>
           <NativeHeaderToolbar.Button
             accessibilityLabel="New task"
             icon="square.and.pencil"

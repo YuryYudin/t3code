@@ -215,6 +215,36 @@ function ComboboxItem({
   );
 }
 
+function ComboboxSeparator({ className, ...props }: ComboboxPrimitive.Separator.Props) {
+  return (
+    <ComboboxPrimitive.Separator
+      className={cn("mx-2 my-1 h-px bg-border last:hidden", className)}
+      data-slot="combobox-separator"
+      {...props}
+    />
+  );
+}
+
+function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
+  return (
+    <ComboboxPrimitive.Group
+      className={cn("[[role=group]+&]:mt-1.5", className)}
+      data-slot="combobox-group"
+      {...props}
+    />
+  );
+}
+
+function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      className={cn("px-2 py-1.5 font-medium text-muted-foreground text-xs", className)}
+      data-slot="combobox-group-label"
+      {...props}
+    />
+  );
+}
+
 function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   return (
     <ComboboxPrimitive.Empty
@@ -281,6 +311,9 @@ export {
   ComboboxPopup,
   ComboboxItem,
   ComboboxEmpty,
+  ComboboxSeparator,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxList,
   ComboboxListVirtualized,
   ComboboxClear,
