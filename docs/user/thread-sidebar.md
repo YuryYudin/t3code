@@ -3,6 +3,47 @@
 Use a new thread for a separate task. Choose **New worktree** when its code changes
 need a separate branch and working directory.
 
+## Organize projects into collections
+
+Collections let you separate groups of projects such as company, client, and
+personal work without changing the thread list into a folder tree. Each project
+belongs to at most one collection, and selecting a collection filters the existing
+flat thread list. Select **All projects** to see everything or **Unfiled** to see
+projects that do not belong to a collection.
+
+Use the add menu beside the project selector to choose **New collection**. Give
+the collection a name and either an icon and color or an emoji. Open
+**Manage collections** to create, edit, or delete collections and to move projects.
+Deleting a collection moves its projects to **Unfiled**; it does not delete any
+projects or threads.
+
+On web and desktop, drag a project onto a collection or use its **Move** action.
+Keyboard and mobile users can use the same explicit Move action. Moving a
+repository-backed project moves all of its workspaces and checkouts together,
+even if the sidebar is using a different project-grouping mode. A workspace that
+is not associated with a repository remains independent. Choose **Remove from
+collection** to return the whole project family to **Unfiled**.
+
+Collection order follows the current project sort instead of having a separate
+manual order. A populated collection is ranked by its highest-ranked project;
+empty collections follow alphabetically. **All projects** stays first and
+**Unfiled** stays last.
+
+The add menu keeps project and thread creation separate: **New project** opens
+the Add project flow, while **New task** starts a thread in the current project.
+
+Collection names, styles, and assignments synchronize through connected
+environments that support collections. When capable environments disagree, the
+app shows which environment supplies the displayed layout; choose **Use this
+layout everywhere** to reconcile the others. Offline environments are compared
+when they reconnect, and older servers are skipped. If only older servers are
+connected, existing projects and threads remain available but collection
+management is read-only until a capable environment connects.
+
+The selected filter is device-local. For example, a Mac can reopen on **Work**
+while a phone reopens on **Personal** without either selection changing the
+other device.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model

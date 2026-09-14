@@ -163,6 +163,14 @@
       "types": "./src/state/projectGrouping.ts",
       "default": "./src/state/projectGrouping.ts"
     },
+    "./state/project-collections": {
+      "types": "./src/state/projectCollections.ts",
+      "default": "./src/state/projectCollections.ts"
+    },
+    "./state/project-collections-sync": {
+      "types": "./src/state/projectCollectionsSync.ts",
+      "default": "./src/state/projectCollectionsSync.ts"
+    },
     "./state/relay": {
       "types": "./src/state/relayDiscovery.ts",
       "default": "./src/state/relayDiscovery.ts"
