@@ -62,6 +62,11 @@ export interface ReleaseAssetEvidence {
   readonly sha256: Readonly<Record<string, string>>;
 }
 
+export interface GitHubReleaseVersion {
+  readonly tagName: string;
+  readonly isDraft: boolean;
+}
+
 export interface IncidentRecord {
   readonly schemaVersion: 1;
   readonly recordId: string;
@@ -115,6 +120,12 @@ export function allocateForkVersion(input: {
     }
   }
   return `${prefix}${maximum + 1}`;
+}
+
+export function publishedReleaseVersions(
+  releases: ReadonlyArray<GitHubReleaseVersion>,
+): ReadonlyArray<string> {
+  return releases.filter(({ isDraft }) => !isDraft).map(({ tagName }) => tagName);
 }
 
 export function assertFullSha(value: string, label: string): string {
