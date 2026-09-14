@@ -3,6 +3,8 @@ import { useCallback, useMemo } from "react";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { MaterialThreadListToolbar } from "./MaterialThreadListToolbar";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -11,11 +13,9 @@ function checkedMenuState(checked: boolean) {
 }
 
 export function HomeHeader(props: HomeHeaderProps) {
-  // The list uses a fixed creation order and ignores sort/group options, so
-  // the filter menu only carries the filters and the "customized" icon state
-  // keys off those alone.
+  // Collection scopes narrow the list just like a project filter.
   const hasCustomListOptions =
-    props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
+    props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const menuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -34,6 +34,22 @@ export function HomeHeader(props: HomeHeaderProps) {
           })),
         ],
       },
+      ...(props.projectCollectionsAvailable
+        ? ([
+            {
+              id: "collection-scope",
+              title: "Collections",
+              subactions: props.projectCollectionScopeOptions.map((option) => ({
+                id: `collection-scope:${mobileProjectCollectionScopeKey(option.scope)}`,
+                title: `${option.label} (${option.count})`,
+                state: checkedMenuState(
+                  mobileProjectCollectionScopeKey(option.scope) ===
+                    mobileProjectCollectionScopeKey(props.projectCollectionScope),
+                ),
+              })),
+            },
+          ] satisfies MenuAction[])
+        : []),
       ...(props.projects.length === 0
         ? []
         : ([
@@ -44,7 +60,7 @@ export function HomeHeader(props: HomeHeaderProps) {
                 {
                   id: "project:all",
                   title: "All projects",
-                  state: checkedMenuState(props.selectedProjectKey === null),
+                  state: checkedMenuState(props.projectCollectionScope.kind === "all"),
                 },
                 ...props.projects.map((project) => ({
                   id: `project:${project.key}`,
@@ -55,7 +71,15 @@ export function HomeHeader(props: HomeHeaderProps) {
             },
           ] satisfies MenuAction[])),
     ],
-    [props.environments, props.projects, props.selectedEnvironmentId, props.selectedProjectKey],
+    [
+      props.environments,
+      props.projects,
+      props.selectedEnvironmentId,
+      props.selectedProjectKey,
+      props.projectCollectionScope,
+      props.projectCollectionScopeOptions,
+      props.projectCollectionsAvailable,
+    ],
   );
   const handleMenuAction = useCallback(
     (event: { nativeEvent: { event: string } }) => {
@@ -73,6 +97,15 @@ export function HomeHeader(props: HomeHeaderProps) {
         if (environment) {
           props.onEnvironmentChange(environment.environmentId);
         }
+        return;
+      }
+
+      if (id.startsWith("collection-scope:")) {
+        const scopeKey = id.slice("collection-scope:".length);
+        const option = props.projectCollectionScopeOptions.find(
+          (candidate) => mobileProjectCollectionScopeKey(candidate.scope) === scopeKey,
+        );
+        if (option) props.onProjectCollectionScopeChange(option.scope);
         return;
       }
 
@@ -95,6 +128,7 @@ export function HomeHeader(props: HomeHeaderProps) {
   return (
     <>
       <NativeStackScreenOptions options={{ headerShown: false }} />
+      <ProjectCollectionScopeStrip {...props} />
       <MaterialThreadListToolbar
         searchQuery={props.searchQuery}
         onSearchQueryChange={props.onSearchQueryChange}

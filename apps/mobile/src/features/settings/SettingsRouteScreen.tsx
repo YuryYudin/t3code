@@ -17,6 +17,7 @@ import {
   SettingsEnvironmentFilterHeader,
 } from "./components/SettingsEnvironmentFilterHeader";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+import { ProjectCollectionsSettingsSection } from "./ProjectCollectionsSettingsSection";
 
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
@@ -166,6 +167,8 @@ function SettingsIndexSections() {
         <SettingsRow icon="text.bubble" label="Thread behavior" target="SettingsThreads" />
         <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
       </SettingsSection>
+
+      <ProjectCollectionsSettingsSection />
 
       <SettingsSection title="Server settings">
         <SettingsRow

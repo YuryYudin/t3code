@@ -1,4 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import type { MobileProjectCollectionsModel } from "./mobileProjectCollections";
 import type {
   HomeListFilterMenuEnvironment,
   HomeListFilterMenuProject,
@@ -12,10 +14,17 @@ export interface HomeHeaderProps {
   readonly searchQuery: string;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly projectCollectionScope: ProjectCollectionScope;
+  readonly projectCollectionScopeOptions: MobileProjectCollectionsModel["scopeOptions"];
+  readonly projectCollectionsAvailable: boolean;
+  readonly canManageProjectCollections: boolean;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onProjectCollectionScopeChange: (scope: ProjectCollectionScope) => void;
+  readonly onManageProjectCollections: () => void;
   readonly onOpenEnvironments: () => void;
   readonly onOpenSettings: () => void;
   readonly onStartNewTask: () => void;
+  readonly onStartNewProject: () => void;
 }
