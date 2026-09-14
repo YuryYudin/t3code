@@ -11,11 +11,17 @@ import {
 } from "@t3tools/client-runtime/state/thread-search";
 import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
-import { useAtomValue } from "@effect/atom-react";
-import { type EnvironmentId, resolveEnvironmentMachineKind } from "@t3tools/contracts";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import {
+  DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+  type EnvironmentId,
+  resolveEnvironmentMachineKind,
+} from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LayoutChangeEvent } from "react-native";
-import { Platform, StyleSheet, TextInput, View } from "react-native";
+import { Modal, Platform, StyleSheet, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,6 +35,7 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects, useThreadShells } from "../../state/entities";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { usePendingThreadOrder } from "../../state/thread-order";
@@ -42,6 +49,12 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { useHomeListOptions } from "../home/home-list-options";
 import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
+import {
+  buildMobileProjectCollectionsModel,
+  mobileProjectCollectionScopeKey,
+} from "../home/mobileProjectCollections";
+import { ProjectCollectionsSheet } from "../projects/ProjectCollectionsSheet";
+import { useProjectCollections } from "../projects/useProjectCollections";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -91,6 +104,7 @@ interface ThreadNavigationSidebarProps {
   readonly onOpenEnvironmentSettings: () => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
+  readonly onStartNewProject: () => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onRequestVisibility: () => void;
@@ -159,6 +173,11 @@ function ThreadNavigationSidebarPane(
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const queuedThreadKeys = useQueuedThreadKeys();
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const projectCollections = useProjectCollections();
+  const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
+  const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
     () =>
@@ -204,7 +223,6 @@ function ThreadNavigationSidebarPane(
     () => new Set(threadSearch.matches.map(threadSearchMatchKey)),
     [threadSearch.matches],
   );
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
@@ -214,13 +232,79 @@ function ThreadNavigationSidebarPane(
       }),
     [options.projectGroupingMode, options.selectedEnvironmentId, projects],
   );
+  const storedProjectCollectionScope = AsyncResult.isSuccess(preferencesResult)
+    ? (preferencesResult.value.projectCollectionScope ?? ({ kind: "all" } as const))
+    : ({ kind: "all" } as const);
+  const projectCollectionModel = useMemo(
+    () =>
+      buildMobileProjectCollectionsModel({
+        projects,
+        threads,
+        pendingTasks,
+        environmentId: options.selectedEnvironmentId,
+        projectGroupingMode: options.projectGroupingMode,
+        projectSortOrder: options.projectSortOrder,
+        document: projectCollections.document ?? DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        scope: scopeOverride ?? storedProjectCollectionScope,
+      }),
+    [
+      options.projectGroupingMode,
+      options.projectSortOrder,
+      options.selectedEnvironmentId,
+      pendingTasks,
+      projectCollections.document,
+      projects,
+      scopeOverride,
+      storedProjectCollectionScope,
+      threads,
+    ],
+  );
+  const selectedProjectKey =
+    projectCollectionModel.activeScope.kind === "project"
+      ? projectCollectionModel.activeScope.projectKey
+      : null;
   const projectFilterOptions = useMemo(
     () =>
-      projectScopes.map((scope) => ({
-        key: scope.key,
-        label: scope.title,
+      projectCollectionModel.projectChoices.map((project) => ({
+        key: project.projectKey,
+        label: project.label,
       })),
-    [projectScopes],
+    [projectCollectionModel.projectChoices],
+  );
+  useEffect(() => {
+    if (projectCollections.document === null) return;
+    const requested = scopeOverride ?? storedProjectCollectionScope;
+    if (
+      mobileProjectCollectionScopeKey(requested) !==
+      mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
+    ) {
+      setScopeOverride(projectCollectionModel.activeScope);
+      if (AsyncResult.isSuccess(preferencesResult)) {
+        savePreferences({ projectCollectionScope: projectCollectionModel.activeScope });
+      }
+    }
+  }, [
+    preferencesResult,
+    projectCollectionModel.activeScope,
+    projectCollections.document,
+    savePreferences,
+    scopeOverride,
+    storedProjectCollectionScope,
+  ]);
+  const setProjectCollectionScope = useCallback(
+    (scope: ProjectCollectionScope) => {
+      setScopeOverride(scope);
+      savePreferences({ projectCollectionScope: scope });
+    },
+    [savePreferences],
+  );
+  const setSelectedProjectKey = useCallback(
+    (projectKey: string | null) => {
+      setProjectCollectionScope(
+        projectKey === null ? { kind: "all" } : { kind: "project", projectKey },
+      );
+    },
+    [setProjectCollectionScope],
   );
   const projectTitleByProjectKey = useMemo(
     () =>
@@ -237,31 +321,15 @@ function ThreadNavigationSidebarPane(
       ),
     [projectScopes],
   );
-  const selectedProjectScope = useMemo(
+  const selectedProjectRefsForList = useMemo(
     () =>
-      selectedProjectKey === null
+      projectCollectionModel.activeScope.kind === "all"
         ? null
-        : (projectScopes.find((scope) => scope.key === selectedProjectKey) ?? null),
-    [projectScopes, selectedProjectKey],
-  );
-  useEffect(() => {
-    if (
-      selectedProjectKey !== null &&
-      !projectFilterOptions.some((project) => project.key === selectedProjectKey)
-    ) {
-      setSelectedProjectKey(null);
-    }
-  }, [projectFilterOptions, selectedProjectKey]);
-  const selectedProjectRefs = useMemo(
-    () =>
-      selectedProjectScope === null
-        ? null
-        : new Set(
-            selectedProjectScope.projectRefs.map((projectRef) =>
-              scopedProjectKey(projectRef.environmentId, projectRef.projectId),
-            ),
-          ),
-    [selectedProjectScope],
+        : projectCollectionModel.visibleProjects.map((project) => ({
+            environmentId: project.environmentId,
+            projectId: project.id,
+          })),
+    [projectCollectionModel.activeScope.kind, projectCollectionModel.visibleProjects],
   );
   const projectByKey = useMemo(() => {
     const map = new Map<string, EnvironmentProject>();
@@ -278,7 +346,7 @@ function ThreadNavigationSidebarPane(
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   );
-  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${selectedProjectKey ?? "all"}:${props.searchQuery.trim()}`;
+  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)}:${props.searchQuery.trim()}`;
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -431,7 +499,7 @@ function ThreadNavigationSidebarPane(
       pendingOrder,
       threads: threads.filter((thread) => thread.archivedAt === null),
       environmentId: options.selectedEnvironmentId,
-      projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
+      projectRefs: selectedProjectRefsForList,
       searchQuery: props.searchQuery,
       matchedThreadKeys,
       settlementEnvironmentIds,
@@ -458,7 +526,7 @@ function ThreadNavigationSidebarPane(
     settlementEnvironmentIds,
     snoozeEnvironmentIds,
     threads,
-    selectedProjectScope,
+    selectedProjectRefsForList,
   ]);
   // Re-partition the moment the earliest snooze expires (clamped to the
   // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
@@ -481,16 +549,9 @@ function ThreadNavigationSidebarPane(
     // deletable while their environment is offline. Same environment scope
     // and search filter as the list.
     const v2SearchQuery = props.searchQuery.trim().toLocaleLowerCase();
-    const v2PendingTasks = pendingTasks.filter(
+    const v2PendingTasks = projectCollectionModel.visiblePendingTasks.filter(
       (pendingTask) =>
-        (options.selectedEnvironmentId === null ||
-          pendingTask.environmentId === options.selectedEnvironmentId) &&
-        (selectedProjectRefs === null ||
-          selectedProjectRefs.has(
-            scopedProjectKey(pendingTask.environmentId, pendingTask.projectId),
-          )) &&
-        (v2SearchQuery.length === 0 ||
-          pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
+        v2SearchQuery.length === 0 || pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery),
     );
     const items: SidebarListItem[] = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
@@ -517,12 +578,10 @@ function ThreadNavigationSidebarPane(
     return items;
   }, [
     nowMinute,
-    options.selectedEnvironmentId,
-    pendingTasks,
+    projectCollectionModel.visiblePendingTasks,
     props.searchQuery,
     queuedThreadKeys,
     threadMoveAvailability,
-    selectedProjectRefs,
     settledShelfExpanded,
     shelfPreferencesLoaded,
     snoozedShelfExpanded,
@@ -551,6 +610,23 @@ function ThreadNavigationSidebarPane(
           })),
         ],
       },
+      ...(projectCollections.document !== null
+        ? ([
+            {
+              id: "collection-scope",
+              title: "Collections",
+              subactions: projectCollectionModel.scopeOptions.map((option) => ({
+                id: `collection-scope:${mobileProjectCollectionScopeKey(option.scope)}`,
+                title: `${option.label} (${option.count})`,
+                state:
+                  mobileProjectCollectionScopeKey(option.scope) ===
+                  mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
+                    ? ("on" as const)
+                    : ("off" as const),
+              })),
+            },
+          ] satisfies MenuAction[])
+        : []),
       ...(projectFilterOptions.length === 0
         ? []
         : ([
@@ -562,7 +638,7 @@ function ThreadNavigationSidebarPane(
                   id: "project:all",
                   title: "All projects",
                   subtitle: "Show threads from every project",
-                  state: selectedProjectKey === null ? "on" : "off",
+                  state: projectCollectionModel.activeScope.kind === "all" ? "on" : "off",
                 },
                 ...projectFilterOptions.map((project) => ({
                   id: `project:${project.key}`,
@@ -572,8 +648,29 @@ function ThreadNavigationSidebarPane(
               ],
             },
           ] satisfies MenuAction[])),
+      {
+        id: "add",
+        title: "Add",
+        subactions: [
+          { id: "add:project", title: "New project" },
+          ...(projectCollections.document !== null
+            ? [
+                { id: "add:collection", title: "New collection" },
+                { id: "add:manage", title: "Manage collections" },
+              ]
+            : []),
+        ],
+      },
     ],
-    [environments, options, projectFilterOptions, selectedProjectKey],
+    [
+      environments,
+      options,
+      projectFilterOptions,
+      selectedProjectKey,
+      projectCollectionModel.activeScope,
+      projectCollectionModel.scopeOptions,
+      projectCollections.document,
+    ],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -589,6 +686,14 @@ function ThreadNavigationSidebarPane(
         if (environment) setSelectedEnvironmentId(environment.environmentId);
         return;
       }
+      if (event.startsWith("collection-scope:")) {
+        const scopeKey = event.slice("collection-scope:".length);
+        const option = projectCollectionModel.scopeOptions.find(
+          (candidate) => mobileProjectCollectionScopeKey(candidate.scope) === scopeKey,
+        );
+        if (option) setProjectCollectionScope(option.scope);
+        return;
+      }
       if (event === "project:all") {
         setSelectedProjectKey(null);
         return;
@@ -600,8 +705,20 @@ function ThreadNavigationSidebarPane(
         }
         return;
       }
+      if (event === "add:project") props.onStartNewProject();
+      if (event === "add:collection" || event === "add:manage") {
+        setProjectCollectionsOpen(true);
+      }
     },
-    [environments, projectFilterOptions, setSelectedEnvironmentId],
+    [
+      environments,
+      projectFilterOptions,
+      projectCollectionModel.scopeOptions,
+      props.onStartNewProject,
+      setProjectCollectionScope,
+      setSelectedEnvironmentId,
+      setSelectedProjectKey,
+    ],
   );
 
   const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null);
@@ -871,9 +988,9 @@ function ThreadNavigationSidebarPane(
       unsnoozeThread,
     ],
   );
-  // The list ignores sort/group options, so only the environment and project
-  // filters can light the "customized" state.
-  const filterCustomized = options.selectedEnvironmentId !== null || selectedProjectKey !== null;
+  // A collection scope narrows the list just like a project filter.
+  const filterCustomized =
+    options.selectedEnvironmentId !== null || projectCollectionModel.activeScope.kind !== "all";
   const filterIcon = filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
@@ -884,10 +1001,27 @@ function ThreadNavigationSidebarPane(
         projects: projectFilterOptions,
         selectedEnvironmentId: options.selectedEnvironmentId,
         selectedProjectKey,
+        projectCollectionScope: projectCollectionModel.activeScope,
+        projectCollectionScopeOptions: projectCollectionModel.scopeOptions,
+        projectCollectionsAvailable: projectCollections.document !== null,
+        canManageProjectCollections: projectCollections.document !== null,
         onEnvironmentChange: setSelectedEnvironmentId,
         onProjectChange: setSelectedProjectKey,
+        onProjectCollectionScopeChange: setProjectCollectionScope,
+        onManageProjectCollections: () => setProjectCollectionsOpen(true),
       }),
-    [environments, options, projectFilterOptions, selectedProjectKey, setSelectedEnvironmentId],
+    [
+      environments,
+      options,
+      projectFilterOptions,
+      selectedProjectKey,
+      projectCollectionModel.activeScope,
+      projectCollectionModel.scopeOptions,
+      projectCollections.document,
+      setSelectedEnvironmentId,
+      setSelectedProjectKey,
+      setProjectCollectionScope,
+    ],
   );
   const nativeHeaderItems = useMemo(
     () =>
@@ -916,10 +1050,24 @@ function ThreadNavigationSidebarPane(
             ? threadSearch.isPending
               ? "Searching thread messages…"
               : "No matching threads"
-            : selectedProjectScope !== null
-              ? `No threads in ${selectedProjectScope.title}`
+            : projectCollectionModel.activeScope.kind !== "all"
+              ? `No threads in ${projectCollectionModel.activeScopeLabel}`
               : "No threads yet"}
     </Text>
+  );
+  const collectionsModal = (
+    <Modal
+      animationType="slide"
+      onRequestClose={() => setProjectCollectionsOpen(false)}
+      presentationStyle="pageSheet"
+      visible={projectCollectionsOpen && projectCollections.document !== null}
+    >
+      <ProjectCollectionsSheet
+        onClose={() => setProjectCollectionsOpen(false)}
+        projects={projectCollectionModel.projects}
+        sync={projectCollections}
+      />
+    </Modal>
   );
 
   if (props.nativeChrome) {
@@ -993,6 +1141,7 @@ function ThreadNavigationSidebarPane(
             </GestureDetector>
           </SwipeableScrollGateProvider>
         </View>
+        {collectionsModal}
       </>
     );
   }
@@ -1129,6 +1278,7 @@ function ThreadNavigationSidebarPane(
           </View>
         </View>
       )}
+      {collectionsModal}
     </View>
   );
 }
