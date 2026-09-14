@@ -995,6 +995,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
         const pythonPath = path.join(tempDir, "python.exe");
         yield* fs.writeFileString(pythonPath, "python");
+        let powershellCommand = "";
         let powershellArgs: ReadonlyArray<string> = [];
         const spawner = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
@@ -1003,10 +1004,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
               readonly command: string;
               readonly args: ReadonlyArray<string>;
             };
-            if (childProcess.command === "powershell.exe") powershellArgs = childProcess.args;
+            const isPowerShell = childProcess.command.toLowerCase().endsWith("\\powershell.exe");
+            if (isPowerShell) {
+              powershellCommand = childProcess.command;
+              powershellArgs = childProcess.args;
+            }
             const fails =
               childProcess.command === "rustc" ||
-              childProcess.command === "powershell.exe" ||
+              isPowerShell ||
               childProcess.command === pythonPath;
             return Effect.succeed(mockProcess(fails ? 1 : 0));
           }),
@@ -1030,6 +1035,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(error.missing, ["rust", "python", "msvc"]);
         assert.equal(error.rustTarget, "x86_64-pc-windows-msvc");
         assert.include(error.message, "Visual Studio Build Tools components");
+        assert.include(powershellCommand, "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
         assert.include(powershellArgs, "-EncodedCommand");
         const encodedCommand = powershellArgs.at(-1)!;
         const encodedBytes = yield* Effect.fromResult(Encoding.decodeBase64(encodedCommand));
@@ -1054,7 +1060,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ChildProcessSpawner.make((command) => {
             const childProcess = command as unknown as { readonly command: string };
             commands.push(childProcess.command);
-            return Effect.succeed(mockProcess(childProcess.command === "powershell.exe" ? 1 : 0));
+            return Effect.succeed(
+              mockProcess(childProcess.command.toLowerCase().endsWith("\\powershell.exe") ? 1 : 0),
+            );
           }),
         );
 
@@ -1077,7 +1085,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
         );
 
-        assert.notInclude(commands, "powershell.exe");
+        assert.isFalse(commands.some((command) => command.endsWith("\\powershell.exe")));
       }),
     ),
   );
