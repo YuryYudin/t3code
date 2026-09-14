@@ -25,8 +25,8 @@ Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable onl
 Configure the credential IDs referenced by `Jenkinsfile`:
 
 - Git/GitHub: `github-pockeo-ssh`, `github-release-token` for release contents, and `github-incident-token` with Issues write access;
-- existing Apple credentials: `apple-certificate`, `apple-certificate-password`, `apple-signing-identity`, `apple-api-issuer`, `apple-api-key-id`, `apple-api-key-p8`;
-- public production configuration copied from the upstream stable desktop build: `t3code-clerk-publishable-key`, `t3code-clerk-jwt-template`, `t3code-clerk-cli-oauth-client-id`, `t3code-relay-url`, and `t3code-clerk-passkey-rp-domains`;
+- existing Apple credentials: `apple-certificate`, `apple-certificate-password`, `apple-api-issuer`, `apple-api-key-id`, and `apple-api-key-p8`;
+- public production configuration copied from the upstream stable desktop build: `t3code-clerk-publishable-key`, `t3code-clerk-jwt-template`, `t3code-clerk-cli-oauth-client-id`, and `t3code-relay-url`;
 - the immutable full SHA of `origin/bootstrap/0.0.41-1-source`: `t3code-bootstrap-source-sha`;
 - incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, `t3code-jenkins-token`, and `t3code-jenkins-model-selection`. The model-selection credential is the selected project's current default model JSON and is used only by the v0.0.40 compatibility path.
 
@@ -43,7 +43,7 @@ npx t3 auth session issue \
 
 The selected T3 project must exist and have a default model. Jenkins only creates passive incident threads; it never starts a turn or settles them.
 
-The macOS stage uses the existing App Store Connect team key to register `com.tapnetix.t3code`, enable Associated Domains, and create or renew its `MAC_APP_DIRECT` provisioning profile. Jenkins does not retain the downloaded profile after the build. The App Store Connect key must be a team key with provisioning access; individual keys cannot use the provisioning endpoints.
+The macOS stage signs `com.tapnetix.t3code` with the existing Developer ID certificate and notarizes it with the existing App Store Connect API key. Fork builds explicitly disable Clerk passkeys, so they do not request Associated Domains and do not need an App ID or provisioning profile. The regular Electron hardened-runtime entitlements continue to come from the signing tool's defaults.
 
 ## Bootstrap release
 
