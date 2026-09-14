@@ -22,12 +22,11 @@ def readResolvedPlan(String fileName) {
 
 def checkoutCandidate(String stashName, String candidateRef) {
     deleteDir()
-    checkout scm
     unstash stashName
     if (isUnix()) {
-        sh "git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate && git checkout --detach refs/remotes/fork-candidate"
+        sh "git init . && git remote add origin git@github.com:YuryYudin/t3code.git && git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate && rm candidate.bundle && git checkout --detach refs/remotes/fork-candidate"
     } else {
-        bat "git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate && git checkout --detach refs/remotes/fork-candidate"
+        bat "git init . && git remote add origin git@github.com:YuryYudin/t3code.git && git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate && del /q candidate.bundle && git checkout --detach refs/remotes/fork-candidate"
     }
 }
 
@@ -43,7 +42,6 @@ def prepareCandidate(Map resolved, String slug) {
     def candidateRef = "refs/heads/fork-release/candidate-${slug}"
     node('built-in') {
         stage("${slug}: Prepare") {
-            deleteDir()
             checkout scm
             sh '''
                 git remote remove upstream 2>/dev/null || true
@@ -66,7 +64,7 @@ def buildMac(String slug, String candidateRef, String version) {
             retry(count: 2, conditions: [agent(), nonresumable()]) {
                 checkoutCandidate("candidate-${slug}", candidateRef)
                 withEnv([
-                    "PATH=/Users/jenkins/.nvm/versions/node/v24.14.1/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
+                    "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
                     'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
                 ]) {
                     installWorkspace()
@@ -119,8 +117,8 @@ def buildLinux(String slug, String candidateRef, String version) {
             checkoutCandidate("candidate-${slug}", candidateRef)
             installWorkspace()
             sh '''
-                sudo apt-get update
-                sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
+                pkg-config --exists libsecret-1
+                command -v convert
             '''
             withEnv(['T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code']) {
                 sh "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
@@ -173,10 +171,11 @@ def reportIncident(Map resolved, String failureClass, String summary) {
         deleteDir()
         checkout scm
         withCredentials([
-            string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN'),
+            string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
             string(credentialsId: 't3code-jenkins-base-url', variable: 'T3CODE_JENKINS_BASE_URL'),
             string(credentialsId: 't3code-jenkins-project-id', variable: 'T3CODE_JENKINS_PROJECT_ID'),
+            string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
         ]) {
             sh "node scripts/fork-release.ts incident open --state-dir '${env.FORK_RELEASE_STATE_DIR}' --mode ${resolved.mode} --target-identity '${resolved.targetIdentity}' --failure-class ${failureClass} --title 'T3 Code fork maintenance failed' --summary '${summary}' --url '${env.BUILD_URL}'"
         }
@@ -188,10 +187,11 @@ def recoverIncidents(Map resolved) {
         deleteDir()
         checkout scm
         withCredentials([
-            string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN'),
+            string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
             string(credentialsId: 't3code-jenkins-base-url', variable: 'T3CODE_JENKINS_BASE_URL'),
             string(credentialsId: 't3code-jenkins-project-id', variable: 'T3CODE_JENKINS_PROJECT_ID'),
+            string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
         ]) {
             sh "node scripts/fork-release.ts incident recover --state-dir '${env.FORK_RELEASE_STATE_DIR}' --target-identity '${resolved.targetIdentity}' --url '${env.BUILD_URL}'"
         }
@@ -212,9 +212,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         buildWindows(slug, candidateRef, version)
         node('built-in') {
             stage("${slug}: Assemble + verify") {
-                deleteDir()
-                checkout scm
-                unstash "candidate-${slug}"
+                checkoutCandidate("candidate-${slug}", candidateRef)
                 unstash "artifacts-mac-${slug}"
                 unstash "artifacts-linux-${slug}"
                 unstash "artifacts-windows-${slug}"
@@ -230,7 +228,6 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 if (publishRelease) {
                     withCredentials([string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN')]) {
                         sshagent(credentials: ['github-pockeo-ssh']) {
-                            sh "git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate"
                             sh "node scripts/fork-release.ts release-draft --version ${version} --candidate refs/remotes/fork-candidate --assets release-complete --dry-run ${params.DRY_RUN}"
                         }
                     }
@@ -243,7 +240,6 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                     failureClass = publishRelease ? 'release-publication' : 'branch-promotion'
                     withCredentials([string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN')]) {
                         sshagent(credentials: ['github-pockeo-ssh']) {
-                            sh "git fetch candidate.bundle ${candidateRef}:refs/remotes/fork-candidate"
                             def branch = publishRelease ? 'main' : 'integration/upstream-main'
                             def observed = publishRelease ? resolved.observedMainSha : sh(returnStdout: true, script: "git ls-remote origin refs/heads/${branch} | cut -f1").trim()
                             if (!observed) { observed = '0000000000000000000000000000000000000000' }
