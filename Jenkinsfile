@@ -66,9 +66,11 @@ def buildMac(String slug, String candidateRef, String version) {
                 checkoutCandidate("candidate-${slug}", candidateRef)
                 withEnv([
                     "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
+                    'RUSTUP_TOOLCHAIN=stable',
                     'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
                 ]) {
                     installWorkspace()
+                    sh 'rustup update stable --no-self-update'
                     withCredentials([
                         string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
                         string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
@@ -116,12 +118,16 @@ def buildLinux(String slug, String candidateRef, String version) {
     node('linux') {
         stage("${slug}: Linux x64 + WSL helper") {
             checkoutCandidate("candidate-${slug}", candidateRef)
-            installWorkspace()
-            sh '''
-                pkg-config --exists libsecret-1
-                command -v convert
-            '''
-            withEnv(['T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code']) {
+            withEnv([
+                'RUSTUP_TOOLCHAIN=stable',
+                'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
+            ]) {
+                installWorkspace()
+                sh '''
+                    rustup update stable --no-self-update
+                    pkg-config --exists libsecret-1
+                    command -v convert
+                '''
                 sh "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
             }
             sh '''
@@ -158,8 +164,12 @@ def buildWindows(String slug, String candidateRef, String version) {
         stage("${slug}: Windows x64 unsigned") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             unstash "artifacts-linux-${slug}"
-            installWorkspace()
-            withEnv(['T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code']) {
+            withEnv([
+                'RUSTUP_TOOLCHAIN=stable',
+                'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
+            ]) {
+                installWorkspace()
+                bat 'rustup update stable --no-self-update'
                 bat "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version ${version} --output-dir artifacts\\windows-x64 --wsl-prebuild artifacts\\wsl-prebuild\\pty.node --verbose"
             }
             stash name: "artifacts-windows-${slug}", includes: 'artifacts/windows-x64/*'
