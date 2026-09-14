@@ -43,6 +43,7 @@ def prepareCandidate(Map resolved, String slug) {
     node('built-in') {
         stage("${slug}: Prepare") {
             checkout scm
+            sh 'git clean -fd'
             sh '''
                 git remote remove upstream 2>/dev/null || true
                 git remote add upstream https://github.com/pingdotgg/t3code.git
@@ -168,8 +169,8 @@ def buildWindows(String slug, String candidateRef, String version) {
 
 def reportIncident(Map resolved, String failureClass, String summary) {
     node('built-in') {
-        deleteDir()
         checkout scm
+        sh 'git clean -ffdx'
         withCredentials([
             string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
@@ -184,8 +185,8 @@ def reportIncident(Map resolved, String failureClass, String summary) {
 
 def recoverIncidents(Map resolved) {
     node('built-in') {
-        deleteDir()
         checkout scm
+        sh 'git clean -ffdx'
         withCredentials([
             string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
@@ -290,8 +291,8 @@ pipeline {
                     Map nightly
                     Map stable
                     node('built-in') {
-                        deleteDir()
                         checkout scm
+                        sh 'git clean -ffdx'
                         sh '''
                             git remote remove upstream 2>/dev/null || true
                             git remote add upstream https://github.com/pingdotgg/t3code.git
