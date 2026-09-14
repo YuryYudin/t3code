@@ -515,25 +515,27 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
       ? `${record.title} (#${record.issueNumber})`
       : `Recovered: ${record.title} (#${record.issueNumber})`;
   if (state === "failing") {
-    t3Receipt(
-      dispatchT3(
-        {
-          type: "thread.create",
-          commandId: `${commandId}:legacy-create`,
-          threadId: payload.threadId,
-          projectId,
-          title: legacyTitle,
-          modelSelection: legacyT3ModelSelection(),
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        },
-        baseUrl,
-        token,
-      ),
+    const created = dispatchT3(
+      {
+        type: "thread.create",
+        commandId: `${commandId}:legacy-create`,
+        threadId: payload.threadId,
+        projectId,
+        title: legacyTitle,
+        modelSelection: legacyT3ModelSelection(),
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      },
+      baseUrl,
+      token,
     );
+    // v0.0.40 does not deduplicate a repeated create command before running the
+    // decider. A 500 here can therefore mean the deterministic thread already
+    // exists; the title update below is the authoritative existence check.
+    if (created.status !== 500) t3Receipt(created);
   }
   return t3Receipt(
     dispatchT3(
