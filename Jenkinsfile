@@ -234,7 +234,11 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 installWorkspace()
                 sh '''
                     mkdir -p release-complete
-                    cp artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/* release-complete/
+                    for artifact in artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/*; do
+                        if [ "${artifact##*/}" != builder-debug.yml ]; then
+                            cp "$artifact" release-complete/
+                        fi
+                    done
                     node scripts/merge-update-manifests.ts --platform mac release-complete/latest-mac.yml release-complete/latest-mac-x64.yml release-complete/latest-mac.yml
                     rm release-complete/latest-mac-x64.yml
                     (cd release-complete && find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 shasum -a 256 | sed 's#  ./#  #' > SHA256SUMS.txt)
