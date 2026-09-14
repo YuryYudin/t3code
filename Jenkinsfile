@@ -119,8 +119,8 @@ def buildLinux(String slug, String candidateRef, String version) {
         stage("${slug}: Linux x64 + WSL helper") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             withEnv([
-                'CC=gcc-12',
-                'CXX=g++-12',
+                'CC=clang-15',
+                'CXX=clang++-15',
                 'RUSTUP_TOOLCHAIN=stable',
                 'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
             ]) {
