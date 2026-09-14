@@ -12,6 +12,7 @@ import {
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  deriveSidebarProjectCollections,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   reduceSidebarProjectScopeMenuState,
@@ -23,6 +24,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
+  resolveSidebarProjectCollectionDragProject,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
@@ -49,6 +51,7 @@ import {
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
+  type SidebarProjectCollectionGroup,
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
@@ -58,6 +61,9 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  ProjectCollectionId,
+  ProjectCollectionProjectKey,
+  type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 
 import {
@@ -2576,4 +2582,325 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+function makeCollectionGroup(
+  project: Project,
+  displayName = project.title,
+): SidebarProjectCollectionGroup<Project> {
+  return {
+    displayName,
+    memberProjects: [{ ...project, physicalProjectKey: `${project.environmentId}:${project.id}` }],
+    memberProjectRefs: [{ environmentId: project.environmentId, projectId: project.id }],
+  };
+}
+
+describe("deriveSidebarProjectCollections", () => {
+  const workId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+  const personalId = ProjectCollectionId.make("8d34b312-58d0-49da-aa2c-653d188a10de");
+  const alphaId = ProjectCollectionId.make("00000000-0000-4000-8000-000000000002");
+  const alphaDuplicateId = ProjectCollectionId.make("00000000-0000-4000-8000-000000000003");
+  const workKey = ProjectCollectionProjectKey.make("repository:github.com/acme/work");
+  const personalKey = ProjectCollectionProjectKey.make("repository:github.com/acme/personal");
+  const work = makeProject({
+    id: ProjectId.make("work"),
+    title: "Work repo",
+    workspaceRoot: "/tmp/work",
+    repositoryIdentity: {
+      canonicalKey: "github.com/acme/work",
+      locator: { source: "git-remote", remoteName: "origin", remoteUrl: "git@example/work" },
+      rootPath: "/tmp/work",
+      provider: "github",
+      owner: "acme",
+      name: "work",
+      displayName: "Work repo",
+    },
+  });
+  const personal = makeProject({
+    id: ProjectId.make("personal"),
+    title: "Personal repo",
+    workspaceRoot: "/tmp/personal",
+    repositoryIdentity: {
+      canonicalKey: "github.com/acme/personal",
+      locator: { source: "git-remote", remoteName: "origin", remoteUrl: "git@example/personal" },
+      rootPath: "/tmp/personal",
+      provider: "github",
+      owner: "acme",
+      name: "personal",
+      displayName: "Personal repo",
+    },
+  });
+  const loose = makeProject({
+    id: ProjectId.make("loose"),
+    title: "Loose project",
+    workspaceRoot: "/tmp/loose",
+  });
+  const projects = [personal, work, loose];
+  const groups = projects.map((project) => makeCollectionGroup(project));
+  const document: ProjectCollectionsDocument = {
+    schemaVersion: 1,
+    collections: [
+      {
+        id: workId,
+        name: "Work",
+        visual: { kind: "lucide" as const, name: "briefcase" as const, color: "blue" as const },
+      },
+      { id: personalId, name: "Personal", visual: { kind: "emoji" as const, emoji: "🏠" } },
+      {
+        id: alphaDuplicateId,
+        name: "Alpha",
+        visual: { kind: "lucide", name: "folder-code", color: "gray" },
+      },
+      {
+        id: alphaId,
+        name: "Alpha",
+        visual: { kind: "lucide", name: "folder-code", color: "gray" },
+      },
+    ],
+    assignments: [
+      { projectKey: workKey, collectionId: workId },
+      { projectKey: personalKey, collectionId: personalId },
+    ],
+  };
+  const threads = [
+    makeThread({ id: ThreadId.make("personal-new"), projectId: personal.id }),
+    makeThread({ id: ThreadId.make("work-middle"), projectId: work.id }),
+    makeThread({ id: ThreadId.make("loose-old"), projectId: loose.id }),
+  ];
+
+  it("filters each scope without disturbing the existing flat thread order", () => {
+    const named = deriveSidebarProjectCollections({
+      document,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "collection", collectionId: workId },
+      sanitizeUnavailableProjects: true,
+    });
+    const unfiled = deriveSidebarProjectCollections({
+      document,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "unfiled" },
+      sanitizeUnavailableProjects: true,
+    });
+    const individual = deriveSidebarProjectCollections({
+      document,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "project", projectKey: personalKey },
+      sanitizeUnavailableProjects: true,
+    });
+
+    expect(named.filteredItems.map((thread) => thread.id)).toEqual(["work-middle"]);
+    expect(unfiled.filteredItems.map((thread) => thread.id)).toEqual(["loose-old"]);
+    expect(individual.filteredItems.map((thread) => thread.id)).toEqual(["personal-new"]);
+    expect(
+      deriveSidebarProjectCollections({
+        document,
+        groups,
+        projects,
+        threads,
+        scope: { kind: "all" },
+        sanitizeUnavailableProjects: true,
+      }).filteredItems,
+    ).toEqual(threads);
+    const all = deriveSidebarProjectCollections({
+      document,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "all" },
+      sanitizeUnavailableProjects: true,
+    });
+    expect(
+      resolveSidebarProjectCollectionDragProject({
+        model: all,
+        environmentId: work.environmentId,
+        projectId: work.id,
+        canMutate: true,
+      })?.projectKey,
+    ).toBe(workKey);
+    expect(
+      resolveSidebarProjectCollectionDragProject({
+        model: named,
+        environmentId: work.environmentId,
+        projectId: work.id,
+        canMutate: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSidebarProjectCollectionDragProject({
+        model: all,
+        environmentId: work.environmentId,
+        projectId: work.id,
+        canMutate: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("pins All and Unfiled around populated activity order and stable empty ordering", () => {
+    const model = deriveSidebarProjectCollections({
+      document,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "all" },
+      sanitizeUnavailableProjects: true,
+    });
+
+    expect(model.scopeOptions.map((option) => [option.label, option.count])).toEqual([
+      ["All projects", 3],
+      ["Personal", 1],
+      ["Work", 1],
+      ["Alpha", 0],
+      ["Alpha", 0],
+      ["Unfiled", 1],
+    ]);
+    expect(model.scopeOptions.slice(2, 5).map((option) => option.collection?.id)).toEqual([
+      workId,
+      alphaId,
+      alphaDuplicateId,
+    ]);
+  });
+
+  it("collapses differently rendered repository groups into one whole-project identity", () => {
+    const checkout = {
+      ...work,
+      id: ProjectId.make("work-checkout"),
+      workspaceRoot: "/tmp/work-feature",
+    };
+    const model = deriveSidebarProjectCollections({
+      document,
+      groups: [makeCollectionGroup(work), makeCollectionGroup(checkout, "Work feature")],
+      projects: [work, checkout],
+      threads: [
+        makeThread({ id: ThreadId.make("main"), projectId: work.id }),
+        makeThread({ id: ThreadId.make("feature"), projectId: checkout.id }),
+      ],
+      scope: { kind: "project", projectKey: workKey },
+      sanitizeUnavailableProjects: true,
+    });
+
+    expect(model.projects).toHaveLength(1);
+    expect(model.projects[0]).toMatchObject({
+      projectKey: workKey,
+      impact: { checkoutCount: 2, threadCount: 2 },
+    });
+    expect(model.filteredItems.map((thread) => thread.id)).toEqual(["main", "feature"]);
+  });
+
+  it("indexes hidden identity candidates and thread counts once for many groups", () => {
+    let projectScans = 0;
+    let threadFilterCalls = 0;
+    const visibleProjects = Array.from({ length: 40 }, (_, index) =>
+      makeProject({
+        id: ProjectId.make(`visible-${index}`),
+        title: `Project ${index}`,
+        workspaceRoot: `/tmp/project-${index}`,
+      }),
+    );
+    const originalProjects = visibleProjects.flatMap((visible, index) => [
+      visible,
+      {
+        ...visible,
+        repositoryIdentity: {
+          canonicalKey: `github.com/acme/project-${index}`,
+          locator: {
+            source: "git-remote" as const,
+            remoteName: "origin",
+            remoteUrl: `git@example/project-${index}`,
+          },
+          rootPath: visible.workspaceRoot,
+          provider: "github" as const,
+          owner: "acme",
+          name: `project-${index}`,
+          displayName: `Project ${index}`,
+        },
+      },
+    ]);
+    const projectSnapshot = [...originalProjects];
+    Object.defineProperty(originalProjects, Symbol.iterator, {
+      value: function* () {
+        projectScans += 1;
+        yield* projectSnapshot;
+      },
+    });
+    const manyThreads = visibleProjects.map((visible, index) =>
+      makeThread({ id: ThreadId.make(`thread-${index}`), projectId: visible.id }),
+    );
+    Object.defineProperty(manyThreads, "filter", {
+      value: (...args: Parameters<typeof manyThreads.filter>) => {
+        threadFilterCalls += 1;
+        return Array.prototype.filter.apply(manyThreads, args);
+      },
+    });
+
+    const model = deriveSidebarProjectCollections({
+      document: { schemaVersion: 1, collections: [], assignments: [] },
+      groups: visibleProjects.map((visible) => ({
+        displayName: visible.title,
+        memberProjects: [
+          {
+            ...visible,
+            physicalProjectKey: `${visible.environmentId}:${visible.workspaceRoot}`,
+          },
+        ],
+        memberProjectRefs: [{ environmentId: visible.environmentId, projectId: visible.id }],
+      })),
+      projects: originalProjects,
+      threads: manyThreads,
+      scope: { kind: "all" },
+      sanitizeUnavailableProjects: true,
+    });
+
+    expect(model.projects).toHaveLength(40);
+    expect(model.projects[0]?.projectKey).toBe("repository:github.com/acme/project-0");
+    expect(model.projects.every((candidate) => candidate.impact.threadCount === 1)).toBe(true);
+    expect(projectScans).toBe(1);
+    expect(threadFilterCalls).toBe(0);
+  });
+
+  it("sanitizes stale named and confirmed-missing project scopes to All", () => {
+    const deletedCollection = ProjectCollectionId.make("ef5d7c34-0c54-48e7-935d-cf584b9f1ee8");
+    const staleProject = ProjectCollectionProjectKey.make("repository:github.com/acme/gone");
+    const derive = (
+      scope: Parameters<typeof deriveSidebarProjectCollections>[0]["scope"],
+      ready: boolean,
+    ) =>
+      deriveSidebarProjectCollections({
+        document,
+        groups,
+        projects,
+        threads,
+        scope,
+        sanitizeUnavailableProjects: ready,
+      }).scope;
+
+    expect(derive({ kind: "collection", collectionId: deletedCollection }, false)).toEqual({
+      kind: "all",
+    });
+    expect(derive({ kind: "project", projectKey: staleProject }, false)).toEqual({
+      kind: "project",
+      projectKey: staleProject,
+    });
+    expect(derive({ kind: "project", projectKey: staleProject }, true)).toEqual({ kind: "all" });
+  });
+
+  it("retains a device-local named scope while the reference document is temporarily unavailable", () => {
+    const model = deriveSidebarProjectCollections({
+      document: null,
+      groups,
+      projects,
+      threads,
+      scope: { kind: "collection", collectionId: workId },
+      sanitizeUnavailableProjects: true,
+    });
+
+    expect(model.scope).toEqual({ kind: "collection", collectionId: workId });
+    expect(model.filteredItems).toEqual(threads);
+    expect(model.scopedProjectKeys).toBeNull();
+  });
 });

@@ -1,11 +1,16 @@
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
-import { Platform, useWindowDimensions } from "react-native";
+import { DEFAULT_PROJECT_COLLECTIONS_DOCUMENT } from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal, Platform, useWindowDimensions } from "react-native";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useThreadShells } from "../../state/entities";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -18,7 +23,12 @@ import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
 import { useHomeThreadSelection } from "./home-thread-navigation";
-import { buildHomeProjectScopes } from "./homeThreadList";
+import {
+  buildMobileProjectCollectionsModel,
+  mobileProjectCollectionScopeKey,
+} from "./mobileProjectCollections";
+import { ProjectCollectionsSheet } from "../projects/ProjectCollectionsSheet";
+import { useProjectCollections } from "../projects/useProjectCollections";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle";
@@ -26,15 +36,71 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
+  const { layout } = useAdaptiveWorkspaceLayout();
+  // In split layouts the persistent sidebar IS the thread list, and it owns the
+  // collection scope. Keeping the two branches in separate components stops the
+  // empty detail pane from mounting a second collections controller.
+  return layout.usesSplitView ? <SplitHomeRouteScreen /> : <CompactHomeRouteScreen />;
+}
+
+function SplitHomeRouteScreen() {
+  const { panes } = useAdaptiveWorkspaceLayout();
+  const { state: catalogState } = useWorkspaceState();
+  const navigation = useNavigation();
+
+  return (
+    <>
+      <NativeStackScreenOptions
+        options={
+          Platform.OS === "android"
+            ? { headerShown: false }
+            : { title: "", headerTitle: "", unstable_headerLeftItems: () => [] }
+        }
+      />
+      {Platform.OS === "ios" ? (
+        <NativeHeaderToolbar placement="left">
+          <NativeHeaderToolbar.Button
+            accessibilityLabel="New task"
+            icon="square.and.pencil"
+            onPress={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+          />
+        </NativeHeaderToolbar>
+      ) : null}
+      {Platform.OS === "android" ? <AndroidScreenHeader title="Threads" /> : null}
+      <WorkspaceEmptyDetail
+        onAddConnection={
+          Platform.OS === "android" && !catalogState.hasConnections
+            ? () =>
+                navigation.navigate("SettingsSheet", {
+                  screen: "SettingsContent",
+                  params: { screen: "SettingsEnvironmentNew" },
+                })
+            : undefined
+        }
+        onStartNewTask={
+          Platform.OS === "android" && panes.primarySidebarVisible
+            ? undefined
+            : () => navigation.navigate("NewTaskSheet", { screen: "NewTask" })
+        }
+      />
+    </>
+  );
+}
+
+function CompactHomeRouteScreen() {
   const { width: windowWidth } = useWindowDimensions();
-  const { layout, panes } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState("");
+  const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
+  const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
   const handleSelectThread = useHomeThreadSelection();
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const projectCollections = useProjectCollections();
 
   useEffect(() => {
     void checkForAppUpdateOnLaunch();
@@ -83,69 +149,80 @@ export function HomeRouteScreen() {
     setThreadSortOrder,
   } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
-  const projectFilterOptions = useMemo(
+  const storedProjectCollectionScope = AsyncResult.isSuccess(preferencesResult)
+    ? (preferencesResult.value.projectCollectionScope ?? ({ kind: "all" } as const))
+    : ({ kind: "all" } as const);
+  const projectCollectionModel = useMemo(
     () =>
-      buildHomeProjectScopes({
+      buildMobileProjectCollectionsModel({
         projects,
+        threads,
+        pendingTasks,
         environmentId: selectedEnvironmentId,
         projectGroupingMode: listOptions.projectGroupingMode,
-      }).map((scope) => ({
-        key: scope.key,
-        label: scope.title,
+        projectSortOrder: listOptions.projectSortOrder,
+        document: projectCollections.document ?? DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        scope: scopeOverride ?? storedProjectCollectionScope,
+      }),
+    [
+      listOptions.projectGroupingMode,
+      listOptions.projectSortOrder,
+      pendingTasks,
+      projectCollections.document,
+      projects,
+      scopeOverride,
+      selectedEnvironmentId,
+      storedProjectCollectionScope,
+      threads,
+    ],
+  );
+  const selectedProjectKey =
+    projectCollectionModel.activeScope.kind === "project"
+      ? projectCollectionModel.activeScope.projectKey
+      : null;
+  const projectFilterOptions = useMemo(
+    () =>
+      projectCollectionModel.projectChoices.map((project) => ({
+        key: project.projectKey,
+        label: project.label,
       })),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+    [projectCollectionModel.projectChoices],
   );
   useEffect(() => {
+    if (projectCollections.document === null) return;
+    const requested = scopeOverride ?? storedProjectCollectionScope;
     if (
-      selectedProjectKey !== null &&
-      !projectFilterOptions.some((project) => project.key === selectedProjectKey)
+      mobileProjectCollectionScopeKey(requested) !==
+      mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
     ) {
-      setSelectedProjectKey(null);
+      setScopeOverride(projectCollectionModel.activeScope);
+      if (AsyncResult.isSuccess(preferencesResult)) {
+        savePreferences({ projectCollectionScope: projectCollectionModel.activeScope });
+      }
     }
-  }, [projectFilterOptions, selectedProjectKey]);
-
-  // In split layouts the persistent sidebar IS the thread list — Home becomes
-  // an empty detail pane so selecting a thread never transitions layouts.
-  if (layout.usesSplitView) {
-    return (
-      <>
-        <NativeStackScreenOptions
-          options={
-            Platform.OS === "android"
-              ? { headerShown: false }
-              : { title: "", headerTitle: "", unstable_headerLeftItems: () => [] }
-          }
-        />
-        {Platform.OS === "ios" ? (
-          <NativeHeaderToolbar placement="left">
-            <NativeHeaderToolbar.Button
-              accessibilityLabel="New task"
-              icon="square.and.pencil"
-              onPress={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
-            />
-          </NativeHeaderToolbar>
-        ) : null}
-        {Platform.OS === "android" ? <AndroidScreenHeader title="Threads" /> : null}
-        <WorkspaceEmptyDetail
-          onAddConnection={
-            Platform.OS === "android" && !catalogState.hasConnections
-              ? () =>
-                  navigation.navigate("SettingsSheet", {
-                    screen: "SettingsContent",
-                    params: { screen: "SettingsEnvironmentNew" },
-                  })
-              : undefined
-          }
-          onStartNewTask={
-            Platform.OS === "android" && panes.primarySidebarVisible
-              ? undefined
-              : () => navigation.navigate("NewTaskSheet", { screen: "NewTask" })
-          }
-        />
-      </>
-    );
-  }
+  }, [
+    preferencesResult,
+    projectCollectionModel.activeScope,
+    projectCollections.document,
+    savePreferences,
+    scopeOverride,
+    storedProjectCollectionScope,
+  ]);
+  const setProjectCollectionScope = useCallback(
+    (scope: ProjectCollectionScope) => {
+      setScopeOverride(scope);
+      savePreferences({ projectCollectionScope: scope });
+    },
+    [savePreferences],
+  );
+  const setSelectedProjectKey = useCallback(
+    (projectKey: string | null) => {
+      setProjectCollectionScope(
+        projectKey === null ? { kind: "all" } : { kind: "project", projectKey },
+      );
+    },
+    [setProjectCollectionScope],
+  );
 
   return (
     <AndroidHomeFabLayout
@@ -175,10 +252,16 @@ export function HomeRouteScreen() {
           searchQuery={searchQuery}
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
+          projectCollectionScope={projectCollectionModel.activeScope}
+          projectCollectionScopeOptions={projectCollectionModel.scopeOptions}
+          projectCollectionsAvailable={projectCollections.document !== null}
+          canManageProjectCollections={projectCollections.document !== null}
           projectSortOrder={listOptions.projectSortOrder}
           threadSortOrder={listOptions.threadSortOrder}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
+          onProjectCollectionScopeChange={setProjectCollectionScope}
+          onManageProjectCollections={() => setProjectCollectionsOpen(true)}
           onOpenEnvironments={() =>
             navigation.navigate("SettingsSheet", {
               screen: "SettingsContent",
@@ -194,6 +277,7 @@ export function HomeRouteScreen() {
           onProjectSortOrderChange={setProjectSortOrder}
           onSearchQueryChange={setSearchQuery}
           onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+          onStartNewProject={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
           onThreadSortOrderChange={setThreadSortOrder}
         />
 
@@ -253,17 +337,29 @@ export function HomeRouteScreen() {
           }}
           onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
           onThreadSortOrderChange={setThreadSortOrder}
-          pendingTasks={pendingTasks}
+          pendingTasks={projectCollectionModel.visiblePendingTasks}
           projectGroupingMode={listOptions.projectGroupingMode}
-          projects={projects}
+          projects={projectCollectionModel.visibleProjects}
           projectSortOrder={listOptions.projectSortOrder}
           savedConnectionsById={savedConnectionsById}
           searchQuery={searchQuery}
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
-          threads={threads}
+          threads={projectCollectionModel.visibleThreads}
           threadSortOrder={listOptions.threadSortOrder}
         />
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setProjectCollectionsOpen(false)}
+          presentationStyle="pageSheet"
+          visible={projectCollectionsOpen && projectCollections.document !== null}
+        >
+          <ProjectCollectionsSheet
+            onClose={() => setProjectCollectionsOpen(false)}
+            projects={projectCollectionModel.projects}
+            sync={projectCollections}
+          />
+        </Modal>
       </>
     </AndroidHomeFabLayout>
   );

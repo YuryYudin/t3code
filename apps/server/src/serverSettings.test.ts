@@ -254,6 +254,35 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists a non-default project collections document atomically", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const patch = yield* decodeSettingsPatch({
+        projectCollections: {
+          schemaVersion: 1,
+          collections: [
+            {
+              id: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+              name: "Work",
+              visual: { kind: "lucide", name: "briefcase", color: "indigo" },
+            },
+          ],
+          assignments: [],
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings(patch);
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const persisted = JSON.parse(raw);
+
+      assert.deepEqual(next.projectCollections, patch.projectCollections);
+      assert.deepEqual(persisted.projectCollections, patch.projectCollections);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("buffers changes after a subscription is acquired but before it is consumed", () =>
     Effect.scoped(
       Effect.gen(function* () {

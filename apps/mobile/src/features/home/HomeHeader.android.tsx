@@ -9,6 +9,8 @@ import {
   THREAD_SORT_OPTIONS,
 } from "./home-list-options";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -21,9 +23,16 @@ export function HomeHeader(props: HomeHeaderProps) {
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
   const threadListV2Enabled = useThreadListV2Enabled();
+  // A collection scope narrows the list the same way a project filter does, so
+  // it has to count as a customized list even though it is not a project key.
+  const collectionAwareSelectedProjectKey =
+    props.projectCollectionScope.kind === "all" ? null : (props.selectedProjectKey ?? "collection");
   const hasCustomListOptions = threadListV2Enabled
-    ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
+    ? props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all"
+    : hasCustomHomeListOptions({
+        ...props,
+        selectedProjectKey: collectionAwareSelectedProjectKey,
+      });
   const menuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -42,6 +51,22 @@ export function HomeHeader(props: HomeHeaderProps) {
           })),
         ],
       },
+      ...(props.projectCollectionsAvailable
+        ? ([
+            {
+              id: "collection-scope",
+              title: "Collections",
+              subactions: props.projectCollectionScopeOptions.map((option) => ({
+                id: `collection-scope:${mobileProjectCollectionScopeKey(option.scope)}`,
+                title: `${option.label} (${option.count})`,
+                state: checkedMenuState(
+                  mobileProjectCollectionScopeKey(option.scope) ===
+                    mobileProjectCollectionScopeKey(props.projectCollectionScope),
+                ),
+              })),
+            },
+          ] satisfies MenuAction[])
+        : []),
       ...(props.projects.length === 0
         ? []
         : ([
@@ -52,7 +77,7 @@ export function HomeHeader(props: HomeHeaderProps) {
                 {
                   id: "project:all",
                   title: "All projects",
-                  state: checkedMenuState(props.selectedProjectKey === null),
+                  state: checkedMenuState(props.projectCollectionScope.kind === "all"),
                 },
                 ...props.projects.map((project) => ({
                   id: `project:${project.key}`,
@@ -87,6 +112,9 @@ export function HomeHeader(props: HomeHeaderProps) {
     ],
     [
       props.environments,
+      props.projectCollectionScope,
+      props.projectCollectionScopeOptions,
+      props.projectCollectionsAvailable,
       props.projectSortOrder,
       props.projects,
       props.selectedEnvironmentId,
@@ -115,7 +143,16 @@ export function HomeHeader(props: HomeHeaderProps) {
       }
 
       if (id === "project:all") {
-        props.onProjectChange(null);
+        props.onProjectCollectionScopeChange({ kind: "all" });
+        return;
+      }
+
+      if (id.startsWith("collection-scope:")) {
+        const scopeKey = id.slice("collection-scope:".length);
+        const option = props.projectCollectionScopeOptions.find(
+          (candidate) => mobileProjectCollectionScopeKey(candidate.scope) === scopeKey,
+        );
+        if (option) props.onProjectCollectionScopeChange(option.scope);
         return;
       }
 
@@ -156,6 +193,7 @@ export function HomeHeader(props: HomeHeaderProps) {
         onOpenSettings={props.onOpenSettings}
         onOpenEnvironments={props.onOpenEnvironments}
       />
+      <ProjectCollectionScopeStrip {...props} />
     </>
   );
 }
