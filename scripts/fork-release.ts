@@ -422,6 +422,67 @@ function listIncidentIssues(repository: string, marker: string): ReadonlyArray<G
   return issues.filter(({ body }) => body.includes(marker));
 }
 
+interface T3DispatchResult {
+  readonly status: number;
+  readonly body: string;
+}
+
+function dispatchT3(payload: unknown, baseUrl: string, token: string): T3DispatchResult {
+  const temporary = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-incident-"));
+  try {
+    const payloadPath = NodePath.join(temporary, "payload.json");
+    const responsePath = NodePath.join(temporary, "response.json");
+    NodeFS.writeFileSync(payloadPath, JSON.stringify(payload), { mode: 0o600 });
+    const config = [
+      "silent",
+      "show-error",
+      'request = "POST"',
+      'header = "Content-Type: application/json"',
+      `header = "Authorization: Bearer ${token.replaceAll('"', '\\"')}"`,
+      `data-binary = "@${payloadPath.replaceAll('"', '\\"')}"`,
+      `output = "${responsePath.replaceAll('"', '\\"')}"`,
+      'write-out = "%{http_code}"',
+      `url = "${baseUrl.replace(/\/$/, "")}/api/orchestration/dispatch"`,
+      "",
+    ].join("\n");
+    const status = Number(run("curl", ["--config", "-"], { input: config }));
+    if (!Number.isInteger(status)) throw new Error("T3 returned an invalid HTTP status.");
+    return {
+      status,
+      body: NodeFS.existsSync(responsePath) ? NodeFS.readFileSync(responsePath, "utf8") : "",
+    };
+  } finally {
+    NodeFS.rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+function t3Receipt(result: T3DispatchResult): number {
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`T3 dispatch failed with HTTP ${result.status}: ${result.body.slice(-8_000)}`);
+  }
+  const parsed = JSON.parse(result.body) as { readonly sequence?: unknown };
+  if (!Number.isInteger(parsed.sequence) || (parsed.sequence as number) < 0)
+    throw new Error("T3 returned an invalid incident receipt.");
+  return parsed.sequence as number;
+}
+
+function legacyT3ModelSelection(): unknown {
+  const value = process.env.T3CODE_JENKINS_MODEL_SELECTION;
+  if (!value) throw new Error("T3 legacy incident model selection is not configured.");
+  const parsed = JSON.parse(value) as unknown;
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("instanceId" in parsed) ||
+    typeof parsed.instanceId !== "string" ||
+    !("model" in parsed) ||
+    typeof parsed.model !== "string"
+  ) {
+    throw new Error("T3 legacy incident model selection is invalid.");
+  }
+  return parsed;
+}
+
 function callT3(record: IncidentRecord, state: "failing" | "recovered", commandId: string): number {
   const baseUrl = process.env.T3CODE_JENKINS_BASE_URL;
   const token = process.env.T3CODE_JENKINS_TOKEN;
@@ -429,6 +490,7 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
   if (!baseUrl || !token || !projectId || record.issueNumber === undefined) {
     throw new Error("T3 incident credentials/configuration are incomplete.");
   }
+  const createdAt = new Date().toISOString();
   const payload = {
     type: "thread.external-alert.upsert",
     commandId,
@@ -440,32 +502,60 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
     summary: state === "failing" ? record.summary : `Recovered: ${record.summary}`,
     ...(record.detail ? { detail: record.detail } : {}),
     url: record.evidenceUrl,
-    createdAt: new Date().toISOString(),
+    createdAt,
   };
-  const temporary = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-incident-"));
-  let response: string;
-  try {
-    const payloadPath = NodePath.join(temporary, "payload.json");
-    NodeFS.writeFileSync(payloadPath, JSON.stringify(payload), { mode: 0o600 });
-    const config = [
-      "fail-with-body",
-      "silent",
-      "show-error",
-      'request = "POST"',
-      'header = "Content-Type: application/json"',
-      `header = "Authorization: Bearer ${token.replaceAll('"', '\\"')}"`,
-      `data-binary = "@${payloadPath.replaceAll('"', '\\"')}"`,
-      `url = "${baseUrl.replace(/\/$/, "")}/api/orchestration/dispatch"`,
-      "",
-    ].join("\n");
-    response = run("curl", ["--config", "-"], { input: config });
-  } finally {
-    NodeFS.rmSync(temporary, { recursive: true, force: true });
+  const preferred = dispatchT3(payload, baseUrl, token);
+  if (preferred.status !== 400) return t3Receipt(preferred);
+
+  // v0.0.40 predates the atomic external-alert command. Keep escalation useful
+  // while that server is still running by composing the two commands it knows.
+  if (state === "failing") {
+    t3Receipt(
+      dispatchT3(
+        {
+          type: "thread.create",
+          commandId: `${commandId}:legacy-create`,
+          threadId: payload.threadId,
+          projectId,
+          title: record.title,
+          modelSelection: legacyT3ModelSelection(),
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+        baseUrl,
+        token,
+      ),
+    );
   }
-  const parsed = JSON.parse(response) as { readonly sequence?: unknown };
-  if (!Number.isInteger(parsed.sequence) || (parsed.sequence as number) < 0)
-    throw new Error("T3 returned an invalid incident receipt.");
-  return parsed.sequence as number;
+  return t3Receipt(
+    dispatchT3(
+      {
+        type: "thread.activity.append",
+        commandId,
+        threadId: payload.threadId,
+        activity: {
+          id: `ci-incident:${commandId}`,
+          tone: state === "failing" ? "error" : "info",
+          kind: "ci.incident",
+          summary: payload.summary,
+          payload: {
+            incidentKey: record.incidentKey,
+            state,
+            ...(record.detail ? { detail: record.detail } : {}),
+            url: record.evidenceUrl,
+          },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      },
+      baseUrl,
+      token,
+    ),
+  );
 }
 
 function incidentCommand(args: ParsedArguments): void {

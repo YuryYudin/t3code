@@ -18,15 +18,17 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 - macOS arm64 and cross-built x64: `macos` (`mbook`);
 - Windows x64: `pockeo-windows`.
 
+Install `libsecret-1-dev`, `pkg-config`, and ImageMagick once on every Linux agent. The Jenkins account does not need sudo after that provisioning step.
+
 Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It is the durable incident/promotion journal and contains no credentials.
 
 Configure the credential IDs referenced by `Jenkinsfile`:
 
-- existing Git/GitHub: `github-pockeo-ssh`, `github-release-token`;
+- Git/GitHub: `github-pockeo-ssh`, `github-release-token` for release contents, and `github-incident-token` with Issues write access;
 - existing Apple credentials: `apple-certificate`, `apple-certificate-password`, `apple-signing-identity`, `apple-api-issuer`, `apple-api-key-id`, `apple-api-key-p8`;
 - public production configuration copied from the upstream stable desktop build: `t3code-clerk-publishable-key`, `t3code-clerk-jwt-template`, `t3code-clerk-cli-oauth-client-id`, `t3code-relay-url`, and `t3code-clerk-passkey-rp-domains`;
 - the immutable full SHA of `origin/bootstrap/0.0.41-1-source`: `t3code-bootstrap-source-sha`;
-- incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, and `t3code-jenkins-token`.
+- incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, `t3code-jenkins-token`, and `t3code-jenkins-model-selection`. The model-selection credential is the selected project's current default model JSON and is used only by the v0.0.40 compatibility path.
 
 Issue the T3 credential once on kubuntu and paste its output directly into the secret-text credential:
 
@@ -47,7 +49,7 @@ The macOS stage uses the existing App Store Connect team key to register `com.ta
 
 The first release is the one-time normalization from upstream `v0.0.40` to fork `v0.0.41-1`:
 
-1. Merge the implementation PR linearly and create the protected branch `bootstrap/0.0.41-1-source` at that exact reviewed commit.
+1. Create the protected branch `bootstrap/0.0.41-1-source` at the exact reviewed source commit.
 2. Store that full SHA as `t3code-bootstrap-source-sha`.
 3. Protect the bootstrap branch from changes.
 4. Run the job with `ACTION=auto` once.
