@@ -1717,12 +1717,7 @@ const desktopBuildProbeSucceeds = Effect.fn("desktopBuildProbeSucceeds")(functio
 ) {
   return yield* runCommand(command, { label, verbose: false }).pipe(
     Effect.as(true),
-    Effect.catch((error) =>
-      Effect.logWarning(`[desktop-artifact] ${label} prerequisite probe failed`).pipe(
-        Effect.annotateLogs({ error }),
-        Effect.as(false),
-      ),
-    ),
+    Effect.orElseSucceed(() => false),
   );
 });
 
@@ -1845,6 +1840,11 @@ function encodePowerShellCommand(input: string): string {
   return Encoding.encodeBase64(bytes);
 }
 
+function windowsPowerShellExecutable(): string {
+  const windowsRoot = process.env.SYSTEMROOT ?? process.env.windir ?? String.raw`C:\Windows`;
+  return `${windowsRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+
 export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBuild")(
   function* (input: { readonly arch: typeof BuildArch.Type; readonly bundlesWslRuntime: boolean }) {
     const rustTarget = resolveResourceMonitorRustTargets("win", input.arch)[0]!;
@@ -1864,7 +1864,7 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
         msvc: reuseResourceMonitor
           ? Effect.succeed(true)
           : desktopBuildProbeSucceeds(
-              ChildProcess.make("powershell.exe", [
+              ChildProcess.make(windowsPowerShellExecutable(), [
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
