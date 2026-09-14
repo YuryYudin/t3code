@@ -119,6 +119,8 @@ def buildLinux(String slug, String candidateRef, String version) {
         stage("${slug}: Linux x64 + WSL helper") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             withEnv([
+                'CC=gcc-12',
+                'CXX=g++-12',
                 'RUSTUP_TOOLCHAIN=stable',
                 'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
             ]) {
@@ -129,15 +131,15 @@ def buildLinux(String slug, String candidateRef, String version) {
                     command -v convert
                 '''
                 sh "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
+                sh '''
+                    pty_pkg=$(node -e "console.log(require.resolve('node-pty/package.json', { paths: [process.cwd() + '/apps/server'] }))")
+                    pty_dir=$(dirname "$pty_pkg")
+                    (cd "$pty_dir" && npx --yes node-gyp rebuild)
+                    mkdir -p artifacts/wsl-prebuild
+                    cp "$pty_dir/build/Release/pty.node" artifacts/wsl-prebuild/pty.node
+                    file artifacts/wsl-prebuild/pty.node
+                '''
             }
-            sh '''
-                pty_pkg=$(node -e "console.log(require.resolve('node-pty/package.json', { paths: [process.cwd() + '/apps/server'] }))")
-                pty_dir=$(dirname "$pty_pkg")
-                (cd "$pty_dir" && npx --yes node-gyp rebuild)
-                mkdir -p artifacts/wsl-prebuild
-                cp "$pty_dir/build/Release/pty.node" artifacts/wsl-prebuild/pty.node
-                file artifacts/wsl-prebuild/pty.node
-            '''
             stash name: "artifacts-linux-${slug}", includes: 'artifacts/linux-x64/*,artifacts/wsl-prebuild/pty.node'
         }
     }
