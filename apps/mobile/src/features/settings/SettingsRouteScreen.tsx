@@ -60,6 +60,7 @@ import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
 import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
+import { ProjectCollectionsSettingsSection } from "./ProjectCollectionsSettingsSection";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -596,14 +597,17 @@ function ConfiguredSettingsRouteScreen() {
 
 function GeneralSettingsSection() {
   return (
-    <SettingsSection title="General">
-      <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
-      {Platform.OS === "ios" ? (
-        <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
-      ) : null}
-      <AutoSettleSettingsRows />
-      <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-    </SettingsSection>
+    <>
+      <SettingsSection title="General">
+        <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+        {Platform.OS === "ios" ? (
+          <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
+        ) : null}
+        <AutoSettleSettingsRows />
+        <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
+      </SettingsSection>
+      <ProjectCollectionsSettingsSection />
+    </>
   );
 }
 

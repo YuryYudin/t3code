@@ -14,6 +14,19 @@ const descriptor = {
 } as const;
 
 describe("ExecutionEnvironmentDescriptor", () => {
+  it("treats a missing project-collections capability as unsupported under version skew", () => {
+    expect(decodeDescriptor(descriptor).capabilities.projectCollections).toBeUndefined();
+  });
+
+  it("preserves an advertised project-collections capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, projectCollections: true },
+      }).capabilities.projectCollections,
+    ).toBe(true);
+  });
+
   it("treats a missing pull-request capability as unsupported under version skew", () => {
     expect(decodeDescriptor(descriptor).capabilities.pullRequests).toBeUndefined();
   });

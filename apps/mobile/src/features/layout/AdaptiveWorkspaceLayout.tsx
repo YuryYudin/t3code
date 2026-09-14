@@ -427,6 +427,10 @@ function AdaptiveWorkspaceLayoutContent(
     navigation.navigate("NewTaskSheet", { screen: "NewTask" });
   }, [navigation]);
 
+  const handleStartNewProject = useCallback(() => {
+    navigation.navigate("NewTaskSheet", { screen: "AddProject" });
+  }, [navigation]);
+
   // Minted here (root stack navigation) so the sidebar pane stays free of
   // navigation hooks — on iOS it renders inside an independent nav tree.
   const handleOpenEnvironmentSettings = useCallback(() => {
@@ -594,6 +598,7 @@ function AdaptiveWorkspaceLayoutContent(
                     onNewThreadOnBranch={handleNewThreadOnBranch}
                     onSelectThread={handleSelectThread}
                     onSearchQueryChange={setPrimarySidebarSearchQuery}
+                    onStartNewProject={handleStartNewProject}
                     searchQuery={primarySidebarSearchQuery}
                   />
                 </AndroidHomeFabLayout>

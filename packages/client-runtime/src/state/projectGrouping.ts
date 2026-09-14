@@ -260,24 +260,84 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
     }
   }
 
-  const logicalKeyByPhysicalKey = new Map<string, string>();
-  const groupedMembers = new Map<string, ProjectGroupMember<TProject>[]>();
+  // Logical keys also feed routes and device-local UI state, so preserve their
+  // existing shape unless a repository key actually aliases a physical key.
+  // Internal namespaced buckets prevent that collision from merging members.
+  const bucketKeyByPhysicalKey = new Map<string, string>();
+  const pendingGroups = new Map<
+    string,
+    {
+      readonly logicalKey: string;
+      readonly members: ProjectGroupMember<TProject>[];
+    }
+  >();
+  const bucketKeysByLogicalKey = new Map<string, string[]>();
   for (const [physicalProjectKey, physicalProjects] of projectsByPhysicalKey) {
     const winner = physicalProjects.reduce((current, candidate) =>
       shouldReplacePhysicalProjectWinner(current, candidate) ? candidate : current,
     );
     const identitySource = selectProjectIdentitySource(physicalProjects, winner);
+    const groupingMode = resolveProjectGroupingMode(winner, input.settings);
     const logicalKey = deriveLogicalProjectKey(identitySource, {
-      groupingMode: resolveProjectGroupingMode(winner, input.settings),
+      groupingMode,
     });
-    logicalKeyByPhysicalKey.set(physicalProjectKey, logicalKey);
+    const bucketKind =
+      groupingMode !== "separate" && identitySource.repositoryIdentity?.canonicalKey
+        ? "repository"
+        : "physical";
+    const bucketKey = JSON.stringify([bucketKind, logicalKey]);
+    bucketKeyByPhysicalKey.set(physicalProjectKey, bucketKey);
     const member = { physicalProjectKey, project: winner };
-    const existing = groupedMembers.get(logicalKey);
+    const existing = pendingGroups.get(bucketKey);
     if (existing) {
-      existing.push(member);
+      existing.members.push(member);
     } else {
-      groupedMembers.set(logicalKey, [member]);
+      pendingGroups.set(bucketKey, { logicalKey, members: [member] });
+      const logicalKeyBuckets = bucketKeysByLogicalKey.get(logicalKey);
+      if (logicalKeyBuckets) {
+        logicalKeyBuckets.push(bucketKey);
+      } else {
+        bucketKeysByLogicalKey.set(logicalKey, [bucketKey]);
+      }
     }
+  }
+
+  const resolvedKeyByBucketKey = new Map<string, string>();
+  const occupiedGroupKeys = new Set<string>();
+  for (const [bucketKey, group] of pendingGroups) {
+    if (bucketKeysByLogicalKey.get(group.logicalKey)?.length === 1) {
+      resolvedKeyByBucketKey.set(bucketKey, group.logicalKey);
+      occupiedGroupKeys.add(group.logicalKey);
+    }
+  }
+  const collidingBucketKeys = Array.from(pendingGroups.keys())
+    .filter((bucketKey) => {
+      const logicalKey = pendingGroups.get(bucketKey)!.logicalKey;
+      return bucketKeysByLogicalKey.get(logicalKey)!.length > 1;
+    })
+    .sort();
+  for (const bucketKey of collidingBucketKeys) {
+    let suffix = 0;
+    let resolvedKey: string;
+    do {
+      resolvedKey = JSON.stringify([
+        "t3-project-group",
+        bucketKey,
+        ...(suffix === 0 ? [] : [suffix]),
+      ]);
+      suffix += 1;
+    } while (occupiedGroupKeys.has(resolvedKey));
+    resolvedKeyByBucketKey.set(bucketKey, resolvedKey);
+    occupiedGroupKeys.add(resolvedKey);
+  }
+
+  const logicalKeyByPhysicalKey = new Map<string, string>();
+  for (const [physicalProjectKey, bucketKey] of bucketKeyByPhysicalKey) {
+    logicalKeyByPhysicalKey.set(physicalProjectKey, resolvedKeyByBucketKey.get(bucketKey)!);
+  }
+  const groupedMembers = new Map<string, ProjectGroupMember<TProject>[]>();
+  for (const [bucketKey, group] of pendingGroups) {
+    groupedMembers.set(resolvedKeyByBucketKey.get(bucketKey)!, group.members);
   }
 
   const projectRefsByLogicalKey = new Map<string, ScopedProjectRef[]>();
