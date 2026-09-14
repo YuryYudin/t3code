@@ -145,7 +145,7 @@ describe("release asset gate", () => {
     "T3-Code-0.0.41-1-arm64.zip",
     "T3-Code-0.0.41-1-x64.dmg",
     "T3-Code-0.0.41-1-x64.zip",
-    "T3-Code-0.0.41-1-x64.AppImage",
+    "T3-Code-0.0.41-1-x86_64.AppImage",
     "T3-Code-Setup-0.0.41-1-x64.exe",
     "latest-mac.yml",
     "latest-linux.yml",
