@@ -452,10 +452,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         const firstIncident = existingThread.activities.find(
           (entry) => entry.kind === "ci.incident",
         );
+        const isLegacyIncidentThread =
+          existingThread.activities.length === 0 &&
+          existingThread.id.startsWith("t3-fork-incident-");
         if (
-          firstIncident === undefined ||
-          !Predicate.isObject(firstIncident.payload) ||
-          firstIncident.payload.incidentKey !== command.incidentKey
+          !isLegacyIncidentThread &&
+          (firstIncident === undefined ||
+            !Predicate.isObject(firstIncident.payload) ||
+            firstIncident.payload.incidentKey !== command.incidentKey)
         ) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
