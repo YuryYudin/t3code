@@ -24,6 +24,7 @@ import {
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
+  ensureWindowsPowerShellOnPath,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
@@ -2185,6 +2186,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolvePackageManagerUserAgent("pnpm@11.10.0"), "pnpm/11.10.0");
     assert.equal(resolvePackageManagerUserAgent(" yarn@4.9.2 "), "yarn/4.9.2");
     assert.equal(resolvePackageManagerUserAgent("pnpm"), "pnpm");
+  });
+
+  it("adds the canonical Windows PowerShell directory to the build PATH", () => {
+    const environment: NodeJS.ProcessEnv = {
+      SystemRoot: String.raw`D:\Windows`,
+      Path: String.raw`C:\Tools`,
+    };
+
+    ensureWindowsPowerShellOnPath(environment);
+
+    assert.equal(environment.PATH, String.raw`D:\Windows\System32\WindowsPowerShell\v1.0;C:\Tools`);
+    assert.notProperty(environment, "Path");
+  });
+
+  it("normalizes Windows PATH casing without duplicating PowerShell", () => {
+    const environment: NodeJS.ProcessEnv = {
+      WINDIR: "C:\\WINDOWS\\",
+      PATH: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Tools",
+      Path: String.raw`C:\Ignored`,
+    };
+
+    ensureWindowsPowerShellOnPath(environment);
+
+    assert.equal(environment.PATH, "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Tools");
+    assert.notProperty(environment, "Path");
   });
 
   it.effect("normalizes mock update server ports from env-style strings", () =>
