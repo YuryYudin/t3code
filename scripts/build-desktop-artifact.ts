@@ -2953,13 +2953,13 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   }
 
   yield* Effect.log("[desktop-artifact] Installing server sidecar runtime externals...");
-  const installCommand = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  const installCommand = yield* resolveSpawnCommand("pnpm", [...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: serverStageDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod (server sidecar)", verbose: input.verbose },
+    { label: "pnpm install --prod (server sidecar)", verbose: input.verbose },
   );
 
   yield* Effect.log("[desktop-artifact] Packing server.asar...");
@@ -3702,13 +3702,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  const installCommand = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  const installCommand = yield* resolveSpawnCommand("pnpm", [...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod", verbose: options.verbose },
+    { label: "pnpm install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
   yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
