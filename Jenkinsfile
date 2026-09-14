@@ -72,6 +72,7 @@ def buildMac(String slug, String candidateRef, String version) {
                 ]) {
                     installWorkspace()
                     sh 'rustup update stable --no-self-update'
+                    sh 'rustup target add x86_64-apple-darwin'
                     withCredentials([
                         string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
                         string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
