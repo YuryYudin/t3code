@@ -125,6 +125,7 @@ def buildLinux(String slug, String candidateRef, String version) {
                 'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
             ]) {
                 installWorkspace()
+                sh "node scripts/update-release-package-versions.ts ${version}"
                 sh '''
                     rustup update stable --no-self-update
                     pkg-config --exists libsecret-1
