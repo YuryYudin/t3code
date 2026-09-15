@@ -184,7 +184,9 @@ describe("Jenkins release pipeline", () => {
       "utf8",
     );
 
-    expect(pipeline).toContain("node scripts/build-cli-archive.ts --platform linux --arch x64");
+    expect(pipeline).toContain(
+      "corepack pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64",
+    );
     expect(pipeline).toContain(
       "--wsl-runtime artifacts\\\\wsl-runtime\\\\t3-${version}-linux-x64.tar.gz",
     );
