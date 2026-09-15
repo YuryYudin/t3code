@@ -56,6 +56,7 @@ import {
   PinOffIcon,
   PlusIcon,
   ShieldQuestionIcon,
+  SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
   XIcon,
