@@ -177,6 +177,21 @@ describe("release asset gate", () => {
   });
 });
 
+describe("Jenkins release pipeline", () => {
+  it("hands the current Linux CLI archive to the Windows WSL runtime build", () => {
+    const pipeline = NodeFS.readFileSync(
+      NodePath.resolve(import.meta.dirname, "..", "Jenkinsfile"),
+      "utf8",
+    );
+
+    expect(pipeline).toContain("node scripts/build-cli-archive.ts --platform linux --arch x64");
+    expect(pipeline).toContain(
+      "--wsl-runtime artifacts\\\\wsl-runtime\\\\t3-${version}-linux-x64.tar.gz",
+    );
+    expect(pipeline).not.toContain("--wsl-prebuild");
+  });
+});
+
 describe("durable state", () => {
   it("atomically replaces JSON records", () => {
     const directory = NodeFS.mkdtempSync(
