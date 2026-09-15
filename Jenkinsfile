@@ -132,11 +132,11 @@ def buildLinux(String slug, String candidateRef, String version) {
                 '''
                 sh "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
                 sh """
-                    VP_NODE_VERSION=26.8.2 node apps/server/scripts/cli.ts build-exe --verbose
+                    VP_NODE_VERSION=26.8.2 corepack pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
                     mkdir -p artifacts/cli-resource-monitor/linux-x64 artifacts/wsl-runtime
                     cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor artifacts/cli-resource-monitor/linux-x64/t3-resource-monitor
-                    node scripts/build-cli-archive.ts --platform linux --arch x64 --version ${version} --resource-monitor-dir artifacts/cli-resource-monitor --output-dir artifacts/wsl-runtime
-                    node scripts/smoke-cli-archive.ts --archive artifacts/wsl-runtime/t3-${version}-linux-x64.tar.gz --expect-version ${version}
+                    corepack pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 --version ${version} --resource-monitor-dir artifacts/cli-resource-monitor --output-dir artifacts/wsl-runtime
+                    corepack pnpm exec node scripts/smoke-cli-archive.ts --archive artifacts/wsl-runtime/t3-${version}-linux-x64.tar.gz --expect-version ${version}
                 """
             }
             stash name: "artifacts-linux-${slug}", includes: 'artifacts/linux-x64/*,artifacts/wsl-runtime/*.tar.gz'
