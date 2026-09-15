@@ -189,6 +189,7 @@ describe("Jenkins release pipeline", () => {
     );
     expect(pipeline).toContain("VP_SELF_SETUP_NO_MODIFY_PATH=1");
     expect(pipeline).toContain("VP_NODE_VERSION=26.8.2");
+    expect(pipeline).toContain("node scripts/update-release-package-versions.ts ${version}");
     expect(pipeline).toContain("env exec node apps/server/scripts/cli.ts build-exe --verbose");
     expect(pipeline).toContain(
       "--wsl-runtime artifacts\\\\wsl-runtime\\\\t3-${version}-linux-x64.tar.gz",
