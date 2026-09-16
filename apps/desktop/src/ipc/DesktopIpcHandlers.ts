@@ -45,6 +45,8 @@ import {
   getWindowFullscreenState,
   openExternal,
   openSystemSettings,
+  openWindow,
+  setWindowScope,
   checkSystemPermission,
   pasteAsText,
   probeRemoteEditors,
@@ -134,6 +136,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(openExternal);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
+  yield* ipc.handle(openWindow);
+  yield* ipc.handle(setWindowScope);
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);

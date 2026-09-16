@@ -33,6 +33,22 @@ const DesktopSettingsPatch = Schema.Struct({
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
   wslMode: Schema.optionalKey(Schema.Literals(["local", "wsl"])),
   wslDistro: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  windows: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        bounds: Schema.NullOr(
+          Schema.Struct({
+            x: Schema.Number,
+            y: Schema.Number,
+            width: Schema.Number,
+            height: Schema.Number,
+          }),
+        ),
+        maximized: Schema.Boolean,
+        scope: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
   wslOnly: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -135,6 +151,7 @@ describe("DesktopSettings", () => {
         wslBackendEnabled: false,
         wslOnly: false,
         wslDistro: null,
+        windows: [],
       } satisfies DesktopAppSettings.DesktopSettings,
     );
   });
@@ -165,6 +182,7 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
 
         const exposure = yield* settings.setServerExposureMode("local-only");
@@ -273,6 +291,10 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          // Legacy document: the saved main window becomes the one restore record.
+          windows: [
+            { bounds: { x: 120, y: 80, width: 1280, height: 900 }, maximized: false, scope: null },
+          ],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
     ),
@@ -330,6 +352,7 @@ describe("DesktopSettings", () => {
             wslBackendEnabled: false,
             wslOnly: false,
             wslDistro: null,
+            windows: [],
           } satisfies DesktopAppSettings.DesktopSettings);
         }),
       ),
@@ -352,6 +375,13 @@ describe("DesktopSettings", () => {
           mainWindowBounds: { x: -1200, y: 40, width: 1440, height: 960 },
           mainWindowMaximized: true,
           serverExposureMode: "network-accessible",
+          windows: [
+            {
+              bounds: { x: -1200, y: 40, width: 1440, height: 960 },
+              maximized: true,
+              scope: null,
+            },
+          ],
         } satisfies typeof DesktopSettingsPatch.Type);
       }),
     ),
@@ -379,6 +409,7 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
@@ -408,6 +439,7 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
@@ -436,6 +468,7 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
     ),
@@ -527,6 +560,167 @@ describe("DesktopSettings", () => {
         const loaded = yield* settings.load;
         assert.equal(loaded.wslBackendEnabled, true);
         assert.equal(loaded.wslDistro, null);
+      }),
+    ),
+  );
+
+  it.effect("keeps a window record per window and mirrors the first one", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const mainBounds = { x: 0, y: 0, width: 1100, height: 780 };
+        const secondBounds = { x: 400, y: 120, width: 1280, height: 900 };
+
+        yield* settings.setWindowRecord(0, {
+          bounds: mainBounds,
+          maximized: false,
+          scope: "collection:one",
+        });
+        yield* settings.setWindowRecord(1, {
+          bounds: secondBounds,
+          maximized: true,
+          scope: "collection:two",
+        });
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: secondBounds, maximized: true, scope: "collection:two" },
+        ]);
+        // A downgraded build reads only the mirrored main window keys.
+        assert.deepEqual(loaded.mainWindowBounds, mainBounds);
+        assert.isFalse(loaded.mainWindowMaximized);
+        const persisted = yield* decodeDesktopSettingsPatch(
+          yield* fileSystem.readFileString(environment.desktopSettingsPath),
+        );
+        assert.deepEqual(persisted.mainWindowBounds, mainBounds);
+        assert.deepEqual(persisted.windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: secondBounds, maximized: true, scope: "collection:two" },
+        ]);
+
+        // A secondary window moving never touches the main window's record.
+        const moved = { x: 500, y: 200, width: 1280, height: 900 };
+        yield* settings.setWindowRecord(1, {
+          bounds: moved,
+          maximized: false,
+          scope: "collection:two",
+        });
+        assert.deepEqual((yield* settings.load).windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: moved, maximized: false, scope: "collection:two" },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("removes a closed window's record and re-indexes the rest", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const first = { x: 0, y: 0, width: 1100, height: 780 };
+        const second = { x: 40, y: 40, width: 1280, height: 900 };
+        yield* settings.setWindowRecord(0, { bounds: first, maximized: false, scope: null });
+        yield* settings.setWindowRecord(1, {
+          bounds: second,
+          maximized: false,
+          scope: "collection:two",
+        });
+
+        const removed = yield* settings.removeWindowRecord(0);
+        assert.isTrue(removed.changed);
+        assert.deepEqual(removed.settings.windows, [
+          { bounds: second, maximized: false, scope: "collection:two" },
+        ]);
+        assert.deepEqual(removed.settings.mainWindowBounds, second);
+        assert.isFalse((yield* settings.removeWindowRecord(4)).changed);
+
+        // With no windows left the last known main bounds survive for the next launch.
+        const emptied = yield* settings.removeWindowRecord(0);
+        assert.deepEqual(emptied.settings.windows, []);
+        assert.deepEqual(emptied.settings.mainWindowBounds, second);
+      }),
+    ),
+  );
+
+  it.effect("setMainWindowBounds still writes record 0 and keeps its scope", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setWindowRecord(0, {
+          bounds: { x: 0, y: 0, width: 1100, height: 780 },
+          maximized: false,
+          scope: "collection:one",
+        });
+
+        const bounds = { x: 20, y: 20, width: 1200, height: 800 };
+        const change = yield* settings.setMainWindowBounds(bounds, true);
+        assert.isTrue(change.changed);
+        assert.deepEqual(change.settings.windows, [
+          { bounds, maximized: true, scope: "collection:one" },
+        ]);
+        assert.isFalse((yield* settings.setMainWindowBounds(bounds, true)).changed);
+      }),
+    ),
+  );
+
+  it.effect("drops unusable persisted window entries", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.desktopSettingsPath,
+          `{
+            "mainWindowBounds": { "x": 10, "y": 10, "width": 1100, "height": 780 },
+            "windows": [
+              null,
+              7,
+              { "bounds": { "x": 10, "y": 10, "width": 1100, "height": 780 }, "scope": "collection:one" },
+              { "bounds": { "x": 1, "y": 2, "width": 10, "height": 10 }, "maximized": true, "scope": 5 }
+            ]
+          }\n`,
+        );
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, [
+          {
+            bounds: { x: 10, y: 10, width: 1100, height: 780 },
+            maximized: false,
+            scope: "collection:one",
+          },
+          // Unusable bounds still restore a window, just at the default size.
+          { bounds: null, maximized: false, scope: null },
+        ]);
+        assert.deepEqual(loaded.mainWindowBounds, { x: 10, y: 10, width: 1100, height: 780 });
+      }),
+    ),
+  );
+
+  it.effect("keeps the legacy main window bounds when the window list is empty", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.desktopSettingsPath,
+          `{
+            "mainWindowBounds": { "x": 10, "y": 10, "width": 1100, "height": 780 },
+            "mainWindowMaximized": true,
+            "windows": []
+          }\n`,
+        );
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, []);
+        assert.deepEqual(loaded.mainWindowBounds, { x: 10, y: 10, width: 1100, height: 780 });
+        assert.isTrue(loaded.mainWindowMaximized);
       }),
     ),
   );
