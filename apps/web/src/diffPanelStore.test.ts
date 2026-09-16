@@ -1,8 +1,13 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
+import {
+  foreignDiffPanelStateSync,
+  selectThreadDiffPanelSelection,
+  useDiffPanelStore,
+} from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
 
@@ -108,5 +113,42 @@ describe("diffPanelStore", () => {
       filePath: "src/app.ts",
       revealRequestId: 1,
     });
+  });
+});
+
+describe("diffPanelStore cross-window merging", () => {
+  it("adopts another window's threads while defending the one it edited", () => {
+    const refB = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-2"));
+    const refC = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-3"));
+    const keyOf = (ref: typeof THREAD_REF) => scopedThreadKey(ref);
+    useDiffPanelStore.setState({
+      byThreadKey: {
+        [keyOf(THREAD_REF)]: { kind: "branch", baseRef: null },
+        [keyOf(refC)]: { kind: "unstaged" },
+      },
+      branchBaseRefByThreadKey: {},
+    });
+    const handler = createForeignStateHandler(foreignDiffPanelStateSync);
+
+    // This window edits thread A, so it owns that key from here on.
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "unstaged");
+
+    handler(
+      JSON.stringify({
+        version: 1,
+        state: {
+          byThreadKey: {
+            [keyOf(THREAD_REF)]: { kind: "branch", baseRef: "main" },
+            [keyOf(refB)]: { kind: "unstaged" },
+          },
+          branchBaseRefByThreadKey: {},
+        },
+      }),
+    );
+
+    const { byThreadKey } = useDiffPanelStore.getState();
+    expect(byThreadKey[keyOf(THREAD_REF)]).toEqual({ kind: "unstaged" });
+    expect(byThreadKey[keyOf(refB)]).toEqual({ kind: "unstaged" });
+    expect(byThreadKey[keyOf(refC)]).toBeUndefined();
   });
 });

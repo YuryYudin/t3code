@@ -8,7 +8,9 @@ import {
 import { sanitizeProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { WINDOW_SCOPE_STORAGE_KEY } from "./windowScope";
 import {
+  applyInitialWindowScope,
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
@@ -24,8 +26,12 @@ import {
   setProjectExpanded,
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
+  useUiStateStore,
+  foreignUiStateSync,
+  mergeForeignUiState,
   type UiState,
 } from "./uiStateStore";
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -484,3 +490,163 @@ describe("uiStateStore persistence", () => {
     expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(true);
   });
 });
+
+describe("uiStateStore per-window scope", () => {
+  const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hydrates from this window's scope first, then the launch param", () => {
+    const persisted = makeUiState({
+      projectCollectionScope: { kind: "project", projectKey: "repository:acme/work" },
+      sidebarProjectScopeKey: "repository:acme/work",
+    });
+    const launch = { kind: "collection", collectionId } as const;
+
+    expect(
+      applyInitialWindowScope(persisted, { launch, session: { kind: "unfiled" } }),
+    ).toMatchObject({ projectCollectionScope: { kind: "unfiled" }, sidebarProjectScopeKey: null });
+    expect(applyInitialWindowScope(persisted, { launch, session: null })).toMatchObject({
+      projectCollectionScope: launch,
+      sidebarProjectScopeKey: null,
+    });
+    expect(
+      applyInitialWindowScope(persisted, { launch: null, session: { kind: "unfiled" } })
+        .projectCollectionScope,
+    ).toEqual({ kind: "unfiled" });
+    expect(applyInitialWindowScope(persisted, { launch: null, session: null })).toBe(persisted);
+  });
+
+  it("records a scope change in sessionStorage and tells the desktop shell", () => {
+    const sessionStorageStub = createLocalStorageStub();
+    const setWindowScope = vi.fn(async () => {});
+    vi.stubGlobal("window", {
+      localStorage: createLocalStorageStub(),
+      sessionStorage: sessionStorageStub,
+      desktopBridge: { setWindowScope },
+    });
+
+    useUiStateStore.getState().setProjectCollectionScope({ kind: "collection", collectionId });
+
+    expect(sessionStorageStub.getItem(WINDOW_SCOPE_STORAGE_KEY)).toBe(`collection:${collectionId}`);
+    expect(setWindowScope).toHaveBeenCalledWith(`collection:${collectionId}`);
+    expect(useUiStateStore.getState().projectCollectionScope).toEqual({
+      kind: "collection",
+      collectionId,
+    });
+  });
+
+  it("does not throw on a desktop build or browser without the window bridge", () => {
+    const sessionStorageStub = createLocalStorageStub();
+    vi.stubGlobal("window", {
+      localStorage: createLocalStorageStub(),
+      sessionStorage: sessionStorageStub,
+      desktopBridge: {},
+    });
+
+    expect(() =>
+      useUiStateStore.getState().setProjectCollectionScope({ kind: "unfiled" }),
+    ).not.toThrow();
+    expect(sessionStorageStub.getItem(WINDOW_SCOPE_STORAGE_KEY)).toBe("unfiled");
+    expect(useUiStateStore.getState().projectCollectionScope).toEqual({ kind: "unfiled" });
+  });
+});
+
+describe("uiStateStore cross-window merging", () => {
+  function foreignWrite(persisted: PersistedUiState): string {
+    return JSON.stringify(persisted);
+  }
+
+  it("takes shared preferences from another window and keeps this window's scope", () => {
+    const applied: UiState[] = [];
+    const local = makeUiState({
+      projectCollectionScope: { kind: "unfiled" },
+      sidebarProjectScopeKey: null,
+      projectExpandedById: { local: true },
+    });
+    const handler = createForeignStateHandler<UiState>({
+      ...foreignUiStateSync,
+      snapshot: () => local,
+      apply: (merged) => applied.push(merged),
+    });
+
+    handler(
+      foreignWrite({
+        projectExpandedById: { foreign: false },
+        projectOrder: ["foreign"],
+        pullRequestMergeMethod: "squash",
+        projectCollectionScope: { kind: "project", projectKey: "other-window" },
+        sidebarProjectScopeKey: "other-window",
+      }),
+    );
+
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.projectExpandedById).toEqual({ foreign: false });
+    expect(applied[0]?.projectOrder).toEqual(["foreign"]);
+    expect(applied[0]?.pullRequestMergeMethod).toBe("squash");
+    expect(applied[0]?.projectCollectionScope).toEqual({ kind: "unfiled" });
+    expect(applied[0]?.sidebarProjectScopeKey).toBeNull();
+  });
+
+  it("keeps the later visit timestamp for each thread", () => {
+    const local = makeUiState({
+      threadLastVisitedAtById: {
+        "thread-a": "2026-02-25T12:00:00.000Z",
+        "thread-b": "2026-02-25T13:00:00.000Z",
+      },
+    });
+
+    const merged = mergeForeignUiState(
+      local,
+      parsePersistedState({
+        threadLastVisitedAtById: {
+          "thread-a": "2026-02-25T14:00:00.000Z",
+          "thread-b": "2026-02-25T11:00:00.000Z",
+          "thread-c": "2026-02-25T10:00:00.000Z",
+        },
+      }),
+    );
+
+    expect(merged.threadLastVisitedAtById).toEqual({
+      "thread-a": "2026-02-25T14:00:00.000Z",
+      "thread-b": "2026-02-25T13:00:00.000Z",
+      "thread-c": "2026-02-25T10:00:00.000Z",
+    });
+  });
+
+  it("does not touch the store when the foreign write carries nothing new", () => {
+    const applied: UiState[] = [];
+    const local = makeUiState({
+      projectExpandedById: { shared: true },
+      projectOrder: ["shared"],
+      threadLastVisitedAtById: { "thread-a": "2026-02-25T12:00:00.000Z" },
+      projectCollectionScope: { kind: "unfiled" },
+    });
+    const handler = createForeignStateHandler<UiState>({
+      ...foreignUiStateSync,
+      snapshot: () => local,
+      apply: (merged) => applied.push(merged),
+    });
+
+    expect(mergeForeignUiState(local, parsePersistedState(persistedSnapshot(local)))).toBe(local);
+    handler(foreignWrite(persistedSnapshot(local)));
+
+    expect(applied).toEqual([]);
+  });
+});
+
+function persistedSnapshot(state: UiState): PersistedUiState {
+  return {
+    projectExpandedById: state.projectExpandedById,
+    projectOrder: state.projectOrder,
+    threadLastVisitedAtById: state.threadLastVisitedAtById,
+    defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
+    sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+    projectCollectionScope: state.projectCollectionScope,
+    threadChangedFilesExpansionVersion: 2,
+    threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
+    pullRequestMergeMethod: state.pullRequestMergeMethod,
+  };
+}
