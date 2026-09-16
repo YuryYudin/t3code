@@ -615,6 +615,16 @@ const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal):
   );
 };
 
+/**
+ * A preview guest may be hosted by any live application window, not only the
+ * one that currently owns the preview manager (multi-window).
+ */
+function isLiveAppWindowHost(host: Electron.WebContents | null | undefined): boolean {
+  if (!host || host.isDestroyed()) return false;
+  const window = BrowserWindow.fromWebContents(host);
+  return window !== null && !window.isDestroyed();
+}
+
 const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function* (
   artifactDirectory: string,
   pictureInPicturePreloadPath: string,
@@ -2144,7 +2154,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       !wc ||
       wc.isDestroyed() ||
       wc.getType() !== "webview" ||
-      (Option.isSome(mainWindow) && wc.hostWebContents !== mainWindow.value.webContents)
+      (Option.isSome(mainWindow) &&
+        wc.hostWebContents !== mainWindow.value.webContents &&
+        !isLiveAppWindowHost(wc.hostWebContents))
     ) {
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
     }

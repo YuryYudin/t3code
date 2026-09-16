@@ -4,10 +4,12 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import type * as Electron from "electron";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
+import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry.ts";
 import {
   checkSnapShotShortcut,
   requestSnapShotPermissions,
@@ -50,6 +52,7 @@ describe("window capture IPC", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          DesktopAppWindowRegistry.layer,
           Layer.succeed(ElectronWindow.ElectronWindow, {
             main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
           } as ElectronWindow.ElectronWindow["Service"]),
@@ -86,6 +89,7 @@ describe("window capture IPC", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          DesktopAppWindowRegistry.layer,
           Layer.succeed(ElectronWindow.ElectronWindow, {
             main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
           } as ElectronWindow.ElectronWindow["Service"]),
@@ -119,6 +123,7 @@ describe("window capture IPC", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          DesktopAppWindowRegistry.layer,
           Layer.succeed(ElectronWindow.ElectronWindow, {
             main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
           } as ElectronWindow.ElectronWindow["Service"]),
@@ -153,6 +158,7 @@ describe("window capture IPC", () => {
     let received: unknown;
     const webContents = { id: 7, getZoomFactor: () => 1.25 };
     const layer = Layer.mergeAll(
+      DesktopAppWindowRegistry.layer,
       Layer.succeed(
         ElectronWindow.ElectronWindow,
         ElectronWindow.ElectronWindow.of({
@@ -217,6 +223,7 @@ describe("window capture IPC", () => {
     let includeAccessibility: boolean | undefined;
     const webContents = { id: 7 };
     const layer = Layer.mergeAll(
+      DesktopAppWindowRegistry.layer,
       Layer.succeed(
         ElectronWindow.ElectronWindow,
         ElectronWindow.ElectronWindow.of({
@@ -260,6 +267,7 @@ describe("window capture IPC", () => {
         } as ElectronWindow.ElectronWindow["Service"]),
       ),
       Effect.provideService(DesktopSnapShot.DesktopSnapShot, null as never),
+      Effect.provide(DesktopAppWindowRegistry.layer),
     ),
   );
 
@@ -276,6 +284,7 @@ describe("window capture IPC", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          DesktopAppWindowRegistry.layer,
           Layer.succeed(ElectronWindow.ElectronWindow, {
             main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
           } as ElectronWindow.ElectronWindow["Service"]),
@@ -292,6 +301,7 @@ describe("window capture IPC", () => {
 
   it.effect("checks shortcut availability for a trusted renderer", () => {
     const layer = Layer.mergeAll(
+      DesktopAppWindowRegistry.layer,
       Layer.succeed(
         ElectronWindow.ElectronWindow,
         ElectronWindow.ElectronWindow.of({
@@ -317,6 +327,7 @@ describe("window capture IPC", () => {
   it.effect("suppresses the active shortcut for a trusted renderer", () => {
     let suppressed = false;
     const layer = Layer.mergeAll(
+      DesktopAppWindowRegistry.layer,
       Layer.succeed(
         ElectronWindow.ElectronWindow,
         ElectronWindow.ElectronWindow.of({
@@ -338,6 +349,50 @@ describe("window capture IPC", () => {
       yield* setSnapShotShortcutSuppressed.handler(true, { sender: { id: 7 } });
       assert.isTrue(suppressed);
     }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("trusts a registered peer window that is not the main window", () => {
+    const calls: string[] = [];
+    const peerWindow = {
+      id: 2,
+      isDestroyed: () => false,
+      on: () => peerWindow,
+      webContents: { id: 9, isDestroyed: () => false },
+    } as unknown as Electron.BrowserWindow;
+    return Effect.gen(function* () {
+      const request = { operation: "install" as const, chooseFile: false };
+      yield* previewSnapShotConfig.handler(request, { sender: { id: 9 } });
+      assert.deepEqual(calls, ["read"]);
+      const stranger = yield* Effect.exit(
+        previewSnapShotConfig.handler(request, { sender: { id: 10 } }),
+      );
+      assert(Exit.isFailure(stranger));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.effect(
+            DesktopAppWindowRegistry.DesktopAppWindowRegistry,
+            DesktopAppWindowRegistry.make.pipe(
+              Effect.tap((registry) => registry.register(peerWindow, null)),
+            ),
+          ),
+          Layer.succeed(ElectronWindow.ElectronWindow, {
+            main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
+          } as ElectronWindow.ElectronWindow["Service"]),
+          Layer.succeed(DesktopSnapShot.DesktopSnapShot, {
+            previewConfig: () =>
+              Effect.sync(() => {
+                calls.push("read");
+                return configPreview;
+              }),
+          } as unknown as DesktopSnapShot.DesktopSnapShot["Service"]),
+          Layer.succeed(
+            ElectronDialog.ElectronDialog,
+            {} as ElectronDialog.ElectronDialog["Service"],
+          ),
+        ),
+      ),
+    );
   });
 });
 

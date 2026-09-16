@@ -74,7 +74,10 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
 
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
+    create: () =>
+      Deferred.succeed(selectedAction, "new-window").pipe(Effect.as({} as Electron.BrowserWindow)),
     createMain: Effect.die("unexpected createMain"),
+    setWindowScope: () => Effect.die("unexpected setWindowScope"),
     ensureMain: Effect.die("unexpected ensureMain"),
     revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
     activate: Effect.void,
@@ -126,6 +129,39 @@ const configureMenu = (
   );
 
 describe("DesktopApplicationMenu", () => {
+  it.effect("opens an additional window from the File menu", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const newWindow = fileMenu.submenu.find((item) => item.label === "New Window");
+      assert.isDefined(newWindow);
+      assert.equal(newWindow.accelerator, "CmdOrCtrl+Alt+N");
+      if (typeof newWindow.click !== "function") {
+        throw new Error("Expected New Window menu item to have a click handler.");
+      }
+
+      // Closing a window must stay reachable on every platform, and only
+      // non-darwin keeps Quit in this menu.
+      assert.deepEqual(
+        fileMenu.submenu.flatMap((item) => (item.role === undefined ? [] : [item.role])),
+        ["close", "quit"],
+      );
+
+      newWindow.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      assert.equal(yield* Deferred.await(selectedAction), "new-window");
+    }),
+  );
+
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
