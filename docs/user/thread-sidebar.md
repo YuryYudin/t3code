@@ -44,6 +44,17 @@ The selected filter is device-local. For example, a Mac can reopen on **Work**
 while a phone reopens on **Personal** without either selection changing the
 other device.
 
+### One window per collection
+
+On desktop, each app window keeps its own collection filter, so you can keep a
+**Work** window on one desktop and a **Personal** window on another. Choose
+**File → New Window** (or **New window** from the command palette) to open
+another window with the current filter, or use the new-window action beside a
+collection in the project selector to open that collection directly. Windows
+reopen with their filters and positions the next time the app starts; a window
+you closed before quitting is not restored. Projects, threads, and settings are
+shared by every window.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model

@@ -2,7 +2,9 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environ
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 import {
+  foreignTerminalUiStateSync,
   migratePersistedTerminalUiStateStoreState,
   selectThreadTerminalUiState,
   useTerminalUiStateStore,
@@ -292,5 +294,63 @@ describe("terminalUiStateStore actions", () => {
     store.clearTerminalUiState(THREAD_REF);
 
     expect(useTerminalUiStateStore.getState()).toBe(before);
+  });
+});
+
+describe("terminalUiStateStore cross-window merging", () => {
+  const THIRD_THREAD_REF = scopeThreadRef("environment-c" as never, THREAD_ID);
+
+  function terminalUiState(overrides: { terminalOpen: boolean; terminalHeight: number }) {
+    return {
+      terminalIds: [DEFAULT_THREAD_TERMINAL_ID],
+      activeTerminalId: DEFAULT_THREAD_TERMINAL_ID,
+      terminalGroups: [],
+      activeTerminalGroupId: DEFAULT_THREAD_TERMINAL_ID,
+      ...overrides,
+    };
+  }
+
+  it("adopts another window's threads while defending the one it edited", () => {
+    useTerminalUiStateStore.setState({
+      terminalUiStateByThreadKey: {
+        [scopedThreadKey(THREAD_REF)]: terminalUiState({
+          terminalOpen: false,
+          terminalHeight: 200,
+        }),
+        [scopedThreadKey(THIRD_THREAD_REF)]: terminalUiState({
+          terminalOpen: true,
+          terminalHeight: 240,
+        }),
+      },
+      suppressedTerminalIdsByThreadKey: {},
+    });
+    const handler = createForeignStateHandler(foreignTerminalUiStateSync);
+
+    // This window opens the drawer for its thread, so it owns that key now.
+    useTerminalUiStateStore.getState().setTerminalOpen(THREAD_REF, true);
+
+    handler(
+      JSON.stringify({
+        version: 4,
+        state: {
+          terminalUiStateByThreadKey: {
+            [scopedThreadKey(THREAD_REF)]: terminalUiState({
+              terminalOpen: false,
+              terminalHeight: 400,
+            }),
+            [scopedThreadKey(OTHER_THREAD_REF)]: terminalUiState({
+              terminalOpen: true,
+              terminalHeight: 320,
+            }),
+          },
+        },
+      }),
+    );
+
+    const { terminalUiStateByThreadKey } = useTerminalUiStateStore.getState();
+    expect(terminalUiStateByThreadKey[scopedThreadKey(THREAD_REF)]?.terminalOpen).toBe(true);
+    expect(terminalUiStateByThreadKey[scopedThreadKey(THREAD_REF)]?.terminalHeight).toBe(200);
+    expect(terminalUiStateByThreadKey[scopedThreadKey(OTHER_THREAD_REF)]?.terminalHeight).toBe(320);
+    expect(terminalUiStateByThreadKey[scopedThreadKey(THIRD_THREAD_REF)]).toBeUndefined();
   });
 });
