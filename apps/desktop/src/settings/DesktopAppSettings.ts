@@ -24,9 +24,22 @@ import {
 import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts";
 import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
+/**
+ * One window to restore on the next launch, in launch order. Record 0 is the
+ * main window; `scope` is the opaque per-window collection scope the renderer
+ * reports, which the desktop never interprets.
+ */
+export interface DesktopWindowRecord {
+  readonly bounds: DesktopWindowBounds | null;
+  readonly maximized: boolean;
+  readonly scope: string | null;
+}
+
 export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
+  // Mirrors `windows[0]` so a build without multi-window support still restores
+  // its main window from a document this build wrote.
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
@@ -41,6 +54,7 @@ export interface DesktopSettings {
   // value are migrated to `wslBackendEnabled: true` on load.
   readonly wslBackendEnabled: boolean;
   readonly wslDistro: string | null;
+  readonly windows: readonly DesktopWindowRecord[];
   // When true (and wslBackendEnabled is also true) the desktop runs only
   // the WSL backend as the primary, and the Windows-side Node backend is
   // not started. Designed for users who develop entirely inside WSL and
@@ -85,7 +99,16 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   updateChannelConfiguredByUser: false,
   wslBackendEnabled: false,
   wslDistro: null,
+  windows: [],
   wslOnly: false,
+};
+
+/** Guards against a corrupted document opening an unbounded number of windows. */
+const MAX_PERSISTED_WINDOWS = 16;
+const EMPTY_WINDOW_RECORD: DesktopWindowRecord = {
+  bounds: null,
+  maximized: false,
+  scope: null,
 };
 
 const DesktopWindowBoundsDocument = Schema.Struct({
@@ -111,6 +134,9 @@ const DesktopSettingsDocument = Schema.Struct({
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
   wslMode: Schema.optionalKey(Schema.Literals(["local", "wsl"])),
   wslDistro: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  // Kept lenient on purpose: a malformed window list must cost the user their
+  // window layout, not every other desktop setting in the document.
+  windows: Schema.optionalKey(Schema.Unknown),
   wslOnly: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -162,6 +188,18 @@ export class DesktopAppSettings extends Context.Service<
       bounds: DesktopWindowBounds,
       isMaximized: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    /**
+     * Writes one window's restore record, extending the list with empty records
+     * when a later window is persisted before an earlier one.
+     */
+    readonly setWindowRecord: (
+      index: number,
+      record: DesktopWindowRecord,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    /** Drops a closed window's record and re-indexes the ones behind it. */
+    readonly removeWindowRecord: (
+      index: number,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setServerExposureMode: (
       mode: DesktopServerExposureMode,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -210,6 +248,38 @@ export function normalizeMainWindowBounds(value: unknown): DesktopWindowBounds |
   return Option.getOrNull(decodeDesktopWindowBounds(value));
 }
 
+/**
+ * Documents written before multi-window support only knew the main window, so
+ * their saved bounds become the single restore record. Entries that are not
+ * objects are dropped; an entry with unusable bounds keeps its place and opens
+ * with default bounds, because the window itself is still worth restoring.
+ */
+function normalizeWindowRecords(
+  value: unknown,
+  legacy: DesktopWindowRecord,
+): readonly DesktopWindowRecord[] {
+  if (!Array.isArray(value)) {
+    return legacy.bounds === null ? [] : [legacy];
+  }
+  const records: DesktopWindowRecord[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const candidate = entry as {
+      readonly bounds?: unknown;
+      readonly maximized?: unknown;
+      readonly scope?: unknown;
+    };
+    const bounds = normalizeMainWindowBounds(candidate.bounds);
+    records.push({
+      bounds,
+      maximized: bounds !== null && candidate.maximized === true,
+      scope: typeof candidate.scope === "string" ? candidate.scope : null,
+    });
+    if (records.length === MAX_PERSISTED_WINDOWS) break;
+  }
+  return records;
+}
+
 function normalizeDesktopSettingsDocument(
   parsed: DesktopSettingsDocument,
   appVersion: string,
@@ -229,11 +299,20 @@ function normalizeDesktopSettingsDocument(
     parsed.wslBackendEnabled === true ||
     (parsed.wslBackendEnabled === undefined && parsed.wslMode === "wsl");
 
+  const legacyWindowRecord: DesktopWindowRecord = {
+    bounds: mainWindowBounds,
+    maximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
+    scope: null,
+  };
+  const windows = normalizeWindowRecords(parsed.windows, legacyWindowRecord);
+  const firstWindow = windows[0] ?? legacyWindowRecord;
+
   return {
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
-    mainWindowBounds,
-    mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
+    mainWindowBounds: firstWindow.bounds,
+    mainWindowMaximized: firstWindow.maximized,
+    windows,
     serverExposureMode:
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
@@ -291,6 +370,9 @@ function toDesktopSettingsDocument(
   if (settings.wslOnly !== defaults.wslOnly) {
     document.wslOnly = settings.wslOnly;
   }
+  if (settings.windows.length > 0) {
+    document.windows = settings.windows;
+  }
 
   return document;
 }
@@ -307,20 +389,57 @@ function setServerExposureMode(
       };
 }
 
+function windowRecordsEqual(left: DesktopWindowRecord, right: DesktopWindowRecord): boolean {
+  if (left.maximized !== right.maximized || left.scope !== right.scope) return false;
+  if (left.bounds === null || right.bounds === null) return left.bounds === right.bounds;
+  return desktopWindowBoundsEquivalence(left.bounds, right.bounds);
+}
+
+// Keeps `mainWindowBounds`/`mainWindowMaximized` mirroring record 0. With no
+// records left (every window closed before quit) the last known main window
+// bounds are kept, so the next launch still opens where the user left it.
+function withWindowRecords(
+  settings: DesktopSettings,
+  windows: readonly DesktopWindowRecord[],
+): DesktopSettings {
+  const first = windows[0];
+  return {
+    ...settings,
+    windows,
+    mainWindowBounds: first?.bounds ?? settings.mainWindowBounds,
+    mainWindowMaximized: first?.bounds == null ? settings.mainWindowMaximized : first.maximized,
+  };
+}
+
+function setWindowRecord(
+  settings: DesktopSettings,
+  index: number,
+  record: DesktopWindowRecord,
+): DesktopSettings {
+  if (!Number.isInteger(index) || index < 0 || index >= MAX_PERSISTED_WINDOWS) return settings;
+  const existing = settings.windows[index];
+  if (existing !== undefined && windowRecordsEqual(existing, record)) return settings;
+  const windows = [...settings.windows];
+  while (windows.length < index) windows.push(EMPTY_WINDOW_RECORD);
+  windows[index] = record;
+  return withWindowRecords(settings, windows);
+}
+
+function removeWindowRecord(settings: DesktopSettings, index: number): DesktopSettings {
+  if (!Number.isInteger(index) || index < 0 || index >= settings.windows.length) return settings;
+  return withWindowRecords(settings, settings.windows.toSpliced(index, 1));
+}
+
 function setMainWindowBounds(
   settings: DesktopSettings,
   bounds: DesktopWindowBounds,
   isMaximized: boolean,
 ): DesktopSettings {
-  return settings.mainWindowBounds !== null &&
-    desktopWindowBoundsEquivalence(settings.mainWindowBounds, bounds) &&
-    settings.mainWindowMaximized === isMaximized
-    ? settings
-    : {
-        ...settings,
-        mainWindowBounds: bounds,
-        mainWindowMaximized: isMaximized,
-      };
+  return setWindowRecord(settings, 0, {
+    bounds,
+    maximized: isMaximized,
+    scope: settings.windows[0]?.scope ?? null,
+  });
 }
 
 function setTailscaleServe(
@@ -536,6 +655,16 @@ export const make = Effect.gen(function* () {
           },
         }),
       ),
+    setWindowRecord: (index, record) =>
+      persist((settings) => setWindowRecord(settings, index, record)).pipe(
+        Effect.withSpan("desktop.settings.setWindowRecord", {
+          attributes: { index, maximized: record.maximized, hasScope: record.scope !== null },
+        }),
+      ),
+    removeWindowRecord: (index) =>
+      persist((settings) => removeWindowRecord(settings, index)).pipe(
+        Effect.withSpan("desktop.settings.removeWindowRecord", { attributes: { index } }),
+      ),
     setServerExposureMode: (mode) =>
       persist((settings) => setServerExposureMode(settings, mode)).pipe(
         Effect.withSpan("desktop.settings.setServerExposureMode", { attributes: { mode } }),
@@ -599,6 +728,9 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         load: SynchronizedRef.get(settingsRef),
         setMainWindowBounds: (bounds, isMaximized) =>
           update((settings) => setMainWindowBounds(settings, bounds, isMaximized)),
+        setWindowRecord: (index, record) =>
+          update((settings) => setWindowRecord(settings, index, record)),
+        removeWindowRecord: (index) => update((settings) => removeWindowRecord(settings, index)),
         setServerExposureMode: (mode) =>
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),
