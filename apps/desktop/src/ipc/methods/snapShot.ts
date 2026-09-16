@@ -18,6 +18,7 @@ import type * as Electron from "electron";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
+import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -31,17 +32,19 @@ class SnapShotIpcUnauthorizedSenderError extends Schema.TaggedError<SnapShotIpcU
   }
 }
 
+// Any registered app window may drive snapshots (multi-window); the main
+// window is checked as well so the check holds before the registry knows it.
 const ensureTrustedSnapShotSender = Effect.fn("desktop.ipc.snapShot.ensureTrustedSender")(
   function* (event: DesktopIpc.DesktopIpcInvokeEvent | undefined) {
+    if (event === undefined) return yield* new SnapShotIpcUnauthorizedSenderError();
     const main = yield* (yield* ElectronWindow.ElectronWindow).main;
-    if (
-      event === undefined ||
-      Option.isNone(main) ||
-      main.value.webContents.id !== event.sender.id
-    ) {
-      return yield* new SnapShotIpcUnauthorizedSenderError();
+    if (Option.isSome(main) && main.value.webContents.id === event.sender.id) {
+      return main.value;
     }
-    return main.value;
+    const appWindows = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
+    const sender = yield* appWindows.findBySender(event.sender.id);
+    if (Option.isNone(sender)) return yield* new SnapShotIpcUnauthorizedSenderError();
+    return sender.value.window;
   },
 );
 

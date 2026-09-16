@@ -13,6 +13,7 @@ import {
   GripVerticalIcon,
   MoreHorizontalIcon,
   SettingsIcon,
+  SquareArrowOutUpRightIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 
@@ -48,18 +49,14 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { SidebarMenuButton } from "./ui/sidebar";
+import {
+  canOpenWindowForScope,
+  encodeProjectCollectionScope,
+  openWindowForScope,
+} from "~/windowScope";
 
 export function sidebarProjectCollectionScopeValue(scope: ProjectCollectionScope): string {
-  switch (scope.kind) {
-    case "all":
-      return "all";
-    case "unfiled":
-      return "unfiled";
-    case "collection":
-      return `collection:${scope.collectionId}`;
-    case "project":
-      return `project:${scope.projectKey}`;
-  }
+  return encodeProjectCollectionScope(scope);
 }
 
 export function SidebarProjectCollectionDragHandle(props: {
@@ -193,6 +190,8 @@ export function SidebarProjectCollections<
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [feedback, setFeedback] = useState("");
   const filter = useComboboxFilter();
+  // Desktop-only: older shells (and the browser) have no window management.
+  const canOpenNewWindow = canOpenWindowForScope();
   const items = useMemo<ReadonlyArray<ScopeItem<TProject>>>(
     () => [
       ...model.scopeOptions.map((option) => ({
@@ -374,6 +373,21 @@ export function SidebarProjectCollections<
                       >
                         <ScopeIcon item={item} />
                         <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                        {canOpenNewWindow ? (
+                          <Button
+                            size="icon-xs"
+                            variant="ghost-muted"
+                            aria-label={`Open ${item.label} in a new window`}
+                            className="size-6 p-0"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openWindowForScope(item.scope);
+                              onScopePickerOpenChange(false);
+                            }}
+                          >
+                            <SquareArrowOutUpRightIcon aria-hidden className="size-3.5" />
+                          </Button>
+                        ) : null}
                         <span className="text-xs tabular-nums text-muted-foreground">
                           {item.count}
                         </span>

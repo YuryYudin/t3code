@@ -77,8 +77,10 @@ import {
   composerFileNeedsReattach,
   partializeComposerDraftStoreState,
   useComposerDraftStore,
+  foreignComposerDraftStateSync,
   DraftId,
 } from "./composerDraftStore";
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference } from "./lib/composerContextRecords";
@@ -3401,5 +3403,41 @@ describe("composerDraftStore attachment references", () => {
     expect(merged.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.prompt).toBe(
       prompt,
     );
+  });
+});
+
+describe("composerDraftStore cross-window merging", () => {
+  it("adopts another window's drafts while defending the one it is typing in", () => {
+    resetComposerDraftStore();
+    const ownThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-own"));
+    const foreignThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-foreign"));
+    const droppedThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-dropped"));
+    const store = () => useComposerDraftStore.getState();
+    store().setPrompt(ownThreadRef, "hydrated");
+    store().setPrompt(droppedThreadRef, "sent from the other window");
+
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+
+    // This window keeps typing, so it owns its draft from here on.
+    store().setPrompt(ownThreadRef, "still typing here");
+
+    handler(
+      JSON.stringify({
+        version: 9,
+        state: {
+          draftsByThreadKey: {
+            [scopedThreadKey(ownThreadRef)]: { prompt: "stale copy", attachments: [] },
+            [scopedThreadKey(foreignThreadRef)]: { prompt: "written next door", attachments: [] },
+          },
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        },
+      }),
+    );
+
+    const { draftsByThreadKey } = useComposerDraftStore.getState();
+    expect(draftsByThreadKey[scopedThreadKey(ownThreadRef)]?.prompt).toBe("still typing here");
+    expect(draftsByThreadKey[scopedThreadKey(foreignThreadRef)]?.prompt).toBe("written next door");
+    expect(draftsByThreadKey[scopedThreadKey(droppedThreadRef)]).toBeUndefined();
   });
 });
