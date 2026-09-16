@@ -3,12 +3,22 @@ import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import {
+  createForeignStateHandler,
+  mergeForeignEntries,
+  ownedEntryKeys,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
 import { resolveStorage } from "./lib/storage";
 
 export type DiffPanelSelection =
   | { kind: "branch"; baseRef: string | null }
   | { kind: "unstaged" }
   | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
+
+const DIFF_PANEL_STORAGE_KEY = "t3code:diff-panel-state:v1";
+const DIFF_PANEL_STORAGE_VERSION = 1;
 
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
 const DEFAULT_WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "unstaged" };
@@ -118,8 +128,8 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
         }),
     }),
     {
-      name: "t3code:diff-panel-state:v1",
-      version: 1,
+      name: DIFF_PANEL_STORAGE_KEY,
+      version: DIFF_PANEL_STORAGE_VERSION,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
@@ -142,3 +152,59 @@ export function selectThreadDiffPanelSelection(
     (hasWorkingTreeChanges ? DEFAULT_WORKING_TREE_SELECTION : DEFAULT_SELECTION)
   );
 }
+
+interface DiffPanelPersistedState {
+  byThreadKey: Record<string, DiffPanelSelection>;
+  branchBaseRefByThreadKey: Record<string, string | null>;
+}
+
+/** Throws on anything this build cannot use, which skips the foreign write. */
+function parseDiffPanelPersistedState(raw: string | null): DiffPanelPersistedState {
+  if (raw === null) return { byThreadKey: {}, branchBaseRefByThreadKey: {} };
+  const parsed = JSON.parse(raw) as {
+    version?: number;
+    state?: Partial<DiffPanelPersistedState>;
+  };
+  if (parsed.version !== DIFF_PANEL_STORAGE_VERSION) {
+    throw new Error("unsupported diff panel state version");
+  }
+  return {
+    byThreadKey: Object.fromEntries(
+      Object.entries(parsed.state?.byThreadKey ?? {}).filter(
+        ([, selection]) => typeof selection === "object" && selection !== null,
+      ),
+    ),
+    branchBaseRefByThreadKey: Object.fromEntries(
+      Object.entries(parsed.state?.branchBaseRefByThreadKey ?? {}).filter(
+        ([, baseRef]) => baseRef === null || typeof baseRef === "string",
+      ),
+    ),
+  };
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * fold a foreign window's write into this window without a DOM.
+ */
+export const foreignDiffPanelStateSync: ForeignStateSync<DiffPanelPersistedState> = {
+  snapshot: () => {
+    const { byThreadKey, branchBaseRefByThreadKey } = useDiffPanelStore.getState();
+    return { byThreadKey, branchBaseRefByThreadKey };
+  },
+  parse: parseDiffPanelPersistedState,
+  merge: ({ local, incoming, baseline }) => ({
+    byThreadKey: mergeForeignEntries(
+      local.byThreadKey,
+      incoming.byThreadKey,
+      ownedEntryKeys(local.byThreadKey, baseline.byThreadKey),
+    ),
+    branchBaseRefByThreadKey: mergeForeignEntries(
+      local.branchBaseRefByThreadKey,
+      incoming.branchBaseRefByThreadKey,
+      ownedEntryKeys(local.branchBaseRefByThreadKey, baseline.branchBaseRefByThreadKey),
+    ),
+  }),
+  apply: (merged) => useDiffPanelStore.setState(merged),
+};
+
+subscribeStorageKey(DIFF_PANEL_STORAGE_KEY, createForeignStateHandler(foreignDiffPanelStateSync));

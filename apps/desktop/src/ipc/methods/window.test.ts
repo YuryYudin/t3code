@@ -15,18 +15,54 @@ vi.mock("electron", () => ({
   BrowserWindow: { fromWebContents: ownerWindow },
 }));
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import type { DesktopSettings } from "../../settings/DesktopAppSettings.ts";
+import * as DesktopConfig from "../../app/DesktopConfig.ts";
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
+import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import {
   getLocalEnvironmentBootstraps,
   getWindowFullscreenState,
+  openWindow,
   pasteAsText,
+  pickFolder,
   pickProjectFavicon,
+  setWindowScope,
 } from "./window.ts";
+
+// Fake app windows, keyed the way Electron keys them: a window id plus the
+// webContents id its renderer sends IPC from.
+function makeAppWindow(id: number, options: { readonly fullscreen?: boolean } = {}) {
+  const window = {
+    id,
+    webContents: { id: id + 100, isDestroyed: () => false },
+    isDestroyed: () => false,
+    isFocused: () => false,
+    isFullScreen: () => options.fullscreen ?? false,
+    on: () => window,
+  };
+  return window as unknown as Electron.BrowserWindow & { readonly id: number };
+}
+
+// Registers the given windows in creation order, so the last one is the
+// "most recently focused" fallback while nothing is focused.
+const appWindowRegistryLayer = (windows: readonly Electron.BrowserWindow[]) =>
+  Layer.effect(
+    DesktopAppWindowRegistry.DesktopAppWindowRegistry,
+    Effect.gen(function* () {
+      const registry = yield* DesktopAppWindowRegistry.make;
+      for (const window of windows) yield* registry.register(window, null);
+      return registry;
+    }),
+  );
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",
@@ -150,18 +186,26 @@ describe("getLocalEnvironmentBootstraps", () => {
 });
 
 describe("getWindowFullscreenState", () => {
-  it.effect("reads the current native window state", () => {
-    const window = { isFullScreen: () => true } as Electron.BrowserWindow;
+  it.effect("reads the state of the window that asked, not the most recent one", () => {
+    const fullscreen = makeAppWindow(1, { fullscreen: true });
+    const windowed = makeAppWindow(2);
 
     return Effect.gen(function* () {
-      assert.isTrue(yield* getWindowFullscreenState.handler());
-    }).pipe(
-      Effect.provide(
-        Layer.mock(ElectronWindow.ElectronWindow)({
-          currentMainOrFirst: Effect.succeed(Option.some(window)),
+      assert.isTrue(
+        yield* getWindowFullscreenState.handler({
+          sender: { id: fullscreen.webContents.id },
+          returnValue: undefined,
         }),
-      ),
-    );
+      );
+      assert.isFalse(
+        yield* getWindowFullscreenState.handler({
+          sender: { id: windowed.webContents.id },
+          returnValue: undefined,
+        }),
+      );
+      // No event (or an unknown sender): fall back to the most recent window.
+      assert.isFalse(yield* getWindowFullscreenState.handler());
+    }).pipe(Effect.provide(appWindowRegistryLayer([fullscreen, windowed])));
   });
 });
 
@@ -213,9 +257,7 @@ describe("pickProjectFavicon", () => {
   const pickerLayer = (pickFiles: () => Effect.Effect<Array<string>>, settings?: DesktopSettings) =>
     Layer.mergeAll(
       Layer.mock(ElectronDialog.ElectronDialog)({ pickFiles }),
-      Layer.mock(ElectronWindow.ElectronWindow)({
-        focusedMainOrFirst: Effect.succeed(Option.none()),
-      }),
+      appWindowRegistryLayer([]),
       DesktopAppSettings.layerTest(settings),
     );
 
@@ -261,4 +303,107 @@ describe("pickProjectFavicon", () => {
       assert.strictEqual(pickFiles.mock.calls.length, 0);
     }),
   );
+});
+
+const environmentInput = {
+  dirname: "/repo/apps/desktop/dist-electron",
+  homeDirectory: "/Users/alice",
+  platform: "darwin",
+  processArch: "arm64",
+  appVersion: "1.2.3",
+  appPath: "/repo",
+  isPackaged: false,
+  resourcesPath: "/repo/resources",
+  runningUnderArm64Translation: false,
+} satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
+
+describe("pickFolder", () => {
+  it.effect("attaches the folder dialog to the window that asked", () => {
+    const first = makeAppWindow(11);
+    const second = makeAppWindow(12);
+    const owners: Array<Option.Option<Electron.BrowserWindow>> = [];
+
+    return Effect.gen(function* () {
+      const result = yield* pickFolder.handler(undefined, {
+        sender: { id: first.webContents.id },
+      });
+
+      assert.strictEqual(result, "/projects/app");
+      assert.deepEqual(owners, [Option.some(first)]);
+
+      // An unknown sender still attaches the dialog to a visible window.
+      yield* pickFolder.handler(undefined, { sender: { id: 9_999 } });
+      assert.deepEqual(owners[1], Option.some(second));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.mock(ElectronDialog.ElectronDialog)({
+            pickFolder: (input) => {
+              owners.push(input.owner);
+              return Effect.succeed(Option.some("/projects/app"));
+            },
+          }),
+          appWindowRegistryLayer([first, second]),
+          DesktopAppSettings.layerTest(),
+          DesktopWslEnvironment.layerTest(),
+          DesktopEnvironment.layer(environmentInput).pipe(
+            Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+          ),
+        ),
+      ),
+    );
+  });
+});
+
+describe("openWindow", () => {
+  it.effect("opens a window for the requested scope and rejects an invalid one", () =>
+    Effect.gen(function* () {
+      const created: unknown[] = [];
+      const layer = Layer.mock(DesktopWindow.DesktopWindow)({
+        create: (input) =>
+          Effect.sync(() => created.push(input)).pipe(Effect.as({} as Electron.BrowserWindow)),
+      });
+
+      yield* openWindow.handler({ scope: "collection:abc" }).pipe(Effect.provide(layer));
+      yield* openWindow.handler({}).pipe(Effect.provide(layer));
+      assert.deepEqual(created, [{ scope: "collection:abc" }, {}]);
+
+      const rejected = yield* Effect.exit(
+        openWindow.handler({ scope: " untrimmed " }).pipe(Effect.provide(layer)),
+      );
+      assert.equal(rejected._tag, "Failure");
+      assert.equal(created.length, 2);
+    }),
+  );
+});
+
+describe("setWindowScope", () => {
+  it.effect("routes the scope to the window that reported it", () => {
+    const first = makeAppWindow(21);
+    const second = makeAppWindow(22);
+    const applied: { readonly windowId: number; readonly scope: string | null }[] = [];
+
+    return Effect.gen(function* () {
+      const registry = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
+      yield* setWindowScope.handler("collection:one", { sender: { id: first.webContents.id } });
+      assert.deepEqual(applied, [{ windowId: first.id, scope: "collection:one" }]);
+      assert.isNull(Option.getOrThrow(yield* registry.findBySender(second.webContents.id)).scope);
+
+      // A renderer that is not an app window cannot move another window's scope.
+      yield* setWindowScope.handler("collection:two", { sender: { id: 9_999 } });
+      assert.deepEqual(applied, [{ windowId: first.id, scope: "collection:one" }]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          appWindowRegistryLayer([first, second]),
+          Layer.mock(DesktopWindow.DesktopWindow)({
+            setWindowScope: (window, scope) =>
+              Effect.sync(() => {
+                applied.push({ windowId: window.id, scope });
+              }),
+          }),
+        ),
+      ),
+    );
+  });
 });

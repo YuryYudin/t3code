@@ -274,6 +274,8 @@ export const make = Effect.gen(function* () {
         clearRegisteredRenderer();
         return;
       }
+      // Activation (deep links, second-instance handoff) targets the primary
+      // window, not whichever additional window happens to be focused.
       const main = yield* electronWindow.main;
       if (Option.isNone(main)) return;
       const webContents = main.value.webContents;

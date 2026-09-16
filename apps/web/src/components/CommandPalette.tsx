@@ -51,6 +51,7 @@ import {
   MessageSquareIcon,
   PaletteIcon,
   SettingsIcon,
+  SquareArrowOutUpRightIcon,
   SquarePenIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -133,6 +134,7 @@ import {
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
+  buildNewWindowActionItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
   type CommandPaletteSubmenuItem,
@@ -700,6 +702,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectCollectionScope = useUiStateStore((store) => store.projectCollectionScope);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
@@ -1818,6 +1821,14 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
+
+  const newWindowActionItem = buildNewWindowActionItem({
+    scope: projectCollectionScope,
+    icon: <SquareArrowOutUpRightIcon className={ITEM_ICON_CLASS} />,
+  });
+  if (newWindowActionItem !== null) {
+    actionItems.push(newWindowActionItem);
+  }
 
   actionItems.push({
     kind: "action",

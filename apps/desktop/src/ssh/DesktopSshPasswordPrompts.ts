@@ -284,6 +284,8 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
   const request: DesktopSshPasswordPrompts["Service"]["request"] = Effect.fn(
     "desktop.sshPasswordPrompts.request",
   )(function* (input) {
+    // Deliberately the primary window, not the calling one: an SSH password
+    // prompt belongs to the app, and modal prompts stay on one window.
     const window = yield* electronWindow.main;
     if (Option.isNone(window)) {
       return yield* new DesktopSshPromptWindowUnavailableError({

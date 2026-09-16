@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectCollectionId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildNewWindowActionItem,
   buildCommandPaletteProjectMetadata,
   buildProjectActionItems,
   buildThreadActionItems,
@@ -737,4 +744,26 @@ it.each([
   expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
     "Implementation",
   ]);
+});
+
+describe("new window command", () => {
+  it("is offered only when the desktop shell can open windows", () => {
+    expect(buildNewWindowActionItem({ scope: { kind: "all" }, icon: null })).toBeNull();
+    expect(buildNewWindowActionItem({ scope: { kind: "all" }, icon: null, bridge: {} })).toBeNull();
+  });
+
+  it("opens a window pinned to the scope this window is showing", async () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const openWindow = vi.fn(async () => {});
+
+    const item = buildNewWindowActionItem({
+      scope: { kind: "collection", collectionId },
+      icon: null,
+      bridge: { openWindow },
+    });
+
+    expect(item?.value).toBe("action:new-window");
+    await item?.run();
+    expect(openWindow).toHaveBeenCalledWith({ scope: `collection:${collectionId}` });
+  });
 });

@@ -70,6 +70,13 @@ import {
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
+import {
+  createForeignStateHandler,
+  mergeForeignEntries,
+  ownedEntryKeys,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -4288,3 +4295,107 @@ export function finalizePromotedDraftThreadByRef(threadRef: ScopedThreadRef): vo
   }
   clearBackgroundDraftSubmissionByRef(threadRef);
 }
+
+interface ComposerForeignState {
+  draftsByThreadKey: Record<string, ComposerThreadDraftState>;
+  draftThreadsByThreadKey: Record<string, DraftThreadState>;
+  logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
+}
+
+function keysMissingFrom(local: Record<string, unknown>, persisted: Record<string, unknown>) {
+  return Object.keys(local).filter((key) => persisted[key] === undefined);
+}
+
+/**
+ * Owned keys plus the keys this window deliberately keeps out of storage
+ * (empty draft sessions), which a foreign snapshot must not delete.
+ */
+function ownedComposerKeys(
+  local: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  persisted: Record<string, unknown>,
+): ReadonlySet<string> {
+  const owned = new Set(ownedEntryKeys(local, baseline));
+  for (const key of keysMissingFrom(local, persisted)) owned.add(key);
+  return owned;
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * fold a foreign window's write into this window without a DOM.
+ * Only the thread-keyed maps merge; the sticky provider/model preferences stay
+ * as this window has them until it reloads.
+ */
+export const foreignComposerDraftStateSync: ForeignStateSync<ComposerForeignState> = {
+  snapshot: () => {
+    const {
+      draftsByThreadKey,
+      draftThreadsByThreadKey,
+      logicalProjectDraftThreadKeyByLogicalProjectKey,
+    } = useComposerDraftStore.getState();
+    return {
+      draftsByThreadKey,
+      draftThreadsByThreadKey,
+      logicalProjectDraftThreadKeyByLogicalProjectKey,
+    };
+  },
+  parse: (raw) => {
+    const normalized = migratePersistedComposerDraftStoreState(
+      raw === null ? null : (JSON.parse(raw) as { state?: unknown }).state,
+    );
+    return {
+      draftsByThreadKey: Object.fromEntries(
+        Object.entries(normalized.draftsByThreadKey).map(([threadKey, draft]) => [
+          threadKey,
+          toHydratedThreadDraft(draft),
+        ]),
+      ),
+      draftThreadsByThreadKey: Object.fromEntries(
+        Object.entries(normalized.draftThreadsByThreadKey).map(([threadKey, draftThread]) => [
+          threadKey,
+          toHydratedDraftThreadState(draftThread),
+        ]),
+      ) as Record<string, DraftThreadState>,
+      logicalProjectDraftThreadKeyByLogicalProjectKey:
+        normalized.logicalProjectDraftThreadKeyByLogicalProjectKey,
+    };
+  },
+  merge: ({ local, incoming, baseline }) => {
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    return {
+      draftsByThreadKey: mergeForeignEntries(
+        local.draftsByThreadKey,
+        incoming.draftsByThreadKey,
+        ownedComposerKeys(
+          local.draftsByThreadKey,
+          baseline.draftsByThreadKey,
+          persisted.draftsByThreadKey,
+        ),
+      ),
+      draftThreadsByThreadKey: mergeForeignEntries(
+        local.draftThreadsByThreadKey,
+        incoming.draftThreadsByThreadKey,
+        ownedComposerKeys(
+          local.draftThreadsByThreadKey,
+          baseline.draftThreadsByThreadKey,
+          persisted.draftThreadsByThreadKey,
+        ),
+      ),
+      logicalProjectDraftThreadKeyByLogicalProjectKey: mergeForeignEntries(
+        local.logicalProjectDraftThreadKeyByLogicalProjectKey,
+        incoming.logicalProjectDraftThreadKeyByLogicalProjectKey,
+        ownedComposerKeys(
+          local.logicalProjectDraftThreadKeyByLogicalProjectKey,
+          baseline.logicalProjectDraftThreadKeyByLogicalProjectKey,
+          persisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
+        ),
+      ),
+    };
+  },
+  apply: (merged) => useComposerDraftStore.setState(merged),
+};
+
+subscribeStorageKey(
+  COMPOSER_DRAFT_STORAGE_KEY,
+  createForeignStateHandler(foreignComposerDraftStateSync),
+);

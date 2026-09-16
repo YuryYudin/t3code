@@ -176,6 +176,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ...(position === undefined ? {} : { position }),
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  openWindow: (input) => ipcRenderer.invoke(IpcChannels.OPEN_WINDOW_CHANNEL, input),
+  setWindowScope: (scope) => ipcRenderer.invoke(IpcChannels.SET_WINDOW_SCOPE_CHANNEL, scope),
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

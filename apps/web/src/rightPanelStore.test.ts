@@ -1,8 +1,10 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 import {
+  foreignRightPanelStateSync,
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
@@ -916,5 +918,45 @@ describe("rightPanelStore", () => {
         (surface) => surface.id,
       ),
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
+  });
+});
+
+describe("rightPanelStore cross-window merging", () => {
+  it("adopts another window's threads while defending the one it edited", () => {
+    const refC = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-C"));
+    useRightPanelStore.setState({
+      byThreadKey: {
+        [scopedThreadKey(refA)]: { isOpen: false, surfaces: [], activeSurfaceId: null },
+        [scopedThreadKey(refC)]: { isOpen: true, surfaces: [], activeSurfaceId: null },
+      },
+      userActionRevisionByThreadKey: {},
+    });
+    const handler = createForeignStateHandler(foreignRightPanelStateSync);
+
+    // This window opens thread A's panel, so it owns that key from here on.
+    useRightPanelStore.getState().show(refA);
+
+    handler(
+      JSON.stringify({
+        version: 13,
+        state: {
+          byThreadKey: {
+            [scopedThreadKey(refA)]: { isOpen: false, surfaces: [], activeSurfaceId: null },
+            [scopedThreadKey(refB)]: {
+              isOpen: true,
+              surfaces: [{ id: "files", kind: "files" }],
+              activeSurfaceId: "files",
+            },
+          },
+        },
+      }),
+    );
+
+    const { byThreadKey } = useRightPanelStore.getState();
+    expect(byThreadKey[scopedThreadKey(refA)]?.isOpen).toBe(true);
+    expect(byThreadKey[scopedThreadKey(refB)]?.surfaces.map((surface) => surface.kind)).toEqual([
+      "files",
+    ]);
+    expect(byThreadKey[scopedThreadKey(refC)]).toBeUndefined();
   });
 });

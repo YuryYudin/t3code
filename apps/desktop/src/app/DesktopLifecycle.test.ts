@@ -84,7 +84,9 @@ function makeDesktopWindowLayer(
   } = {},
 ) {
   return Layer.succeed(DesktopWindow.DesktopWindow, {
+    create: () => Effect.die("unexpected window creation"),
     createMain: Effect.die("unexpected window creation"),
+    setWindowScope: () => Effect.die("unexpected window scope update"),
     ensureMain: Effect.die("unexpected window creation"),
     revealOrCreateMain: Effect.die("unexpected window creation"),
     activate: input.activate ?? Effect.void,

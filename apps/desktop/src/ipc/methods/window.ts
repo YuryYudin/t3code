@@ -2,7 +2,9 @@ import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
+  DesktopOpenWindowInputSchema,
   DesktopThemeSchema,
+  DesktopWindowScopeSchema,
   EDITORS,
   EditorId,
   PickedThemeFileSchema,
@@ -39,6 +41,8 @@ import * as MacPermissions from "../../permissions/MacPermissions.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
+import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import {
   extractDistroFromUncPath,
   resolveWslPickFolderDefaultPath,
@@ -54,6 +58,24 @@ const ContextMenuInput = Schema.Struct({
   items: Schema.Array(ContextMenuItemSchema),
   position: Schema.optionalKey(ContextMenuPosition),
 });
+
+/**
+ * The window a renderer request came from. Falls back to the focused (or most
+ * recently focused) app window for callers that reach these methods without an
+ * event, so dialogs and menus still attach to something the user can see.
+ */
+const resolveCallingWindow = (
+  event?: DesktopIpc.DesktopIpcInvokeEvent | DesktopIpc.DesktopIpcSyncEvent,
+) =>
+  Effect.gen(function* () {
+    const appWindows = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
+    const sender =
+      event === undefined
+        ? Option.none<DesktopAppWindowRegistry.DesktopAppWindowRecord>()
+        : yield* appWindows.findBySender(event.sender.id);
+    const record = Option.isSome(sender) ? sender : yield* appWindows.focusedOrRecent;
+    return Option.map(record, (value) => value.window);
+  });
 
 function toWebSocketBaseUrl(httpBaseUrl: URL): string {
   const url = new URL(httpBaseUrl.href);
@@ -82,9 +104,8 @@ export const getSystemLocale = DesktopIpc.makeSyncIpcMethod({
 export const getWindowFullscreenState = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_WINDOW_FULLSCREEN_STATE_CHANNEL,
   result: Schema.Boolean,
-  handler: Effect.fn("desktop.ipc.window.getWindowFullscreenState")(function* () {
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
-    const window = yield* electronWindow.currentMainOrFirst;
+  handler: Effect.fn("desktop.ipc.window.getWindowFullscreenState")(function* (event) {
+    const window = yield* resolveCallingWindow(event);
     return Option.isSome(window) && window.value.isFullScreen();
   }),
 });
@@ -176,9 +197,8 @@ export const pickFolder = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PICK_FOLDER_CHANNEL,
   payload: Schema.UndefinedOr(PickFolderOptionsSchema),
   result: Schema.NullOr(Schema.String),
-  handler: Effect.fn("desktop.ipc.window.pickFolder")(function* (options) {
+  handler: Effect.fn("desktop.ipc.window.pickFolder")(function* (options, event) {
     const dialog = yield* ElectronDialog.ElectronDialog;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
@@ -220,7 +240,7 @@ export const pickFolder = DesktopIpc.makeIpcMethod({
         )
       : environment.resolvePickFolderDefaultPath(options);
     const selectedPath = yield* dialog.pickFolder({
-      owner: yield* electronWindow.focusedMainOrFirst,
+      owner: yield* resolveCallingWindow(event),
       defaultPath,
     });
     if (Option.isNone(selectedPath)) {
@@ -247,15 +267,14 @@ export const pickProjectFavicon = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PICK_PROJECT_FAVICON_CHANNEL,
   payload: Schema.UndefinedOr(Schema.String),
   result: Schema.NullOr(Schema.String),
-  handler: Effect.fn("desktop.ipc.window.pickProjectFavicon")(function* (initialPath) {
+  handler: Effect.fn("desktop.ipc.window.pickProjectFavicon")(function* (initialPath, event) {
     const dialog = yield* ElectronDialog.ElectronDialog;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     if (!(yield* appSettings.get).localEnvironmentEnabled) {
       return null;
     }
     const paths = yield* dialog.pickFiles({
-      owner: yield* electronWindow.focusedMainOrFirst,
+      owner: yield* resolveCallingWindow(event),
       defaultPath: Option.fromNullishOr(initialPath),
       multiple: false,
       filters: [
@@ -283,10 +302,9 @@ export const showContextMenu = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONTEXT_MENU_CHANNEL,
   payload: ContextMenuInput,
   result: Schema.NullOr(Schema.String),
-  handler: Effect.fn("desktop.ipc.window.showContextMenu")(function* (input) {
+  handler: Effect.fn("desktop.ipc.window.showContextMenu")(function* (input, event) {
     const electronMenu = yield* ElectronMenu.ElectronMenu;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
-    const window = yield* electronWindow.focusedMainOrFirst;
+    const window = yield* resolveCallingWindow(event);
     if (Option.isNone(window)) {
       return null;
     }
@@ -307,6 +325,36 @@ export const openExternal = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.openExternal")(function* (url) {
     const shell = yield* ElectronShell.ElectronShell;
     return yield* shell.openExternal(url);
+  }),
+});
+
+export const openWindow = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.OPEN_WINDOW_CHANNEL,
+  payload: DesktopOpenWindowInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.openWindow")(function* (input) {
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    yield* desktopWindow.create(input);
+  }),
+});
+
+/**
+ * The renderer reports its collection scope whenever the user changes it, so
+ * the main process can restore each window with the scope it was showing.
+ */
+export const setWindowScope = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_WINDOW_SCOPE_CHANNEL,
+  payload: DesktopWindowScopeSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.setWindowScope")(function* (scope, event) {
+    if (event === undefined) return;
+    const appWindows = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
+    const record = yield* appWindows.findBySender(event.sender.id);
+    if (Option.isNone(record)) return;
+    // Goes through DesktopWindow so the scope lands in both the registry and
+    // the window's restore record.
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    yield* desktopWindow.setWindowScope(record.value.window, scope);
   }),
 });
 
@@ -387,9 +435,8 @@ export const pickThemeFiles = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PICK_THEME_FILES_CHANNEL,
   payload: Schema.Undefined,
   result: Schema.NullOr(Schema.Array(PickedThemeFileSchema)),
-  handler: Effect.fn("desktop.ipc.window.pickThemeFiles")(function* () {
+  handler: Effect.fn("desktop.ipc.window.pickThemeFiles")(function* (_input, event) {
     const dialog = yield* ElectronDialog.ElectronDialog;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     // The VS Code extensions directory is the same dotfolder on Windows,
@@ -400,7 +447,7 @@ export const pickThemeFiles = DesktopIpc.makeIpcMethod({
       .exists(extensionsDir)
       .pipe(Effect.orElseSucceed(() => false));
     const paths = yield* dialog.pickFiles({
-      owner: yield* electronWindow.focusedMainOrFirst,
+      owner: yield* resolveCallingWindow(event),
       defaultPath: defaultPath ? Option.some(extensionsDir) : Option.none(),
       filters: [{ name: "JSON", extensions: ["json"] }],
       multiple: true,
