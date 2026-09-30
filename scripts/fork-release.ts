@@ -313,7 +313,14 @@ function replayCommit(
       .filter(Boolean)
       .sort();
     const expected = resolutions.map(({ path }) => path).sort();
-    if (JSON.stringify(conflicts) !== JSON.stringify(expected)) {
+    if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml" && expected.length === 0) {
+      // Keep the target dependency graph, then add the fork's manifest changes.
+      // Generated lockfile hunks cannot be meaningfully merged line by line.
+      git(["checkout", "--ours", "--", "pnpm-lock.yaml"]);
+      git(["add", "--", "pnpm-lock.yaml"]);
+      run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"]);
+      git(["add", "--", "pnpm-lock.yaml"]);
+    } else if (JSON.stringify(conflicts) !== JSON.stringify(expected)) {
       const detail = `${attempt.stderr || attempt.stdout}`.trim().slice(-8_000);
       throw new Error(
         `Infrastructure replay conflict set was not declared: ${conflicts.join(", ") || detail}`,
