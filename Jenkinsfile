@@ -293,10 +293,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
     }
 
-    triggers {
-        cron('H 2 * * *')
-    }
-
     parameters {
         choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle'], description: 'Scheduled stable tracking, an exact read-only validation, or a manual release.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
@@ -311,6 +307,7 @@ pipeline {
         stage('Resolve and execute') {
             steps {
                 script {
+                    if (params.ACTION == 'auto') { echo 'Historical branch has no scheduled release job.'; return }
                     Map nightly
                     Map stable
                     node('built-in') {
