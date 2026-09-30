@@ -210,8 +210,12 @@ function resolveCommand(args: ParsedArguments): void {
   ) as ForkAction;
   const mode = enumFlag(args, "mode", INCIDENT_MODES);
   const upstreamRef = optionalFlag(args, "upstream-ref");
+  const sourceRef = optionalFlag(args, "source");
   if (upstreamRef && action !== "validate-only") {
     throw new Error("--upstream-ref is accepted only with --action validate-only.");
+  }
+  if (sourceRef && action !== "out-of-cycle") {
+    throw new Error("--source is accepted only with --action out-of-cycle.");
   }
   const target =
     action === "validate-only" && upstreamRef
@@ -225,15 +229,17 @@ function resolveCommand(args: ParsedArguments): void {
   );
   validateBootstrap(bootstrap);
   const firstRelease = !githubReleaseVersions().includes("v0.0.41-1");
-  const boundary = firstRelease
-    ? bootstrap.stableBase.commit
-    : resolveCommit(git(["merge-base", "origin/main", "upstream/main"]));
   const candidateSourceSha = firstRelease
     ? assertFullSha(
         flag(args, "bootstrap-source-sha", process.env.BOOTSTRAP_SOURCE_SHA),
         "Bootstrap source",
       )
-    : observedMainSha;
+    : sourceRef
+      ? resolveCommit(sourceRef)
+      : observedMainSha;
+  const boundary = firstRelease
+    ? bootstrap.stableBase.commit
+    : resolveCommit(git(["merge-base", candidateSourceSha, "upstream/main"]));
   const releaseVersion =
     mode === "nightly-integration" || target.version === null
       ? null

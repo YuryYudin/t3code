@@ -5,9 +5,10 @@ The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases 
 Use **Build with Parameters** only for two exceptions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
-- `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix.
+- `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
 
 `DRY_RUN` builds and validates everything but never pushes, publishes, or reports incidents.
+Scheduled `auto` builds run only on the `main` job. Reindex the multibranch project after adding `main` or changing its Jenkinsfile so its job and schedule are current.
 
 ## One-time Jenkins setup
 
