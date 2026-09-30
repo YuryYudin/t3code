@@ -13,6 +13,7 @@ def readResolvedPlan(String fileName) {
         target: [commit: readJsonScalar(fileName, 'target.commit')],
         targetIdentity: readJsonScalar(fileName, 'targetIdentity'),
         observedMainSha: readJsonScalar(fileName, 'observedMainSha'),
+        candidateSourceSha: readJsonScalar(fileName, 'candidateSourceSha'),
         firstRelease: readJsonScalar(fileName, 'firstRelease') == 'true',
         releaseRequired: readJsonScalar(fileName, 'releaseRequired') == 'true',
         releaseVersion: readJsonScalar(fileName, 'releaseVersion'),
@@ -50,7 +51,7 @@ def prepareCandidate(Map resolved, String slug) {
                 git fetch --prune --tags upstream '+refs/heads/main:refs/remotes/upstream/main'
             '''
             withCredentials([string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA')]) {
-                sh "node scripts/fork-release.ts prepare --target ${resolved.target.commit} --candidate-ref ${candidateRef} --first-release ${resolved.firstRelease} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\""
+                sh "node scripts/fork-release.ts prepare --target ${resolved.target.commit} --source ${resolved.candidateSourceSha} --candidate-ref ${candidateRef} --first-release ${resolved.firstRelease} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\""
             }
             sh "git bundle create candidate.bundle ${candidateRef}"
             stash name: "candidate-${slug}", includes: 'candidate.bundle'
@@ -300,6 +301,7 @@ pipeline {
     parameters {
         choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle'], description: 'Scheduled stable tracking, an exact read-only validation, or a manual release.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
+        string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for a manual out-of-cycle release; leave empty to use main.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
     }
 
@@ -311,6 +313,16 @@ pipeline {
         stage('Resolve and execute') {
             steps {
                 script {
+                    if (params.ACTION == 'auto' && env.BRANCH_NAME != 'main') {
+                        echo 'Scheduled fork tracking runs only on main.'
+                        return
+                    }
+                    if (params.SOURCE_REF && params.ACTION != 'out-of-cycle') {
+                        error('SOURCE_REF is accepted only for out-of-cycle releases.')
+                    }
+                    if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
+                        error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
+                    }
                     Map nightly
                     Map stable
                     node('built-in') {
@@ -331,7 +343,8 @@ pipeline {
                             nightly = readResolvedPlan('.fork-release-nightly.json')
                             if (params.ACTION != 'validate-only') {
                                 def stableMode = params.ACTION == 'out-of-cycle' ? 'out-of-cycle-release' : 'automatic-stable-release'
-                                sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
+                                def sourceArg = params.SOURCE_REF ? "--source ${params.SOURCE_REF}" : ''
+                                sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
                                 stable = readResolvedPlan('.fork-release-stable.json')
                             }
                         }
