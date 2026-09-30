@@ -169,7 +169,7 @@ def runQuality(String slug, String candidateRef) {
 }
 
 def buildWindows(String slug, String candidateRef, String version) {
-    node('pockeo-windows') {
+    node('pockeo-windows-3') {
         stage("${slug}: Windows x64 unsigned") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             unstash "artifacts-linux-${slug}"
