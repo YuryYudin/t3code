@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,6 +9,7 @@ import {
   allocateForkVersion,
   atomicWriteJson,
   failureCommandId,
+  finalizeReleaseAssets,
   firstForkVersion,
   incidentKey,
   incidentMarker,
@@ -23,6 +25,7 @@ import {
   verifyBootstrapPatch,
   type ForkReleaseBootstrap,
 } from "./lib/fork-release.ts";
+import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 
 const fullSha = "0123456789abcdef0123456789abcdef01234567";
 
@@ -224,6 +227,81 @@ describe("release asset gate", () => {
     expect(() => requiredReleaseAssets([...assets, "latest-mac-x64.yml"], "0.0.41-1")).toThrow(
       /must be merged/,
     );
+  });
+
+  function releaseFixture() {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-release-assets-"));
+    for (const name of assets) NodeFS.writeFileSync(NodePath.join(directory, name), "artifact");
+    for (const [name, files] of [
+      ["latest-mac.yml", assets.slice(0, 4)],
+      ["latest-linux.yml", assets.slice(4, 5)],
+      ["latest.yml", assets.slice(5, 6)],
+    ] as const) {
+      NodeFS.writeFileSync(
+        NodePath.join(directory, name),
+        serializeUpdateManifest(
+          {
+            version: "0.0.41-1",
+            releaseDate: "2026-10-01T00:00:00Z",
+            files: files.map((url) => ({ url, size: 8, sha512: "old-hash" })),
+            extras: { path: files[0]!, sha512: "old-hash" },
+          },
+          { platformLabel: name },
+        ),
+      );
+    }
+    return directory;
+  }
+
+  it("publishes manifest sizes and hashes from the final stapled artifacts", () => {
+    const directory = releaseFixture();
+    try {
+      const dmg = assets[0]!;
+      const bytes = "artifact with stapled notarization ticket";
+      NodeFS.writeFileSync(NodePath.join(directory, dmg), bytes);
+      const evidence = finalizeReleaseAssets(directory, "0.0.41-1");
+      const manifest = parseUpdateManifest(
+        NodeFS.readFileSync(NodePath.join(directory, "latest-mac.yml"), "utf8"),
+        "latest-mac.yml",
+        "macOS",
+        { preserveLegacyFields: true },
+      );
+      const sha512 = NodeCrypto.createHash("sha512").update(bytes).digest("base64");
+      expect(manifest.files.find(({ url }) => url === dmg)).toEqual({
+        url: dmg,
+        size: bytes.length,
+        sha512,
+      });
+      expect(manifest.extras.sha512).toBe(sha512);
+      expect(manifest.files).toHaveLength(4);
+      const checksums = NodeFS.readFileSync(NodePath.join(directory, "SHA256SUMS.txt"), "utf8");
+      expect(checksums).toContain(`${evidence.sha256[dmg]}  ${dmg}\n`);
+      expect(checksums).toContain(`${evidence.sha256["latest-mac.yml"]}  latest-mac.yml\n`);
+      expect(checksums).not.toContain("SHA256SUMS.txt");
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects inconsistent manifest versions and incomplete macOS architecture coverage", () => {
+    const directory = releaseFixture();
+    const path = NodePath.join(directory, "latest-mac.yml");
+    try {
+      const original = NodeFS.readFileSync(path, "utf8");
+      NodeFS.writeFileSync(path, original.replace("0.0.41-1", "0.0.99-1"));
+      expect(() => finalizeReleaseAssets(directory, "0.0.41-1")).toThrow(/has version/);
+      const manifest = parseUpdateManifest(original, path, "macOS");
+      NodeFS.writeFileSync(
+        path,
+        serializeUpdateManifest(
+          { ...manifest, files: manifest.files.slice(0, 2) },
+          { platformLabel: "macOS" },
+        ),
+      );
+      expect(() => finalizeReleaseAssets(directory, "0.0.41-1")).toThrow(/missing artifact.*x64/);
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

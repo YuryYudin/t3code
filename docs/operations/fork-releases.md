@@ -7,6 +7,8 @@ Use **Build with Parameters** only for two exceptions:
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
 - `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
 
+`apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Release and integration runs also perform this check before their platform build matrix.
+
 `DRY_RUN` builds and validates everything but never pushes, publishes, or reports incidents.
 Scheduled `auto` builds perform release work only on the `main` job. The repository's Jenkinsfile guards other current branches. Reindex the multibranch project when branch jobs or their Jenkinsfiles are stale; indexing can queue builds for every changed discovered branch, so watch the queue and stop redundant builds by their exact job/build ID.
 
@@ -64,6 +66,8 @@ The macOS stage signs `com.tapnetix.t3code` with the existing Developer ID certi
 
 The macOS stage also runs `scripts/ensure-apple-developer-id-g2.py`, which fetches Apple's **public** Developer ID G2 intermediate, verifies its pinned SHA-256, and makes it visible in the Jenkins user's keychain search list. This is separate from the private Developer ID identity in `apple-certificate`; do not rotate that credential merely because `security find-identity -v` reports zero valid identities. Compare a failing build with a known signed build and inspect the certificate chain and keychain search list first.
 
+An Apple notarization HTTP 403 reporting a missing or expired agreement requires checking the team's Agreements and Membership status. The [Account Holder](https://developer.apple.com/help/account/access/roles) must resolve any pending agreement or membership issue; the Jenkins API key cannot accept legal terms. On 2026-10-01, code-signature verification succeeded with the existing setup, but Apple returned this agreement error after the previous day's accepted notarization. Check the account response before rebuilding or changing Jenkins credentials.
+
 ## Bootstrap release
 
 The first release is the one-time normalization from upstream `v0.0.40` to fork `v0.0.41-1`:
@@ -79,6 +83,8 @@ The checked-in Collections patch is executable release input, not documentation.
 ## Promotion and failure behavior
 
 Releases fail closed. Jenkins verifies the complete artifact set and merged updater manifests while the GitHub release is still a draft, updates `main` with an observed-SHA `--force-with-lease`, then makes the draft non-prerelease and latest. Windows artifacts are intentionally unsigned; both macOS architectures must be Developer ID signed and notarized.
+
+Updater manifest sizes and SHA-512 hashes are finalized from the completed artifacts after notarization tickets are stapled. SHA-256 checksums are regenerated afterward, so they describe the exact files published by the release transaction.
 
 Configure a linear-history ruleset for `main`: require pull requests, allow only squash/rebase merging, block merge commits and direct human pushes, and grant the Jenkins Git actor the only promotion bypass. `integration/upstream-main` and `main` are always moved with an observed lease; a stale lease is an incident, never an unconditional force push.
 
