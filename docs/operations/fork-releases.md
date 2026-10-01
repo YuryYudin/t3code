@@ -14,11 +14,9 @@ Scheduled `auto` builds perform release work only on the `main` job. The reposit
 
 New fork builds should retain the exact official upstream stable version and add a numeric fork revision: upstream `v0.0.44` becomes fork `v0.0.44-1`, followed by `v0.0.44-2` for another build on that base. Select the official published, non-prerelease GitHub release and resolve its tag from the upstream remote; a stable-looking local tag alone is insufficient. Archived prereleases and drafts reserve their tag numbers but do not satisfy stable-release coverage.
 
-The policy correction is prepared on [`fix/fork-release-versioning`](https://github.com/YuryYudin/t3code/tree/fix/fork-release-versioning); it has not yet been deployed to `main`. Do not start a release merely to deploy this maintenance change while publication is deferred.
+On 2026-10-01, `v0.0.45-1`, `v0.0.45-2`, and `v0.0.45-3` were withdrawn from the stable update feed and retained as clearly labeled archived prereleases. All three were built on official stable `v0.0.44`, commit `451afcb22d93f06cb24f9bc16703404564952553`; their installer download counts were zero at withdrawal. `v0.0.43-1` was restored as latest while versioning was corrected. That older installed release retains the historical version offset and is based on upstream `v0.0.42`.
 
-On 2026-10-01, `v0.0.45-1`, `v0.0.45-2`, and `v0.0.45-3` were withdrawn from the stable update feed and retained as clearly labeled archived prereleases. All three were built on official stable `v0.0.44`, commit `451afcb22d93f06cb24f9bc16703404564952553`; their installer download counts were zero at withdrawal. `v0.0.43-1` was restored as latest. That older installed release retains the historical version offset and is based on upstream `v0.0.42`. No replacement build was started.
-
-Keep the original tags and artifacts for the withdrawn releases. Renaming their GitHub tags or files would not change the version embedded in the signed apps or updater manifests. The current live pipeline still counts these published archived records as already processed for upstream `v0.0.44`, preventing it from immediately republishing that base. Deploy the corrected policy before allowing the next stable publication; otherwise the live allocator still uses the historical patch increment.
+Keep the original tags and artifacts for the withdrawn releases. Renaming their GitHub tags or files would not change the version embedded in the signed apps or updater manifests. The corrected allocator reserves these archived tags but requires a published stable fork release on the exact upstream version before treating that upstream release as covered.
 
 ## Access from the maintainer workspace
 
