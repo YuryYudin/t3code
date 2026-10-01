@@ -283,6 +283,35 @@ describe("release asset gate", () => {
     }
   });
 
+  it("preserves AppImage block-map metadata while finalizing updater hashes", () => {
+    const directory = releaseFixture();
+    const manifestPath = NodePath.join(directory, "latest-linux.yml");
+    try {
+      const original = NodeFS.readFileSync(manifestPath, "utf8");
+      NodeFS.writeFileSync(
+        manifestPath,
+        original.replace("    size: 8", "    size: 8\n    blockMapSize: 164951"),
+      );
+      const appImage = assets[4]!;
+      const bytes = "AppImage with embedded block map";
+      NodeFS.writeFileSync(NodePath.join(directory, appImage), bytes);
+      finalizeReleaseAssets(directory, "0.0.41-1");
+      const manifest = parseUpdateManifest(
+        NodeFS.readFileSync(manifestPath, "utf8"),
+        manifestPath,
+        "Linux",
+        { preserveLegacyFields: true },
+      );
+      const sha512 = NodeCrypto.createHash("sha512").update(bytes).digest("base64");
+      expect(manifest.files).toEqual([
+        { url: appImage, size: bytes.length, sha512, blockMapSize: 164951 },
+      ]);
+      expect(manifest.extras.sha512).toBe(sha512);
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects inconsistent manifest versions and incomplete macOS architecture coverage", () => {
     const directory = releaseFixture();
     const path = NodePath.join(directory, "latest-mac.yml");
