@@ -68,6 +68,7 @@ export function parseUpdateManifest(
   raw: string,
   sourcePath: string,
   platformLabel: string,
+  options: { readonly preserveLegacyFields?: boolean } = {},
 ): UpdateManifest {
   const lines = raw.split(/\r?\n/);
   const files: UpdateManifestFile[] = [];
@@ -155,7 +156,7 @@ export function parseUpdateManifest(
       continue;
     }
 
-    if (key === "path" || key === "sha512") {
+    if ((key === "path" || key === "sha512") && !options.preserveLegacyFields) {
       continue;
     }
 
