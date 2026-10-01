@@ -371,13 +371,14 @@ export function finalizeReleaseAssets(directory: string, version: string): Relea
         throw new Error(`${manifestName} is missing artifact ${name}.`);
       }
     }
-    const files = manifest.files.map(({ url }) => {
+    const files = manifest.files.map((file) => {
+      const { url } = file;
       if (NodePath.basename(url) !== url || !names.includes(url)) {
         throw new Error(`${manifestName} references an unavailable artifact: ${url}.`);
       }
       const bytes = NodeFS.readFileSync(NodePath.join(directory, url));
       return {
-        url,
+        ...file,
         size: bytes.length,
         sha512: NodeCrypto.createHash("sha512").update(bytes).digest("base64"),
       };
