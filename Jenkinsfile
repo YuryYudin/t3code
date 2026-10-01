@@ -79,6 +79,31 @@ def checkAppleNotarizationAccount() {
     }
 }
 
+def diagnoseAppleNotarizationAccount() {
+    def failed = false
+    for (label in ['built-in', 'macos']) {
+        node(label) {
+            stage("Notary API: ${label}") {
+                checkout scm
+                withEnv(["PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:${env.PATH}"]) {
+                    if (label == 'macos') {
+                        sh 'xcode-select -p; xcrun --find notarytool; xcrun notarytool --version'
+                    }
+                    withCredentials([
+                        string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
+                        string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
+                        file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+                    ]) {
+                        def status = sh(returnStatus: true, script: 'node scripts/diagnose-apple-notarization.ts')
+                        if (status != 0) failed = true
+                    }
+                }
+            }
+        }
+    }
+    if (failed) error('Apple Notary API diagnostics failed; compare the sanitized responses from both hosts.')
+}
+
 def buildMac(String slug, String candidateRef, String version) {
     node('macos') {
         stage("${slug}: macOS arm64 + x64") {
@@ -340,7 +365,7 @@ pipeline {
                         return
                     }
                     if (params.ACTION == 'apple-account-check') {
-                        checkAppleNotarizationAccount()
+                        diagnoseAppleNotarizationAccount()
                         return
                     }
                     if (params.SOURCE_REF && params.ACTION != 'out-of-cycle') {
