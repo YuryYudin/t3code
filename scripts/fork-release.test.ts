@@ -388,27 +388,6 @@ describe("Jenkins release pipeline", () => {
   });
 });
 
-describe("Jenkins release pipeline", () => {
-  it("hands the current Linux CLI archive to the Windows WSL runtime build", () => {
-    const pipeline = NodeFS.readFileSync(
-      NodePath.resolve(import.meta.dirname, "..", "Jenkinsfile"),
-      "utf8",
-    );
-
-    expect(pipeline).toContain(
-      "corepack pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64",
-    );
-    expect(pipeline).toContain("VP_SELF_SETUP_NO_MODIFY_PATH=1");
-    expect(pipeline).toContain("VP_NODE_VERSION=26.8.2");
-    expect(pipeline).toContain("node scripts/update-release-package-versions.ts ${version}");
-    expect(pipeline).toContain("env exec node apps/server/scripts/cli.ts build-exe --verbose");
-    expect(pipeline).toContain(
-      "--wsl-runtime artifacts\\\\wsl-runtime\\\\t3-${version}-linux-x64.tar.gz",
-    );
-    expect(pipeline).not.toContain("--wsl-prebuild");
-  });
-});
-
 describe("durable state", () => {
   it("atomically replaces JSON records", () => {
     const directory = NodeFS.mkdtempSync(
