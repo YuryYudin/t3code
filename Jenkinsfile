@@ -104,7 +104,7 @@ def diagnoseAppleNotarizationAccount() {
     if (failed) error('Apple Notary API diagnostics failed; compare the sanitized responses from both hosts.')
 }
 
-def buildMac(String slug, String candidateRef, String version) {
+def buildMac(String slug, String candidateRef, String version, boolean publishRelease) {
     node('macos') {
         stage("${slug}: macOS arm64 + x64") {
             retry(count: 2, conditions: [agent(), nonresumable()]) {
@@ -118,23 +118,30 @@ def buildMac(String slug, String candidateRef, String version) {
                     installWorkspace()
                     sh 'rustup update stable --no-self-update'
                     sh 'rustup target add x86_64-apple-darwin'
-                    sh 'python3 scripts/ensure-apple-developer-id-g2.py'
-                    withCredentials([
-                        string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
-                        string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
-                        string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
-                        string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
-                        file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+                    def macCredentials = [
                         string(credentialsId: 't3code-clerk-publishable-key', variable: 'T3CODE_CLERK_PUBLISHABLE_KEY'),
                         string(credentialsId: 't3code-clerk-jwt-template', variable: 'T3CODE_CLERK_JWT_TEMPLATE'),
                         string(credentialsId: 't3code-clerk-cli-oauth-client-id', variable: 'T3CODE_CLERK_CLI_OAUTH_CLIENT_ID'),
                         string(credentialsId: 't3code-relay-url', variable: 'T3CODE_RELAY_URL'),
-                    ]) {
+                    ]
+                    if (publishRelease) {
+                        sh 'python3 scripts/ensure-apple-developer-id-g2.py'
+                        macCredentials += [
+                            string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
+                            string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
+                            string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
+                            string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
+                            file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+                        ]
+                    }
+                    def signingArg = publishRelease ? '--signed' : ''
+                    withCredentials(macCredentials) {
                         sh """
-                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 --signed --verbose
-                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 --signed --verbose
+                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 ${signingArg} --verbose
+                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 ${signingArg} --verbose
                         """
-                        sh '''
+                        if (publishRelease) {
+                            sh '''
                             for dmg in artifacts/mac-arm64/*.dmg artifacts/mac-x64/*.dmg; do
                                 xcrun notarytool submit "$dmg" \
                                     --key-id "$APPLE_API_KEY_ID" \
@@ -144,15 +151,20 @@ def buildMac(String slug, String candidateRef, String version) {
                                     --timeout 20m
                                 xcrun stapler staple "$dmg"
                             done
-                        '''
+                            '''
+                        }
                     }
                     sh '''
                         test -f artifacts/mac-arm64/latest-mac.yml
                         test -f artifacts/mac-x64/latest-mac.yml
                         mv artifacts/mac-x64/latest-mac.yml artifacts/mac-x64/latest-mac-x64.yml
-                        xcrun stapler validate artifacts/mac-arm64/*.dmg
-                        xcrun stapler validate artifacts/mac-x64/*.dmg
                     '''
+                    if (publishRelease) {
+                        sh '''
+                            xcrun stapler validate artifacts/mac-arm64/*.dmg
+                            xcrun stapler validate artifacts/mac-x64/*.dmg
+                        '''
+                    }
                     stash name: "artifacts-mac-${slug}", includes: 'artifacts/mac-arm64/*,artifacts/mac-x64/*'
                 }
             }
@@ -267,12 +279,16 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
     try {
         def candidateRef = prepareCandidate(resolved, slug)
         def version = resolved.releaseVersion ?: "0.0.0-nightly.${env.BUILD_NUMBER}"
-        failureClass = 'mac-signing'
-        checkAppleNotarizationAccount()
+        if (publishRelease) {
+            failureClass = 'mac-signing'
+            checkAppleNotarizationAccount()
+        } else {
+            echo 'Integration validates all platform builds without release signing or notarization.'
+        }
         failureClass = 'validation'
         parallel failFast: false,
             quality: { runQuality(slug, candidateRef) },
-            macos: { buildMac(slug, candidateRef, version) },
+            macos: { buildMac(slug, candidateRef, version, publishRelease) },
             linuxWindows: {
                 buildLinux(slug, candidateRef, version)
                 buildWindows(slug, candidateRef, version)
@@ -297,6 +313,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                     (cd release-complete && find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 shasum -a 256 | sed 's#  ./#  #' > SHA256SUMS.txt)
                 '''
                 failureClass = 'manifest-verification'
+                sh "node scripts/fork-release.ts verify-assets --version ${version} --assets release-complete"
                 if (publishRelease) {
                     withCredentials([string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN')]) {
                         sshagent(credentials: ['github-pockeo-ssh']) {
@@ -346,9 +363,9 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check'], description: 'Scheduled stable tracking, read-only validation, a manual release, or an Apple account check.')
+        choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check', 'sync-upstream'], description: 'Scheduled tracking, read-only validation, a stable release, an Apple check, or integration-only synchronization.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
-        string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for a manual out-of-cycle release; leave empty to use main.')
+        string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for out-of-cycle or sync-upstream; leave empty to use main.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
     }
 
@@ -368,8 +385,8 @@ pipeline {
                         diagnoseAppleNotarizationAccount()
                         return
                     }
-                    if (params.SOURCE_REF && params.ACTION != 'out-of-cycle') {
-                        error('SOURCE_REF is accepted only for out-of-cycle releases.')
+                    if (params.SOURCE_REF && !(params.ACTION in ['out-of-cycle', 'sync-upstream'])) {
+                        error('SOURCE_REF is accepted only for out-of-cycle or sync-upstream.')
                     }
                     if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
                         error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
@@ -390,11 +407,13 @@ pipeline {
                             string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA'),
                         ]) {
                             def validateRef = params.UPSTREAM_REF ? "--upstream-ref '${params.UPSTREAM_REF}'" : ''
-                            sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode nightly-integration ${validateRef} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-nightly.json"
+                            def sourceArg = params.SOURCE_REF ? "--source ${params.SOURCE_REF}" : ''
+                            def resolveAction = params.ACTION == 'sync-upstream' ? 'out-of-cycle' : params.ACTION
+                            def nightlySourceArg = params.ACTION == 'sync-upstream' ? sourceArg : ''
+                            sh "node scripts/fork-release.ts resolve --action ${resolveAction} --mode nightly-integration ${validateRef} ${nightlySourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-nightly.json"
                             nightly = readResolvedPlan('.fork-release-nightly.json')
-                            if (params.ACTION != 'validate-only') {
+                            if (!(params.ACTION in ['validate-only', 'sync-upstream'])) {
                                 def stableMode = params.ACTION == 'out-of-cycle' ? 'out-of-cycle-release' : 'automatic-stable-release'
-                                def sourceArg = params.SOURCE_REF ? "--source ${params.SOURCE_REF}" : ''
                                 sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
                                 stable = readResolvedPlan('.fork-release-stable.json')
                             }
@@ -402,6 +421,8 @@ pipeline {
                     }
                     if (params.ACTION == 'validate-only') {
                         runCandidate(nightly, 'validate-only', false)
+                    } else if (params.ACTION == 'sync-upstream') {
+                        runCandidate(nightly, 'nightly-integration', false)
                     } else if (params.ACTION == 'out-of-cycle') {
                         runCandidate(stable, 'out-of-cycle', true)
                     } else if (stable.firstRelease) {

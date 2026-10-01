@@ -861,13 +861,21 @@ function main(): void {
       return incidentCommand(args);
     case "release-draft":
       return releaseDraftCommand(args);
+    case "verify-assets":
+      return output({
+        status: "assets-verified",
+        evidence: finalizeReleaseAssets(
+          NodePath.resolve(flag(args, "assets")),
+          flag(args, "version"),
+        ),
+      });
     case "promote":
       return promoteCommand(args);
     case "verify-bootstrap":
       return verifyBootstrapCommand(args);
     default:
       throw new Error(
-        "Usage: fork-release <resolve|prepare|incident|release-draft|promote|verify-bootstrap> [options]",
+        "Usage: fork-release <resolve|prepare|incident|verify-assets|release-draft|promote|verify-bootstrap> [options]",
       );
   }
 }
