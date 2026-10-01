@@ -14,7 +14,7 @@ import {
   assertAbsoluteStateDirectory,
   assertFullSha,
   atomicWriteJson,
-  collectReleaseEvidence,
+  finalizeReleaseAssets,
   failureCommandId,
   incidentKey,
   incidentMarker,
@@ -723,7 +723,7 @@ function releaseDraftCommand(args: ParsedArguments): void {
   const tag = `v${version}`;
   const candidate = resolveCommit(flag(args, "candidate"));
   const assetDirectory = NodePath.resolve(flag(args, "assets"));
-  const evidence = collectReleaseEvidence(assetDirectory, version);
+  const evidence = finalizeReleaseAssets(assetDirectory, version);
   if (booleanFlag(args, "dry-run")) return output({ status: "dry-run", tag, candidate, evidence });
   const remoteTag = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
   if (remoteTag) {

@@ -60,6 +60,25 @@ def prepareCandidate(Map resolved, String slug) {
     return candidateRef
 }
 
+def checkAppleNotarizationAccount() {
+    node('macos') {
+        stage('Apple notarization account') {
+            withCredentials([
+                string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
+                string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
+                file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+            ]) {
+                sh '''
+                    xcrun notarytool history \
+                        --key-id "$APPLE_API_KEY_ID" \
+                        --key "$APPLE_API_KEY" \
+                        --issuer "$APPLE_API_ISSUER" >/dev/null
+                '''
+            }
+        }
+    }
+}
+
 def buildMac(String slug, String candidateRef, String version) {
     node('macos') {
         stage("${slug}: macOS arm64 + x64") {
@@ -223,6 +242,8 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
     try {
         def candidateRef = prepareCandidate(resolved, slug)
         def version = resolved.releaseVersion ?: "0.0.0-nightly.${env.BUILD_NUMBER}"
+        failureClass = 'mac-signing'
+        checkAppleNotarizationAccount()
         failureClass = 'validation'
         parallel failFast: false,
             quality: { runQuality(slug, candidateRef) },
@@ -300,7 +321,7 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle'], description: 'Scheduled stable tracking, an exact read-only validation, or a manual release.')
+        choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check'], description: 'Scheduled stable tracking, read-only validation, a manual release, or an Apple account check.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
         string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for a manual out-of-cycle release; leave empty to use main.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
@@ -316,6 +337,10 @@ pipeline {
                 script {
                     if (params.ACTION == 'auto' && env.BRANCH_NAME != 'main') {
                         echo 'Scheduled fork tracking runs only on main.'
+                        return
+                    }
+                    if (params.ACTION == 'apple-account-check') {
+                        checkAppleNotarizationAccount()
                         return
                     }
                     if (params.SOURCE_REF && params.ACTION != 'out-of-cycle') {

@@ -3,6 +3,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import { parseUpdateManifest, serializeUpdateManifest } from "./update-manifest.ts";
+
 export const FORK_REPOSITORY = "YuryYudin/t3code";
 export const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 export const FORK_UPDATE_REPOSITORY = FORK_REPOSITORY;
@@ -340,6 +342,71 @@ export function collectReleaseEvidence(directory: string, version: string): Rele
       names.sort().map((name) => [name, sha256File(NodePath.join(directory, name))]),
     ),
   };
+}
+
+export function finalizeReleaseAssets(directory: string, version: string): ReleaseAssetEvidence {
+  const names = NodeFS.readdirSync(directory).filter((name) =>
+    NodeFS.statSync(NodePath.join(directory, name)).isFile(),
+  );
+  requiredReleaseAssets(names, version);
+  // Stapling a notarization ticket changes DMG bytes after electron-builder
+  // generates its manifest. Describe the final artifacts before publishing.
+  for (const [manifestName, extensions] of [
+    ["latest-mac.yml", [".zip", ".dmg"]],
+    ["latest-linux.yml", [".AppImage"]],
+    ["latest.yml", [".exe"]],
+  ] as const) {
+    const manifestPath = NodePath.join(directory, manifestName);
+    const manifest = parseUpdateManifest(
+      NodeFS.readFileSync(manifestPath, "utf8"),
+      manifestPath,
+      manifestName,
+      { preserveLegacyFields: true },
+    );
+    if (manifest.version !== version) {
+      throw new Error(`${manifestName} has version ${manifest.version}, expected ${version}.`);
+    }
+    for (const name of names.filter((name) => extensions.some((ext) => name.endsWith(ext)))) {
+      if (!manifest.files.some(({ url }) => url === name)) {
+        throw new Error(`${manifestName} is missing artifact ${name}.`);
+      }
+    }
+    const files = manifest.files.map(({ url }) => {
+      if (NodePath.basename(url) !== url || !names.includes(url)) {
+        throw new Error(`${manifestName} references an unavailable artifact: ${url}.`);
+      }
+      const bytes = NodeFS.readFileSync(NodePath.join(directory, url));
+      return {
+        url,
+        size: bytes.length,
+        sha512: NodeCrypto.createHash("sha512").update(bytes).digest("base64"),
+      };
+    });
+    const legacyFile = files.find(({ url }) => url === manifest.extras.path);
+    if (manifest.extras.path !== undefined && !legacyFile) {
+      throw new Error(`${manifestName} references an unavailable legacy artifact.`);
+    }
+    NodeFS.writeFileSync(
+      manifestPath,
+      serializeUpdateManifest(
+        {
+          ...manifest,
+          files,
+          extras: { ...manifest.extras, ...(legacyFile ? { sha512: legacyFile.sha512 } : {}) },
+        },
+        { platformLabel: manifestName },
+      ),
+    );
+  }
+  NodeFS.writeFileSync(
+    NodePath.join(directory, "SHA256SUMS.txt"),
+    names
+      .filter((name) => name !== "SHA256SUMS.txt")
+      .sort()
+      .map((name) => `${sha256File(NodePath.join(directory, name))}  ${name}\n`)
+      .join(""),
+  );
+  return collectReleaseEvidence(directory, version);
 }
 
 export function assertAbsoluteStateDirectory(directory: string): string {
