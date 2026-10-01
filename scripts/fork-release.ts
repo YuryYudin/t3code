@@ -9,6 +9,7 @@ import {
   FAILURE_CLASSES,
   FORK_REPOSITORY,
   INCIDENT_MODES,
+  UPSTREAM_REPOSITORY,
   allocateForkVersion,
   assertAbsoluteStateDirectory,
   assertFullSha,
@@ -19,8 +20,8 @@ import {
   incidentMarker,
   incidentThreadId,
   isIncidentRecoverable,
-  normalizeStableVersion,
   outboxRecordId,
+  parseUpstreamStableRelease,
   publishedReleaseVersions,
   readJsonFile,
   recoveryCommandId,
@@ -29,10 +30,9 @@ import {
   targetIdentity,
   validateBootstrap,
   verifyBootstrapPatch,
-  type FailureClass,
   type ForkAction,
   type ForkReleaseBootstrap,
-  type IncidentMode,
+  type GitHubReleaseVersion,
   type IncidentRecord,
 } from "./lib/fork-release.ts";
 
@@ -172,21 +172,16 @@ function assertLinearRange(range: string): ReadonlyArray<string> {
 }
 
 function latestStableTag(): { tag: string; version: string; commit: string } {
-  const tags = git(["tag", "--list", "v*", "--sort=-v:refname"]).split("\n").filter(Boolean);
-  for (const tag of tags) {
-    try {
-      const version = normalizeStableVersion(tag);
-      return { tag, version, commit: resolveCommit(tag) };
-    } catch {
-      // Prerelease or unrelated tag.
-    }
-  }
-  throw new Error("No upstream stable tag is available locally.");
+  const release = parseUpstreamStableRelease(
+    JSON.parse(gh(["api", `repos/${UPSTREAM_REPOSITORY}/releases/latest`])),
+  );
+  const ref = `refs/upstream-tags/${release.tag}`;
+  git(["fetch", "--no-tags", "upstream", `+refs/tags/${release.tag}:${ref}`]);
+  return { ...release, commit: resolveCommit(ref) };
 }
 
-function githubReleaseVersions(): ReadonlyArray<string> {
-  if (!process.env.GITHUB_TOKEN) return [];
-  const releases = JSON.parse(
+function githubReleases(): ReadonlyArray<GitHubReleaseVersion> {
+  return JSON.parse(
     gh([
       "release",
       "list",
@@ -195,10 +190,9 @@ function githubReleaseVersions(): ReadonlyArray<string> {
       "--limit",
       "100",
       "--json",
-      "tagName,isDraft",
+      "tagName,isDraft,isPrerelease",
     ]),
-  ) as Array<{ readonly tagName: string; readonly isDraft: boolean }>;
-  return publishedReleaseVersions(releases);
+  ) as Array<GitHubReleaseVersion>;
 }
 
 function resolveCommand(args: ParsedArguments): void {
@@ -228,7 +222,9 @@ function resolveCommand(args: ParsedArguments): void {
     NodePath.resolve("scripts/fork-release-bootstrap.json"),
   );
   validateBootstrap(bootstrap);
-  const firstRelease = !githubReleaseVersions().includes("v0.0.41-1");
+  const releases = githubReleases();
+  const publishedVersions = publishedReleaseVersions(releases);
+  const firstRelease = !publishedVersions.includes("v0.0.41-1");
   const candidateSourceSha = firstRelease
     ? assertFullSha(
         flag(args, "bootstrap-source-sha", process.env.BOOTSTRAP_SOURCE_SHA),
@@ -245,13 +241,13 @@ function resolveCommand(args: ParsedArguments): void {
       ? null
       : allocateForkVersion({
           upstreamVersion: target.version,
-          existingVersions: githubReleaseVersions(),
+          existingVersions: releases.map(({ tagName }) => tagName),
         });
   const releaseRequired =
     mode === "nightly-integration" || action === "validate-only"
       ? false
       : action === "out-of-cycle" ||
-        !githubReleaseVersions().some((value) =>
+        !publishedVersions.some((value) =>
           value.startsWith(`v${releaseVersion?.replace(/-\d+$/, "-")}`),
         );
   output({

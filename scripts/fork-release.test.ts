@@ -13,6 +13,7 @@ import {
   incidentMarker,
   isIncidentRecoverable,
   outboxRecordId,
+  parseUpstreamStableRelease,
   publishedReleaseVersions,
   readJsonFile,
   recoveryCommandId,
@@ -26,27 +27,76 @@ import {
 const fullSha = "0123456789abcdef0123456789abcdef01234567";
 
 describe("fork release versions", () => {
-  it("allocates the first numeric fork version from the next upstream patch", () => {
-    expect(firstForkVersion("v0.0.40")).toBe("0.0.41-1");
-    expect(firstForkVersion("1.8.9")).toBe("1.8.10-1");
+  it("keeps the exact upstream stable version before the fork revision", () => {
+    expect(firstForkVersion("v0.0.44")).toBe("0.0.44-1");
+    expect(firstForkVersion("1.8.9")).toBe("1.8.9-1");
   });
 
   it("increments only matching numeric fork suffixes", () => {
     expect(
       allocateForkVersion({
         upstreamVersion: "0.0.40",
-        existingVersions: ["v0.0.41-1", "0.0.41-3", "v0.0.42-8", "v0.0.41-nightly.9"],
+        existingVersions: ["v0.0.40-1", "0.0.40-3", "v0.0.41-8", "v0.0.40-nightly.9"],
       }),
-    ).toBe("0.0.41-4");
+    ).toBe("0.0.40-4");
   });
 
-  it("does not treat draft releases as published version history", () => {
+  it("does not treat draft or archived prereleases as stable release history", () => {
     expect(
       publishedReleaseVersions([
-        { tagName: "v0.0.41-1", isDraft: true },
-        { tagName: "v0.0.40-2", isDraft: false },
+        { tagName: "v0.0.41-1", isDraft: true, isPrerelease: false },
+        { tagName: "v0.0.45-3", isDraft: false, isPrerelease: true },
+        { tagName: "v0.0.40-2", isDraft: false, isPrerelease: false },
       ]),
     ).toEqual(["v0.0.40-2"]);
+  });
+
+  it("reserves archived and draft tags without treating upstream 0.0.45 as released", () => {
+    const releases = [
+      { tagName: "v0.0.45-1", isDraft: false, isPrerelease: true },
+      { tagName: "v0.0.45-2", isDraft: false, isPrerelease: true },
+      { tagName: "v0.0.45-3", isDraft: false, isPrerelease: true },
+      { tagName: "v0.0.45-4", isDraft: true, isPrerelease: false },
+      { tagName: "v0.0.43-1", isDraft: false, isPrerelease: false },
+    ];
+    expect(
+      allocateForkVersion({
+        upstreamVersion: "0.0.45",
+        existingVersions: releases.map(({ tagName }) => tagName),
+      }),
+    ).toBe("0.0.45-5");
+    expect(publishedReleaseVersions(releases)).toEqual(["v0.0.43-1"]);
+    expect(
+      allocateForkVersion({
+        upstreamVersion: "0.0.44",
+        existingVersions: releases.map(({ tagName }) => tagName),
+      }),
+    ).toBe("0.0.44-1");
+  });
+});
+
+describe("upstream stable releases", () => {
+  it("accepts an official published stable release", () => {
+    expect(
+      parseUpstreamStableRelease({ tag_name: "v0.0.44", draft: false, prerelease: false }),
+    ).toEqual({ tag: "v0.0.44", version: "0.0.44" });
+  });
+
+  it("rejects draft and prerelease releases even when their tags look stable", () => {
+    expect(() =>
+      parseUpstreamStableRelease({ tag_name: "v0.0.45", draft: true, prerelease: false }),
+    ).toThrow(/official published/);
+    expect(() =>
+      parseUpstreamStableRelease({ tag_name: "v0.0.45", draft: false, prerelease: true }),
+    ).toThrow(/official published/);
+  });
+
+  it("rejects nightly and preview version tags even when marked as full releases", () => {
+    for (const tag of ["v0.0.45-nightly.20261001.1", "v0.0.45-preview.20261001.1"]) {
+      expect(() =>
+        parseUpstreamStableRelease({ tag_name: tag, draft: false, prerelease: false }),
+      ).toThrow(/stable semantic version/);
+    }
   });
 });
 

@@ -65,6 +65,7 @@ export interface ReleaseAssetEvidence {
 export interface GitHubReleaseVersion {
   readonly tagName: string;
   readonly isDraft: boolean;
+  readonly isPrerelease: boolean;
 }
 
 export interface IncidentRecord {
@@ -102,8 +103,18 @@ export function normalizeStableVersion(value: string): string {
 
 export function firstForkVersion(upstreamVersion: string): string {
   const normalized = normalizeStableVersion(upstreamVersion);
-  const [major, minor, patch] = normalized.split(".").map(Number);
-  return `${major}.${minor}.${patch! + 1}-1`;
+  return `${normalized}-1`;
+}
+
+export function parseUpstreamStableRelease(release: {
+  readonly tag_name: string;
+  readonly draft: boolean;
+  readonly prerelease: boolean;
+}): { tag: string; version: string } {
+  if (release.draft !== false || release.prerelease !== false) {
+    throw new Error("Expected an official published upstream stable release.");
+  }
+  return { tag: release.tag_name, version: normalizeStableVersion(release.tag_name) };
 }
 
 export function allocateForkVersion(input: {
@@ -125,7 +136,9 @@ export function allocateForkVersion(input: {
 export function publishedReleaseVersions(
   releases: ReadonlyArray<GitHubReleaseVersion>,
 ): ReadonlyArray<string> {
-  return releases.filter(({ isDraft }) => !isDraft).map(({ tagName }) => tagName);
+  return releases
+    .filter(({ isDraft, isPrerelease }) => !isDraft && !isPrerelease)
+    .map(({ tagName }) => tagName);
 }
 
 export function assertFullSha(value: string, label: string): string {
