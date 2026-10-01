@@ -104,13 +104,6 @@ Matching credential IDs alone is insufficient. The Jenkins credential metadata A
 
 The G2 helper changes the Jenkins user's shared macOS keychain search list and installs a public intermediate into its dedicated local keychain. It does not update the Jenkins credential store. The Linux Notary API rejection is independent of that macOS state. Relative to the September 19 successful build's `buildMac` function, the G2 helper invocation is the only change; the Apple credential bindings and submit/staple commands are identical. Today's read-only preflight and diagnostics were added after the first agreement rejection.
 
-
-### Checking whether stored Apple credentials changed
-
-Matching credential IDs alone is insufficient. The Jenkins credential metadata API exposes a fingerprint whose calculation includes a hash of the encrypted secret; its usage record associates that stored credential version with build numbers. On 2026-10-01, all three current API credentials (`apple-api-key-p8`, `apple-api-key-id`, `apple-api-issuer`) matched the versions recorded for accepted T3 builds #35 and #52, failed T3 build #2 and diagnostic #8, accepted Redrafter build #35, and failed Redrafter diagnostic #36. The current certificate and password also matched accepted T3 #52 and failed T3 #2. No secret values were retrieved for this comparison. This establishes that the failed runs used the same stored credentials as the accepted runs; it is not a complete audit of every administrative action.
-
-The G2 helper changes the Jenkins user's shared macOS keychain search list and installs a public intermediate into its dedicated local keychain. It does not update the Jenkins credential store. The Linux Notary API rejection is independent of that macOS state. Relative to the September 19 successful build's `buildMac` function, the G2 helper invocation is the only change; the Apple credential bindings and submit/staple commands are identical. Today's read-only preflight and diagnostics were added after the first agreement rejection.
-
 ## Bootstrap release
 
 The first release is the one-time normalization from upstream `v0.0.40` to fork `v0.0.41-1`:
