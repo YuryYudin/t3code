@@ -107,66 +107,70 @@ def diagnoseAppleNotarizationAccount() {
 def buildMac(String slug, String candidateRef, String version, boolean publishRelease) {
     node('macos') {
         stage("${slug}: macOS arm64 + x64") {
-            retry(count: 2, conditions: [agent(), nonresumable()]) {
-                checkoutCandidate("candidate-${slug}", candidateRef)
-                withEnv([
-                    "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
-                    'RUSTUP_TOOLCHAIN=stable',
-                    'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
-                    'T3CODE_MACOS_PASSKEYS=false',
-                ]) {
-                    installWorkspace()
-                    sh 'rustup update stable --no-self-update'
-                    sh 'rustup target add x86_64-apple-darwin'
-                    def macCredentials = [
-                        string(credentialsId: 't3code-clerk-publishable-key', variable: 'T3CODE_CLERK_PUBLISHABLE_KEY'),
-                        string(credentialsId: 't3code-clerk-jwt-template', variable: 'T3CODE_CLERK_JWT_TEMPLATE'),
-                        string(credentialsId: 't3code-clerk-cli-oauth-client-id', variable: 'T3CODE_CLERK_CLI_OAUTH_CLIENT_ID'),
-                        string(credentialsId: 't3code-relay-url', variable: 'T3CODE_RELAY_URL'),
-                    ]
-                    if (publishRelease) {
-                        sh 'python3 scripts/ensure-apple-developer-id-g2.py'
-                        macCredentials += [
-                            string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
-                            string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
-                            string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
-                            string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
-                            file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+            try {
+                retry(count: 2, conditions: [agent(), nonresumable()]) {
+                    checkoutCandidate("candidate-${slug}", candidateRef)
+                    withEnv([
+                        "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
+                        'RUSTUP_TOOLCHAIN=stable',
+                        'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
+                        'T3CODE_MACOS_PASSKEYS=false',
+                    ]) {
+                        installWorkspace()
+                        sh 'rustup update stable --no-self-update'
+                        sh 'rustup target add x86_64-apple-darwin'
+                        def macCredentials = [
+                            string(credentialsId: 't3code-clerk-publishable-key', variable: 'T3CODE_CLERK_PUBLISHABLE_KEY'),
+                            string(credentialsId: 't3code-clerk-jwt-template', variable: 'T3CODE_CLERK_JWT_TEMPLATE'),
+                            string(credentialsId: 't3code-clerk-cli-oauth-client-id', variable: 'T3CODE_CLERK_CLI_OAUTH_CLIENT_ID'),
+                            string(credentialsId: 't3code-relay-url', variable: 'T3CODE_RELAY_URL'),
                         ]
-                    }
-                    def signingArg = publishRelease ? '--signed' : ''
-                    withCredentials(macCredentials) {
-                        sh """
-                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 ${signingArg} --verbose
-                            corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 ${signingArg} --verbose
-                        """
+                        if (publishRelease) {
+                            sh 'python3 scripts/ensure-apple-developer-id-g2.py'
+                            macCredentials += [
+                                string(credentialsId: 'apple-certificate', variable: 'CSC_LINK'),
+                                string(credentialsId: 'apple-certificate-password', variable: 'CSC_KEY_PASSWORD'),
+                                string(credentialsId: 'apple-api-issuer', variable: 'APPLE_API_ISSUER'),
+                                string(credentialsId: 'apple-api-key-id', variable: 'APPLE_API_KEY_ID'),
+                                file(credentialsId: 'apple-api-key-p8', variable: 'APPLE_API_KEY'),
+                            ]
+                        }
+                        def signingArg = publishRelease ? '--signed' : ''
+                        withCredentials(macCredentials) {
+                            sh """
+                                corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version ${version} --output-dir artifacts/mac-arm64 ${signingArg} --verbose
+                                corepack pnpm exec node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64 --build-version ${version} --output-dir artifacts/mac-x64 ${signingArg} --verbose
+                            """
+                            if (publishRelease) {
+                                sh '''
+                                for dmg in artifacts/mac-arm64/*.dmg artifacts/mac-x64/*.dmg; do
+                                    xcrun notarytool submit "$dmg" \
+                                        --key-id "$APPLE_API_KEY_ID" \
+                                        --key "$APPLE_API_KEY" \
+                                        --issuer "$APPLE_API_ISSUER" \
+                                        --wait \
+                                        --timeout 20m
+                                    xcrun stapler staple "$dmg"
+                                done
+                                '''
+                            }
+                        }
+                        sh '''
+                            test -f artifacts/mac-arm64/latest-mac.yml
+                            test -f artifacts/mac-x64/latest-mac.yml
+                            mv artifacts/mac-x64/latest-mac.yml artifacts/mac-x64/latest-mac-x64.yml
+                        '''
                         if (publishRelease) {
                             sh '''
-                            for dmg in artifacts/mac-arm64/*.dmg artifacts/mac-x64/*.dmg; do
-                                xcrun notarytool submit "$dmg" \
-                                    --key-id "$APPLE_API_KEY_ID" \
-                                    --key "$APPLE_API_KEY" \
-                                    --issuer "$APPLE_API_ISSUER" \
-                                    --wait \
-                                    --timeout 20m
-                                xcrun stapler staple "$dmg"
-                            done
+                                xcrun stapler validate artifacts/mac-arm64/*.dmg
+                                xcrun stapler validate artifacts/mac-x64/*.dmg
                             '''
                         }
+                        stash name: "artifacts-mac-${slug}", includes: 'artifacts/mac-arm64/*,artifacts/mac-x64/*'
                     }
-                    sh '''
-                        test -f artifacts/mac-arm64/latest-mac.yml
-                        test -f artifacts/mac-x64/latest-mac.yml
-                        mv artifacts/mac-x64/latest-mac.yml artifacts/mac-x64/latest-mac-x64.yml
-                    '''
-                    if (publishRelease) {
-                        sh '''
-                            xcrun stapler validate artifacts/mac-arm64/*.dmg
-                            xcrun stapler validate artifacts/mac-x64/*.dmg
-                        '''
-                    }
-                    stash name: "artifacts-mac-${slug}", includes: 'artifacts/mac-arm64/*,artifacts/mac-x64/*'
                 }
+            } finally {
+                deleteDir()
             }
         }
     }
