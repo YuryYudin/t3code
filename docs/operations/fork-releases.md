@@ -2,12 +2,13 @@
 
 The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously proving that the fork remains replayable on upstream `main`. Its nightly schedule first validates and promotes a non-release candidate to `integration/upstream-main`. When a new upstream stable tag appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
 
-Use **Build with Parameters** only for two exceptions:
+Use **Build with Parameters** for these manual actions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
 - `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
+- `sync-upstream` immediately replays onto current upstream `main`, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
 
-`apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Release and integration runs also perform this check before their platform build matrix.
+`apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.
 
 `DRY_RUN` builds and validates everything but never pushes, publishes, or reports incidents.
 Scheduled `auto` builds perform release work only on the `main` job. The repository's Jenkinsfile guards other current branches. Reindex the multibranch project when branch jobs or their Jenkinsfiles are stale; indexing can queue builds for every changed discovered branch, so watch the queue and stop redundant builds by their exact job/build ID.
