@@ -9,6 +9,7 @@ export const ZERO_SHA = "0".repeat(40);
 export const REPAIR_LIMIT = 2;
 export const AUTOMATION_PATHS = [
   "Jenkinsfile",
+  "scripts/diagnose-apple-notarization.ts",
   "docs/operations/fork-releases.md",
   "scripts/fork-release.test.ts",
   "scripts/fork-integration.test.ts",

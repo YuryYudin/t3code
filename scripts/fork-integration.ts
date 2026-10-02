@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalFetch:off
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import {
