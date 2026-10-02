@@ -16,7 +16,7 @@ import {
   atomicWriteJson,
   finalizeReleaseAssets,
   failureCommandId,
-  incidentKey,
+  workflowIncidentKey,
   incidentMarker,
   incidentThreadId,
   isIncidentRecoverable,
@@ -264,6 +264,12 @@ function resolveCommand(args: ParsedArguments): void {
           : candidateSourceSha,
     ),
     observedMainSha,
+    observedIntegrationSha:
+      NodeChildProcess.spawnSync(
+        "git",
+        ["show-ref", "--verify", "--hash", "refs/remotes/origin/integration/upstream-main"],
+        { encoding: "utf8" },
+      ).stdout.trim() || "0".repeat(40),
     coverageBaseSha: target.commit,
     candidateSourceSha,
     firstRelease,
@@ -520,7 +526,10 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
     state,
     summary: state === "failing" ? record.summary : `Recovered: ${record.summary}`,
     ...(record.detail ? { detail: record.detail } : {}),
-    url: record.evidenceUrl,
+    url:
+      state === "recovered"
+        ? (record.recoveryEvidenceUrl ?? record.evidenceUrl)
+        : record.evidenceUrl,
     createdAt,
   };
   const preferred = dispatchT3(payload, baseUrl, token);
@@ -589,15 +598,26 @@ function incidentCommand(args: ParsedArguments): void {
     const jobFullName = flag(args, "job-full-name", process.env.JOB_NAME);
     const buildNumber = flag(args, "build-number", process.env.BUILD_NUMBER);
     const identity = flag(args, "target-identity");
-    const detail = optionalFlag(args, "detail");
-    const key = incidentKey({
-      repository,
-      jobFullName,
-      mode,
-      targetIdentity: identity,
-      failureClass,
-    });
-    const recordId = outboxRecordId(key, buildNumber);
+    const detailFile = optionalFlag(args, "detail-file");
+    const detail = detailFile
+      ? NodeFS.readFileSync(detailFile, "utf8")
+      : optionalFlag(args, "detail");
+    // Continue an unresolved episode across target SHAs, failure classes, and
+    // branch-job retries. Retain a legacy key so its existing T3 thread keeps
+    // the same external-alert owner during migration.
+    const active = NodeFS.readdirSync(outbox)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => readJsonFile<IncidentRecord>(NodePath.join(outbox, name)))
+      .filter(
+        (record) =>
+          record.repository === repository &&
+          record.mode === mode &&
+          !record.githubCompleted &&
+          record.issueNumber !== undefined,
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const key = active?.incidentKey ?? workflowIncidentKey(repository, mode);
+    const recordId = outboxRecordId(key, `${jobFullName}#${buildNumber}`);
     const filePath = NodePath.join(outbox, `${recordId}.json`);
     if (!NodeFS.existsSync(filePath)) {
       atomicWriteJson(filePath, {
@@ -624,6 +644,7 @@ function incidentCommand(args: ParsedArguments): void {
   for (const name of records) {
     const filePath = NodePath.join(outbox, name);
     let record = readJsonFile<IncidentRecord>(filePath);
+    if (record.githubCompleted) continue;
     const marker = incidentMarker(record.incidentKey);
     if (record.issueNumber === undefined) {
       const open = listIncidentIssues(record.repository, marker).filter(
@@ -650,6 +671,30 @@ function incidentCommand(args: ParsedArguments): void {
           return { number: issueNumber };
         })();
       record = { ...record, issueNumber: issue.number };
+      atomicWriteJson(filePath, record);
+    }
+    if (!record.githubFailureCommented) {
+      const commentMarker = `<!-- t3-fork-failure:${record.recordId} -->`;
+      const comments = JSON.parse(
+        gh([
+          "api",
+          "--paginate",
+          "--slurp",
+          `repos/${record.repository}/issues/${record.issueNumber}/comments`,
+        ]),
+      ) as Array<Array<{ body: string }>>;
+      if (!comments.flat().some((comment) => comment.body.includes(commentMarker))) {
+        gh([
+          "issue",
+          "comment",
+          String(record.issueNumber),
+          "--repo",
+          record.repository,
+          "--body",
+          `${record.summary}\n\nTarget: ${record.targetIdentity}\nFailure: ${record.failureClass}\n${record.detail ?? ""}\n\n${record.evidenceUrl}\n\n${commentMarker}`,
+        ]);
+      }
+      record = { ...record, githubFailureCommented: true };
       atomicWriteJson(filePath, record);
     }
     if (record.failureReceiptSequence === undefined) {
@@ -687,7 +732,11 @@ function incidentCommand(args: ParsedArguments): void {
           targetIdentity: successfulIdentity,
           failureClass: record.failureClass,
         });
-      record = { ...record, recoveryCommandId: commandId };
+      record = {
+        ...record,
+        recoveryCommandId: commandId,
+        recoveryEvidenceUrl: record.recoveryEvidenceUrl ?? flag(args, "url", process.env.BUILD_URL),
+      };
       atomicWriteJson(filePath, record);
       if (record.recoveryReceiptSequence === undefined) {
         record = { ...record, recoveryReceiptSequence: callT3(record, "recovered", commandId) };
@@ -700,7 +749,7 @@ function incidentCommand(args: ParsedArguments): void {
         "--repo",
         record.repository,
         "--body",
-        `Recovered by ${record.evidenceUrl}.\n\n<!-- t3-fork-recovery-complete:${record.recordId} -->`,
+        `Recovered by ${record.recoveryEvidenceUrl}.\n\n<!-- t3-fork-recovery-complete:${record.recordId} -->`,
       ]);
       gh([
         "issue",
