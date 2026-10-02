@@ -20,9 +20,9 @@ import {
 import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { LayoutChangeEvent } from "react-native";
+import type { LayoutChangeEvent, TextInputInstance } from "react-native";
 import { Modal, Platform, StyleSheet, TextInput, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { SearchBarCommands } from "react-native-screens";
@@ -153,10 +153,10 @@ function ThreadNavigationSidebarPane(
   const threads = useThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const searchBarRef = useRef<SearchBarCommands>(null);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
-  const sidebarScrollGesture = useMemo(() => Gesture.Native(), []);
+  const sidebarScrollGesture = useNativeGesture();
   const {
     archiveThread,
     confirmDeleteThread,
