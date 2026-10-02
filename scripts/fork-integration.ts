@@ -7,6 +7,7 @@ import {
   dispatchRepair,
   verifiedIntegrationCurrent,
   workflowLock,
+  shareCheckout,
 } from "./lib/fork-integration.ts";
 import { assertAbsoluteStateDirectory } from "./lib/fork-release.ts";
 
@@ -22,6 +23,13 @@ function output(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 async function main() {
+  if (command === "share") {
+    const checkout = flag("checkout");
+    if (NodeFS.realpathSync(checkout) !== NodeFS.realpathSync(process.cwd()))
+      throw new Error("Sharing is limited to the current repair checkout.");
+    shareCheckout(checkout, Number(flag("uid")));
+    return output({ status: "shared" });
+  }
   const stateDir = assertAbsoluteStateDirectory(
     flag("state-dir", process.env.FORK_RELEASE_STATE_DIR),
   );

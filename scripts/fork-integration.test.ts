@@ -29,6 +29,7 @@ function fixture() {
   git(["config", "user.name", "Test"]);
   git(["config", "user.email", "test@example.com"]);
   const commit = (file: string, text: string) => {
+    NodeFS.mkdirSync(NodePath.dirname(NodePath.join(repo, file)), { recursive: true });
     NodeFS.writeFileSync(NodePath.join(repo, file), text);
     git(["add", file]);
     git(["commit", "-m", `Change ${file}`]);
@@ -91,6 +92,35 @@ describe("persistent integration", () => {
     expect(NodeFS.existsSync(NodePath.join(second.checkout, "upstream.txt"))).toBe(true);
     next.assertCandidate();
   });
+  it("takes canonical maintenance files from main without spending an agent attempt", () => {
+    const f = fixture();
+    NodeChildProcess.spawnSync("git", ["merge", "--no-commit", f.source], { cwd: f.repo });
+    f.commit("feature.txt", "upstream plus fork\n");
+    const observed = f.commit("docs/operations/fork-releases.md", "old integration notes\n");
+    f.git(["checkout", "--detach", f.source]);
+    const source = f.commit(
+      "docs/operations/fork-releases.md",
+      "canonical automation instructions\n",
+    );
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, source, observed },
+      NodePath.join(f.root, "workers"),
+    );
+    const candidate = next.prepare(f.repo);
+    expect(candidate.status).toBe("prepared");
+    expect(candidate.requests).toHaveLength(0);
+    expect(
+      NodeFS.readFileSync(
+        NodePath.join(candidate.checkout, "docs/operations/fork-releases.md"),
+        "utf8",
+      ),
+    ).toBe("canonical automation instructions\n");
+    expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "feature.txt"), "utf8")).toBe(
+      "upstream plus fork\n",
+    );
+  });
+
   it("reuses the same pending turn after Jenkins restarts and limits repairs per input", async () => {
     const f = fixture();
     f.integration.prepare(f.repo);
@@ -174,13 +204,46 @@ describe("persistent integration", () => {
       "upstream plus fork\n",
     );
   });
-  it("resumes after an interrupted merge commit without applying it twice", () => {
+  it("consumes each completion receipt only once", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
     f.integration.request();
     const done = f.repair(f.integration);
     expect(f.integration.finish()!.head).toBe(done.head);
     expect(new Integration(f.stateDir, f.inputs).prepare(f.repo).head).toBe(done.head);
+  });
+});
+
+describe("interrupted state transitions", () => {
+  it("recovers a committed merge journal when checkout reset was interrupted", () => {
+    const f = fixture();
+    f.integration.prepare(f.repo);
+    f.integration.request();
+    const completed = f.repair(f.integration);
+    integrationGit(completed.checkout, ["reset", "--hard", f.source]);
+    f.integration.save({ ...completed, status: "preparing" });
+    const resumed = new Integration(f.stateDir, f.inputs).prepare(f.repo);
+    expect(resumed.head).toBe(completed.head);
+    expect(integrationGit(resumed.checkout, ["rev-parse", "HEAD"])).toBe(completed.head);
+    expect(NodeFS.readFileSync(NodePath.join(resumed.checkout, "feature.txt"), "utf8")).toBe(
+      "upstream plus fork\n",
+    );
+  });
+  it("does not drop a stable patch if Jenkins stopped before the cherry-pick started", () => {
+    const f = fixture();
+    const stable = new Integration(
+      f.stateDir,
+      f.inputs,
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    const pending = stable.prepare(f.repo);
+    integrationGit(pending.checkout, ["reset", "--hard", f.target]);
+    stable.save({ ...pending, status: "preparing" });
+    const resumed = new Integration(f.stateDir, f.inputs, undefined, "stable").prepare(f.repo);
+    expect(resumed.status).toBe("needs-repair");
+    expect(resumed.conflicts).toEqual(["feature.txt"]);
+    expect(resumed.replay?.index).toBe(0);
   });
 });
 

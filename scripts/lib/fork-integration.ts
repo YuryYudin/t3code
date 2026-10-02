@@ -2,7 +2,6 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { assertFullSha, atomicWriteJson, readJsonFile } from "./fork-release.ts";
 
@@ -10,6 +9,9 @@ export const ZERO_SHA = "0".repeat(40);
 export const REPAIR_LIMIT = 2;
 export const AUTOMATION_PATHS = [
   "Jenkinsfile",
+  "docs/operations/fork-releases.md",
+  "scripts/fork-release.test.ts",
+  "scripts/fork-integration.test.ts",
   "scripts/fork-release.ts",
   "scripts/lib/fork-release.ts",
   "scripts/fork-integration.ts",
@@ -86,6 +88,32 @@ function unresolved(cwd: string): string[] {
     .filter(Boolean)
     .sort();
 }
+export function shareCheckout(checkout: string, uid: number): void {
+  if (!Number.isSafeInteger(uid) || uid < 0) throw new Error("Invalid shared checkout UID.");
+  const owned: string[] = [];
+  const directories: string[] = [];
+  const visit = (path: string) => {
+    const stat = NodeFS.lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    if (stat.uid === process.getuid?.()) {
+      owned.push(path);
+      if (stat.isDirectory()) directories.push(path);
+    }
+    if (stat.isDirectory()) {
+      for (const entry of NodeFS.readdirSync(path)) {
+        if (entry !== "node_modules") visit(NodePath.join(path, entry));
+      }
+    }
+  };
+  visit(checkout);
+  for (let index = 0; index < owned.length; index += 200) {
+    run("setfacl", ["-m", `u:${uid}:rwX`, ...owned.slice(index, index + 200)]);
+  }
+  for (let index = 0; index < directories.length; index += 200) {
+    run("setfacl", ["-m", `d:u:${uid}:rwx`, ...directories.slice(index, index + 200)]);
+  }
+}
+
 export class Integration {
   readonly journal: string;
   readonly statePath: string;
@@ -106,7 +134,7 @@ export class Integration {
     this.statePath = NodePath.join(this.journal, "state.json");
     this.workspaceRoot =
       workspaceRoot ??
-      NodePath.join(NodeOS.tmpdir(), `t3code-fork-repair-${process.getuid?.() ?? "ci"}`);
+      NodePath.join("/var/tmp", `t3code-fork-repair-${process.getuid?.() ?? "ci"}`);
   }
   read(): IntegrationState {
     return readJsonFile(this.statePath);
@@ -133,6 +161,7 @@ export class Integration {
     ]);
     integrationGit(checkout, ["config", "user.name", "T3 Code maintenance"]);
     integrationGit(checkout, ["config", "user.email", "maintenance@tapnetix.com"]);
+    integrationGit(checkout, ["config", "core.sharedRepository", "group"]);
     integrationGit(checkout, ["config", "rerere.enabled", "true"]);
     integrationGit(checkout, ["config", "rerere.autoupdate", "true"]);
     NodeFS.appendFileSync(
@@ -171,18 +200,7 @@ export class Integration {
       // The existing T3 environment runs under the project owner, on this
       // controller. ACLs grant that account access only to repair checkouts.
       run("setfacl", ["-m", `u:${shareWithUid}:x`, this.workspaceRoot]);
-      run("setfacl", [
-        "-R",
-        "-m",
-        `u:${shareWithUid}:rwX,u:${process.getuid?.()}:rwX`,
-        NodePath.dirname(checkout),
-      ]);
-      run("setfacl", [
-        "-R",
-        "-m",
-        `d:u:${shareWithUid}:rwx,d:u:${process.getuid?.()}:rwx`,
-        NodePath.dirname(checkout),
-      ]);
+      shareCheckout(NodePath.dirname(checkout), shareWithUid);
     }
     return this.advance(
       this.save({
@@ -233,6 +251,13 @@ export class Integration {
           throw new Error(`Integration merge failed: ${result.stderr || result.stdout}`);
       }
       let conflicts = unresolved(state.checkout);
+      if (merging === "source") {
+        for (const path of conflicts.filter((path) => AUTOMATION_PATHS.includes(path))) {
+          integrationGit(state.checkout, ["checkout", "--theirs", "--", path]);
+          integrationGit(state.checkout, ["add", "--", path]);
+        }
+        conflicts = unresolved(state.checkout);
+      }
       if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml") {
         integrationGit(state.checkout, ["checkout", "--ours", "--", "pnpm-lock.yaml"]);
         run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], state.checkout);
@@ -390,12 +415,7 @@ export class Integration {
       });
     }
     if (state.shareWithUid !== undefined && state.shareWithUid !== process.getuid?.()) {
-      run("setfacl", [
-        "-R",
-        "-m",
-        `u:${state.shareWithUid}:rwX,u:${process.getuid?.()}:rwX`,
-        NodePath.dirname(state.checkout),
-      ]);
+      shareCheckout(NodePath.dirname(state.checkout), state.shareWithUid);
     }
     const attempt = state.requests.length + 1;
     const id = `fork-repair:${state.id}:${attempt}`;
@@ -408,10 +428,11 @@ export class Integration {
       "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests.",
       `Unresolved paths: ${state.conflicts.join(", ") || "none; repair the gate failure below"}.`,
       `Protected automation files must exactly match the frozen source: ${AUTOMATION_PATHS.join(", ")}. Do not weaken tests or verification gates.`,
-      "Run only focused checks relevant to the repair. CI owns repository-wide checks and native builds. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
+      "Run only focused checks relevant to the repair when tools are already available. Do not install the entire workspace just to run checks; Jenkins owns dependency installation, repository-wide checks, and native builds. If local test tooling is unavailable, finish the source resolution and return the receipt so Jenkins can supply gate feedback. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
       feedback
         ? `Jenkins gate feedback:\n${feedback.slice(-16000)}`
         : "Inspect the merge diff and relevant upstream commits before adapting the fork.",
+      `Before returning the receipt, run node scripts/fork-integration.ts share --checkout ${state.checkout} --uid ${process.getuid?.()} from this checkout. It grants Jenkins access only to files you own here, excluding dependencies and symlink targets.`,
       `Stage all intended tracked repairs, ensure no unresolved paths or unstaged edits remain, then write ${NodePath.join(state.checkout, ".fork-repair-complete.json")} atomically with exactly {"requestId":${JSON.stringify(id)},"status":"completed"}. Create the receipt with mode 0644 so Jenkins can read it. This receipt is the last filesystem operation; finish the turn immediately afterward. If unable to resolve, write the same receipt with status "failed" and a concise detail. Never fabricate success.`,
     ].join("\n\n");
     const request = { id, attempt, message, createdAt: new Date().toISOString() };
@@ -511,7 +532,17 @@ export class Integration {
     this.assertCandidate();
     const state = this.read();
     integrationGit(state.checkout, ["update-ref", ref, state.head]);
-    integrationGit(state.checkout, ["bundle", "create", path, ref]);
+    const sourceRef = "refs/heads/fork-release/source-evidence";
+    integrationGit(state.checkout, ["update-ref", sourceRef, state.inputs.source]);
+    const refs = [ref, sourceRef];
+    if (state.inputs.observed !== ZERO_SHA) {
+      const observedRef = "refs/heads/fork-release/observed-evidence";
+      integrationGit(state.checkout, ["update-ref", observedRef, state.inputs.observed]);
+      refs.push(observedRef);
+    }
+    // Stable replays rewrite fork commits. Include their original objects so
+    // native input comparisons on fresh workers can read the observed main.
+    integrationGit(state.checkout, ["bundle", "create", path, ...refs]);
     return state;
   }
   markQuality(): void {
