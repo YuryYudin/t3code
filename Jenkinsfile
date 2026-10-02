@@ -296,7 +296,7 @@ pipeline {
     }
 
     triggers {
-        cron('H 2 * * *')
+        cron(env.BRANCH_NAME == 'main' ? 'H 2 * * *' : '')
     }
 
     parameters {
