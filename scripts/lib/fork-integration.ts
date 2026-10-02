@@ -597,6 +597,72 @@ export class Integration {
     integrationGit(state.checkout, ["bundle", "create", path, ...refs]);
     return state;
   }
+  private persistVerifiedResolutions(state: IntegrationState): void {
+    if (state.kind !== "integration") return;
+    const range =
+      state.inputs.observed === ZERO_SHA ? state.head : `${state.inputs.observed}..${state.head}`;
+    const merges = integrationGit(state.checkout, [
+      "rev-list",
+      "--first-parent",
+      "--min-parents=2",
+      range,
+    ])
+      .split("\n")
+      .filter(Boolean);
+    const merge = merges.find(
+      (commit) =>
+        integrationGit(state.checkout, ["rev-parse", `${commit}^2`]) === state.inputs.target,
+    );
+    if (!merge) return;
+    // Reconstruct the actual conflict preimages, then record the final tested
+    // blobs. Feedback may have changed the original resolution or cleared its
+    // private cache, so exporting that earlier cache is insufficient.
+    const temporary = NodeFS.mkdtempSync(NodePath.join(this.journal, "verified-cache-"));
+    const scratch = NodePath.join(temporary, "checkout");
+    try {
+      run("git", ["clone", "--no-hardlinks", "--no-checkout", state.checkout, scratch]);
+      integrationGit(scratch, ["config", "user.name", "T3 Code maintenance"]);
+      integrationGit(scratch, ["config", "user.email", "maintenance@tapnetix.com"]);
+      integrationGit(scratch, ["config", "rerere.enabled", "true"]);
+      integrationGit(scratch, [
+        "checkout",
+        "--detach",
+        integrationGit(state.checkout, ["rev-parse", `${merge}^1`]),
+      ]);
+      const result = NodeChildProcess.spawnSync(
+        "git",
+        ["merge", "--no-ff", "--no-commit", state.inputs.target],
+        { cwd: scratch, encoding: "utf8" },
+      );
+      const conflicts = unresolved(scratch);
+      if (result.status !== 0 && !conflicts.length)
+        throw new Error("Could not reconstruct verified merge resolutions.");
+      for (const path of conflicts) {
+        const exists =
+          NodeChildProcess.spawnSync("git", ["cat-file", "-e", `${state.head}:${path}`], {
+            cwd: scratch,
+          }).status === 0;
+        integrationGit(
+          scratch,
+          exists ? ["checkout", state.head, "--", path] : ["rm", "--force", "--", path],
+        );
+      }
+      integrationGit(scratch, ["rerere"]);
+      const cache = NodePath.join(scratch, ".git", "rr-cache");
+      if (NodeFS.existsSync(cache)) {
+        for (const entry of NodeFS.readdirSync(cache)) {
+          const directory = NodePath.join(cache, entry);
+          if (NodeFS.readdirSync(directory).some((name) => name.startsWith("postimage"))) {
+            NodeFS.cpSync(directory, NodePath.join(this.stateDir, "verified-rerere", entry), {
+              recursive: true,
+            });
+          }
+        }
+      }
+    } finally {
+      NodeFS.rmSync(temporary, { recursive: true, force: true });
+    }
+  }
   markQuality(): void {
     const state = this.read();
     this.assertCandidate();
@@ -607,9 +673,12 @@ export class Integration {
     const state = this.read();
     if (state.qualitySha !== state.head)
       throw new Error("Candidate has no passing quality receipt.");
-    const cache = NodePath.join(state.checkout, ".git", "rr-cache");
-    if (NodeFS.existsSync(cache))
-      NodeFS.cpSync(cache, NodePath.join(this.stateDir, "verified-rerere"), { recursive: true });
+    this.persistVerifiedResolutions(state);
+    if (state.kind === "stable") {
+      const cache = NodePath.join(state.checkout, ".git", "rr-cache");
+      if (NodeFS.existsSync(cache))
+        NodeFS.cpSync(cache, NodePath.join(this.stateDir, "verified-rerere"), { recursive: true });
+    }
     this.save({ ...state, status: "verified", verifiedBuild: build });
     atomicWriteJson(NodePath.join(this.stateDir, `${state.kind}-success.json`), {
       inputs: state.inputs,

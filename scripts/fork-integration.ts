@@ -95,10 +95,22 @@ async function main() {
       return output(integration.bundle(NodePath.resolve(flag("output")), flag("ref")));
     case "quality":
       integration.markQuality();
-      return output(integration.read());
+      return output({
+        status: integration.read().status,
+        kind,
+        candidateSha: integration.read().head,
+        inputs,
+        attempts: integration.read().requests.length,
+      });
     case "verified":
       integration.markVerified(flag("build", process.env.BUILD_URL));
-      return output(integration.read());
+      return output({
+        status: integration.read().status,
+        kind,
+        candidateSha: integration.read().head,
+        inputs,
+        attempts: integration.read().requests.length,
+      });
     default:
       throw new Error(
         "Usage: fork-integration <current|prepare|request|finish|bundle|quality|verified|lock> [flags]",
