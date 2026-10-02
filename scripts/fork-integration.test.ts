@@ -212,6 +212,29 @@ describe("persistent integration", () => {
     f.integration.markVerified("build/passed");
     expect(NodeFS.existsSync(NodePath.join(f.stateDir, "verified-rerere"))).toBe(true);
   });
+  it("exports the final tested resolution after feedback changed the original repair", () => {
+    const f = fixture();
+    f.integration.prepare(f.repo);
+    f.integration.request();
+    f.repair(f.integration, "initial repair\n");
+    f.integration.request("The feature gate rejected that repair");
+    f.repair(f.integration, "final tested repair\n");
+    expect(NodeFS.existsSync(NodePath.join(f.stateDir, "verified-rerere"))).toBe(false);
+    f.integration.markQuality();
+    f.integration.markVerified("build/passed");
+    f.git(["checkout", "--detach", f.target]);
+    const target = f.commit("later.txt", "next upstream\n");
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    expect(next.prepare(f.repo).status).toBe("prepared");
+    expect(NodeFS.readFileSync(NodePath.join(next.read().checkout, "feature.txt"), "utf8")).toBe(
+      "final tested repair\n",
+    );
+  });
+
   it("reuses a validated Git resolution when a fresh merge meets the same conflict", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
