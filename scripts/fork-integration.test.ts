@@ -121,6 +121,33 @@ describe("persistent integration", () => {
     );
   });
 
+  it("preserves meaningful blank context lines in upstream dependency patches", () => {
+    const f = fixture();
+    const patch = "--- a/file\n+++ b/file\n@@ -1,2 +1,2 @@\n \n-old\n+new\n";
+    const target = f.commit("patches/dependency.patch", patch);
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    next.prepare(f.repo);
+    next.request();
+    f.repair(next);
+    next.assertCandidate();
+    const checkout = next.read().checkout;
+    expect(NodeFS.readFileSync(NodePath.join(checkout, "patches/dependency.patch"), "utf8")).toBe(
+      patch,
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(checkout, "patches/dependency.patch"),
+      patch.replace("\n \n", "\n\n"),
+    );
+    integrationGit(checkout, ["add", "patches/dependency.patch"]);
+    integrationGit(checkout, ["commit", "-m", "Corrupt patch context"]);
+    next.save({ ...next.read(), head: integrationGit(checkout, ["rev-parse", "HEAD"]) });
+    expect(() => next.assertCandidate()).toThrow(/dependency patch assets/);
+  });
+
   it("reuses the same pending turn after Jenkins restarts and limits repairs per input", async () => {
     const f = fixture();
     f.integration.prepare(f.repo);
@@ -278,6 +305,13 @@ describe("stable candidate repair", () => {
     expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "extra-fork.txt"), "utf8")).toBe(
       "second fork patch\n",
     );
+    const bundle = NodePath.join(f.root, "stable.bundle");
+    const ref = "refs/heads/candidate";
+    stable.bundle(bundle, ref);
+    const worker = NodePath.join(f.root, "worker");
+    NodeChildProcess.execFileSync("git", ["init", worker]);
+    integrationGit(worker, ["fetch", bundle, `${ref}:refs/heads/candidate`]);
+    expect(integrationGit(worker, ["show", `${source}:extra-fork.txt`])).toBe("second fork patch");
   });
 });
 

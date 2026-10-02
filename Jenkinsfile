@@ -123,16 +123,30 @@ def prepareIntegration(Map resolved, String slug) {
             status = readJsonScalar('.fork-integration.json', 'status')
         }
     }
-    bundleIntegration(resolved, slug, candidateRef)
+    ensureIntegrationBundle(resolved, slug, candidateRef)
     return candidateRef
 }
 
+def ensureIntegrationBundle(Map resolved, String slug, String candidateRef) {
+    while (!bundleIntegration(resolved, slug, candidateRef)) {
+        requestIntegrationRepair(resolved, "quality-feedback-${slug}")
+    }
+}
+
 def bundleIntegration(Map resolved, String slug, String candidateRef) {
+    def valid = false
     node('built-in') {
         checkout scm
-        sh "node scripts/fork-integration.ts bundle ${integrationArgs(resolved)} --output '${env.WORKSPACE}/candidate.bundle' --ref ${candidateRef} > .fork-integration.json"
-        stash name: "candidate-${slug}", includes: 'candidate.bundle'
+        def status = sh(returnStatus: true, script: "node scripts/fork-integration.ts bundle ${integrationArgs(resolved)} --output '${env.WORKSPACE}/candidate.bundle' --ref ${candidateRef} > .fork-integration.json 2> .fork-quality.log")
+        valid = status == 0
+        if (valid) {
+            stash name: "candidate-${slug}", includes: 'candidate.bundle'
+        } else {
+            echo 'Candidate guard failed; returning the recorded feedback to the repair worker.'
+            stash name: "quality-feedback-${slug}", includes: '.fork-quality.log'
+        }
     }
+    return valid
 }
 
 def withWorkflowLock(Closure body) {
@@ -482,7 +496,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
             } catch (qualityError) {
                 if (!managed) throw qualityError
                 requestIntegrationRepair(resolved, "quality-feedback-${slug}")
-                bundleIntegration(resolved, slug, candidateRef)
+                ensureIntegrationBundle(resolved, slug, candidateRef)
             }
         }
         if (managed) {

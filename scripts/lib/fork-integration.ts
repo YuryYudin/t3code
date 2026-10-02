@@ -307,7 +307,14 @@ export class Integration {
   private commitStable(state: IntegrationState): IntegrationState {
     const replay = state.replay;
     if (!replay?.pending) throw new Error("Missing stable replay patch.");
-    integrationGit(state.checkout, ["diff", "--cached", "--check"]);
+    integrationGit(state.checkout, [
+      "diff",
+      "--cached",
+      "--check",
+      "--",
+      ".",
+      ":(exclude,glob)**/*.patch",
+    ]);
     const tree = integrationGit(state.checkout, ["write-tree"]);
     const message = integrationGit(state.checkout, ["show", "-s", "--format=%B", replay.pending]);
     const result = NodeChildProcess.spawnSync(
@@ -363,7 +370,14 @@ export class Integration {
     const mergeHead = integrationGit(state.checkout, ["rev-parse", "MERGE_HEAD"]);
     if (mergeHead !== state.inputs[state.merging])
       throw new Error("Repair changed the merge target.");
-    integrationGit(state.checkout, ["diff", "--cached", "--check"]);
+    integrationGit(state.checkout, [
+      "diff",
+      "--cached",
+      "--check",
+      "--",
+      ".",
+      ":(exclude,glob)**/*.patch",
+    ]);
     const tree = integrationGit(state.checkout, ["write-tree"]);
     const result = NodeChildProcess.spawnSync(
       "git",
@@ -425,7 +439,7 @@ export class Integration {
       `Work ONLY in ${state.checkout}. This is a disposable shared checkout. The user's project directory and live T3 data must not be changed.`,
       `Frozen source main: ${state.inputs.source}; upstream target: ${state.inputs.target}; observed integration: ${state.inputs.observed}; HEAD must remain ${state.head}.`,
       `Use git -c safe.directory=${state.checkout} for Git commands in this checkout. Do not create commits, reset HEAD, abort a merge, change remotes, push, release, or alter Jenkins/signing credentials. Jenkins creates commits and promotes only after its gates pass.`,
-      "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests.",
+      "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests. Preserve upstream dependency .patch assets byte for byte; blank context lines in unified diffs intentionally contain a space. Exclude **/*.patch when running git diff --check.",
       `Unresolved paths: ${state.conflicts.join(", ") || "none; repair the gate failure below"}.`,
       `Protected automation files must exactly match the frozen source: ${AUTOMATION_PATHS.join(", ")}. Do not weaken tests or verification gates.`,
       "Run only focused checks relevant to the repair when tools are already available. Do not install the entire workspace just to run checks; Jenkins owns dependency installation, repository-wide checks, and native builds. If local test tooling is unavailable, finish the source resolution and return the receipt so Jenkins can supply gate feedback. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
@@ -470,7 +484,14 @@ export class Integration {
       throw new Error("Repair receipt left unstaged changes.");
     if (integrationGit(state.checkout, ["ls-files", "--others", "--exclude-standard"]))
       throw new Error("Repair receipt left untracked files.");
-    integrationGit(state.checkout, ["diff", "--cached", "--check"]);
+    integrationGit(state.checkout, [
+      "diff",
+      "--cached",
+      "--check",
+      "--",
+      ".",
+      ":(exclude,glob)**/*.patch",
+    ]);
     state = {
       ...state,
       requests: state.requests.map((r) => (r.id === request.id ? { ...r, completed: true } : r)),
@@ -514,6 +535,36 @@ export class Integration {
       if (input !== ZERO_SHA && !ancestor(state.checkout, input, state.head))
         throw new Error("Integration candidate lost an input parent.");
     }
+    const boundary = integrationGit(state.checkout, [
+      "merge-base",
+      state.inputs.source,
+      state.inputs.target,
+    ]);
+    const forkPaths = new Set(
+      integrationGit(state.checkout, ["diff", "--name-only", boundary, state.inputs.source]).split(
+        "\n",
+      ),
+    );
+    const patches = integrationGit(state.checkout, [
+      "ls-tree",
+      "-r",
+      "--name-only",
+      state.inputs.target,
+    ])
+      .split("\n")
+      .filter((path) => path.endsWith(".patch") && !forkPaths.has(path));
+    if (
+      patches.length &&
+      integrationGit(state.checkout, [
+        "diff",
+        "--name-only",
+        state.inputs.target,
+        state.head,
+        "--",
+        ...patches,
+      ])
+    )
+      throw new Error("Repair changed upstream dependency patch assets.");
     if (
       integrationGit(state.checkout, [
         "diff",
