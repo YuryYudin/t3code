@@ -361,7 +361,8 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
     node('ggnode2') {
         stage("${slug}: Android native compatibility") {
             checkoutCandidate("candidate-${slug}", candidateRef)
-            def changed = sh(returnStdout: true, script: "git diff --name-only ${observed} HEAD -- apps/mobile/package.json pnpm-workspace.yaml apps/mobile/modules apps/mobile/plugins apps/mobile/app.config.ts").trim()
+            // Native transitives and patches can change without a mobile manifest edit.
+            def changed = sh(returnStdout: true, script: "git diff --name-only ${observed} HEAD -- apps/mobile/package.json pnpm-workspace.yaml pnpm-lock.yaml patches apps/mobile/modules apps/mobile/plugins apps/mobile/app.config.ts apps/mobile/app.json apps/mobile/babel.config.js apps/mobile/metro.config.js").trim()
             if (!changed) {
                 echo 'Mobile dependency and native inputs are unchanged.'
                 return
