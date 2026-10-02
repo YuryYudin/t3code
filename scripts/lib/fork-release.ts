@@ -91,6 +91,8 @@ export interface IncidentRecord {
   readonly recoveryCommandId?: string;
   readonly recoveryReceiptSequence?: number;
   readonly githubCompleted?: boolean;
+  readonly githubFailureCommented?: boolean;
+  readonly recoveryEvidenceUrl?: string;
 }
 
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -167,6 +169,10 @@ export function incidentKey(input: {
   readonly failureClass: FailureClass;
 }): string {
   return `jenkins:${input.repository}:${input.jobFullName}:${input.mode}:${input.targetIdentity}:${input.failureClass}`;
+}
+
+export function workflowIncidentKey(repository: string, mode: IncidentMode): string {
+  return `jenkins:${repository}:${mode}:workflow`;
 }
 
 export function incidentMarker(key: string): string {

@@ -13,6 +13,7 @@ def readResolvedPlan(String fileName) {
         target: [commit: readJsonScalar(fileName, 'target.commit')],
         targetIdentity: readJsonScalar(fileName, 'targetIdentity'),
         observedMainSha: readJsonScalar(fileName, 'observedMainSha'),
+        observedIntegrationSha: readJsonScalar(fileName, 'observedIntegrationSha'),
         candidateSourceSha: readJsonScalar(fileName, 'candidateSourceSha'),
         firstRelease: readJsonScalar(fileName, 'firstRelease') == 'true',
         releaseRequired: readJsonScalar(fileName, 'releaseRequired') == 'true',
@@ -58,6 +59,126 @@ def prepareCandidate(Map resolved, String slug) {
         }
     }
     return candidateRef
+}
+
+def integrationArgs(Map resolved) {
+    def kind = resolved.candidateKind ?: 'integration'
+    def observed = kind == 'stable' ? resolved.observedMainSha : resolved.observedIntegrationSha
+    return "--kind ${kind} --source ${resolved.candidateSourceSha} --target ${resolved.target.commit} --observed ${observed}"
+}
+
+def requestIntegrationRepair(Map resolved, String feedback = '') {
+    node('built-in') {
+        stage('Automatic integration repair') {
+            checkout scm
+            def feedbackArg = ''
+            if (feedback) {
+                unstash feedback
+                feedbackArg = '--feedback .fork-quality.log'
+            }
+            withCredentials([
+                string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
+                string(credentialsId: 't3code-jenkins-base-url', variable: 'T3CODE_JENKINS_BASE_URL'),
+                string(credentialsId: 't3code-jenkins-project-id', variable: 'T3CODE_JENKINS_PROJECT_ID'),
+                string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
+            ]) {
+                sh "node scripts/fork-integration.ts request ${integrationArgs(resolved)} ${feedbackArg}"
+            }
+            timeout(time: 35, unit: 'MINUTES') {
+                waitUntil(initialRecurrencePeriod: 5000, quiet: true) {
+                    sh "node scripts/fork-integration.ts finish ${integrationArgs(resolved)} > .fork-integration.json"
+                    return readJsonScalar('.fork-integration.json', 'status') != 'waiting'
+                }
+            }
+        }
+    }
+}
+
+def prepareIntegration(Map resolved, String slug) {
+    def candidateRef = "refs/heads/fork-release/candidate-${slug}"
+    def status
+    def alreadyCurrent = false
+    node('built-in') {
+        checkout scm
+        sh 'git clean -fd'
+        sshagent(credentials: ['github-pockeo-ssh']) {
+            sh "git fetch origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/integration/upstream-main:refs/remotes/origin/integration/upstream-main'"
+        }
+        sh "node scripts/fork-integration.ts current ${integrationArgs(resolved)} > .fork-integration-current.json"
+        if (resolved.candidateKind != 'stable' && readJsonScalar('.fork-integration-current.json', 'current') == 'true') {
+            alreadyCurrent = true
+            return
+        }
+        stage("${slug}: Prepare incremental merges") {
+            sshagent(credentials: ['github-pockeo-ssh']) {
+                sh "node scripts/fork-integration.ts prepare ${integrationArgs(resolved)} > .fork-integration.json"
+            }
+            status = readJsonScalar('.fork-integration.json', 'status')
+        }
+    }
+    if (alreadyCurrent) return null
+    while (status == 'needs-repair') {
+        requestIntegrationRepair(resolved)
+        node('built-in') {
+            status = readJsonScalar('.fork-integration.json', 'status')
+        }
+    }
+    ensureIntegrationBundle(resolved, slug, candidateRef)
+    return candidateRef
+}
+
+def ensureIntegrationBundle(Map resolved, String slug, String candidateRef) {
+    while (!bundleIntegration(resolved, slug, candidateRef)) {
+        requestIntegrationRepair(resolved, "quality-feedback-${slug}")
+    }
+}
+
+def bundleIntegration(Map resolved, String slug, String candidateRef) {
+    def valid = false
+    node('built-in') {
+        checkout scm
+        def status = sh(returnStatus: true, script: "node scripts/fork-integration.ts bundle ${integrationArgs(resolved)} --output '${env.WORKSPACE}/candidate.bundle' --ref ${candidateRef} > .fork-integration.json 2> .fork-quality.log")
+        valid = status == 0
+        if (valid) {
+            stash name: "candidate-${slug}", includes: 'candidate.bundle'
+        } else {
+            echo 'Candidate guard failed; returning the recorded feedback to the repair worker.'
+            stash name: "quality-feedback-${slug}", includes: '.fork-quality.log'
+        }
+    }
+    return valid
+}
+
+def withWorkflowLock(Closure body) {
+    def runId = "${env.JOB_NAME}#${env.BUILD_NUMBER}"
+    def acquired = false
+    try {
+        while (!acquired) {
+            def owner
+            node('built-in') {
+                checkout scm
+                sh "mkdir -p '${env.FORK_RELEASE_STATE_DIR}'"
+                sh "flock '${env.FORK_RELEASE_STATE_DIR}/workflow.guard' node scripts/fork-integration.ts lock --operation acquire --owner '${runId}' > .fork-lock.json"
+                acquired = readJsonScalar('.fork-lock.json', 'acquired') == 'true'
+                owner = readJsonScalar('.fork-lock.json', 'owner')
+            }
+            if (!acquired) {
+                echo "Waiting for fork workflow owner ${owner}"
+                waitForBuild runId: owner, propagate: false, propagateAbort: false
+                node('built-in') {
+                    sh "flock '${env.FORK_RELEASE_STATE_DIR}/workflow.guard' node scripts/fork-integration.ts lock --operation release --owner '${owner}'"
+                }
+            }
+        }
+        body()
+    } finally {
+        if (acquired) {
+            node('built-in') {
+                checkout scm
+                sh "flock '${env.FORK_RELEASE_STATE_DIR}/workflow.guard' node scripts/fork-integration.ts lock --operation release --owner '${runId}'"
+            }
+        }
+    }
 }
 
 def checkAppleNotarizationAccount() {
@@ -217,13 +338,52 @@ def runQuality(String slug, String candidateRef) {
         stage("${slug}: Feature + release gates") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             installWorkspace()
-            sh '''
+            sh 'git config --local status.showUntrackedFiles all; echo .fork-quality.log >> .git/info/exclude'
+            try {
+            sh '''#!/usr/bin/env bash
+                set -euo pipefail
+                exec > >(tee .fork-quality.log) 2>&1
                 node scripts/fork-release.ts verify-bootstrap
+                corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
                 corepack pnpm run test:project-collections-acceptance
-                corepack pnpm exec vp test run scripts/fork-release.test.ts scripts/build-desktop-artifact.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
+                corepack pnpm exec vp test run scripts/fork-integration.test.ts scripts/fork-release.test.ts scripts/build-desktop-artifact.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
                 corepack pnpm exec vp run --filter @t3tools/contracts --filter @t3tools/shared --filter @t3tools/client-runtime --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop typecheck
                 test -z "$(git status --porcelain)"
             '''
+            } finally {
+                stash name: "quality-feedback-${slug}", includes: ".fork-quality.log", allowEmpty: true
+            }
+        }
+    }
+}
+
+def checkMobileNative(String slug, String candidateRef, String observed) {
+    node('ggnode2') {
+        stage("${slug}: Android native compatibility") {
+            checkoutCandidate("candidate-${slug}", candidateRef)
+            def changed = sh(returnStdout: true, script: "git diff --name-only ${observed} HEAD -- apps/mobile/package.json pnpm-workspace.yaml apps/mobile/modules apps/mobile/plugins apps/mobile/app.config.ts").trim()
+            if (!changed) {
+                echo 'Mobile dependency and native inputs are unchanged.'
+                return
+            }
+            withEnv(['EXPO_NO_DOTENV=1', 'EXPO_NO_GIT_STATUS=1', 'APP_VARIANT=development']) {
+                installWorkspace()
+                try {
+                sh '''#!/usr/bin/env bash
+                    set -euo pipefail
+                    exec > >(tee .fork-quality.log) 2>&1
+                    export ANDROID_HOME="$HOME/Android/Sdk"
+                    test -d "$ANDROID_HOME"
+                    java -version
+                    cd apps/mobile
+                    corepack pnpm exec expo prebuild --clean --platform android --no-install
+                    cd android
+                    ./gradlew :app:assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
+                '''
+                } finally {
+                    stash name: "quality-feedback-${slug}", includes: '.fork-quality.log', allowEmpty: true
+                }
+            }
         }
     }
 }
@@ -257,7 +417,10 @@ def reportIncident(Map resolved, String failureClass, String summary) {
             string(credentialsId: 't3code-jenkins-project-id', variable: 'T3CODE_JENKINS_PROJECT_ID'),
             string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
         ]) {
-            sh "node scripts/fork-release.ts incident open --state-dir '${env.FORK_RELEASE_STATE_DIR}' --mode ${resolved.mode} --target-identity '${resolved.targetIdentity}' --failure-class ${failureClass} --title 'T3 Code fork maintenance failed' --summary '${summary}' --url '${env.BUILD_URL}'"
+            writeFile file: '.fork-incident-detail.txt', text: "Upstream: ${resolved.target.commit}\nFork source: ${resolved.candidateSourceSha}\nObserved integration: ${resolved.observedIntegrationSha}\n${summary}\n"
+            def detailStatus = sh(returnStatus: true, script: "node scripts/fork-integration.ts inspect ${integrationArgs(resolved)} > .fork-repair-detail.json")
+            if (detailStatus == 0) writeFile file: '.fork-incident-detail.txt', text: readFile('.fork-incident-detail.txt') + readFile('.fork-repair-detail.json')
+            sh "node scripts/fork-release.ts incident open --state-dir '${env.FORK_RELEASE_STATE_DIR}' --mode ${resolved.mode} --target-identity '${resolved.targetIdentity}' --failure-class ${failureClass} --title 'T3 Code fork maintenance failed' --summary '${failureClass} gate failed' --detail-file .fork-incident-detail.txt --url '${env.BUILD_URL}'"
         }
     }
 }
@@ -278,20 +441,71 @@ def recoverIncidents(Map resolved) {
     }
 }
 
+def queueIntegrationFollowup(Map resolved) {
+    if (env.BRANCH_NAME != 'main' || params.DRY_RUN || params.ACTION == 'validate-only') return
+    node('built-in') {
+        checkout scm
+        def upstreamHead = sh(returnStdout: true, script: 'git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main | cut -f1').trim()
+        def mainHead
+        sshagent(credentials: ['github-pockeo-ssh']) {
+            mainHead = sh(returnStdout: true, script: 'git ls-remote origin refs/heads/main | cut -f1').trim()
+        }
+        if (upstreamHead != resolved.target.commit || mainHead != resolved.candidateSourceSha) {
+            echo 'New source inputs arrived during verification; queueing one integration follow-up.'
+            build job: 't3code/main', wait: false, parameters: [
+                string(name: 'ACTION', value: 'sync-upstream'),
+                string(name: 'SOURCE_REF', value: ''),
+                string(name: 'UPSTREAM_REF', value: ''),
+                booleanParam(name: 'DRY_RUN', value: false),
+            ]
+        }
+    }
+}
+
 def runCandidate(Map resolved, String slug, boolean publishRelease) {
     def failureClass = 'patch-replay'
     try {
-        def candidateRef = prepareCandidate(resolved, slug)
-        def version = resolved.releaseVersion ?: "0.0.0-nightly.${env.BUILD_NUMBER}"
+        def managed = params.ACTION != 'validate-only' && !params.DRY_RUN && !resolved.firstRelease
+        def incremental = managed && !publishRelease
+        resolved.candidateKind = publishRelease ? 'stable' : 'integration'
         if (publishRelease) {
             failureClass = 'mac-signing'
             checkAppleNotarizationAccount()
         } else {
             echo 'Integration validates all platform builds without release signing or notarization.'
         }
+        failureClass = 'patch-replay'
+        def candidateRef = managed ? prepareIntegration(resolved, slug) : prepareCandidate(resolved, slug)
+        if (!candidateRef) {
+            echo 'Integration already contains the frozen main and upstream inputs and has verified evidence; skipping unchanged builds.'
+            if (!params.DRY_RUN) recoverIncidents(resolved)
+            return
+        }
+        def version = resolved.releaseVersion ?: "0.0.0-nightly.${env.BUILD_NUMBER}"
         failureClass = 'validation'
+        def qualityPassed = false
+        while (!qualityPassed) {
+            try {
+                runQuality(slug, candidateRef)
+                if (managed) {
+                    def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
+                    if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
+                    checkMobileNative(slug, candidateRef, observedMobile)
+                }
+                qualityPassed = true
+            } catch (qualityError) {
+                if (!managed) throw qualityError
+                requestIntegrationRepair(resolved, "quality-feedback-${slug}")
+                ensureIntegrationBundle(resolved, slug, candidateRef)
+            }
+        }
+        if (managed) {
+            node('built-in') {
+                checkout scm
+                sh "node scripts/fork-integration.ts quality ${integrationArgs(resolved)}"
+            }
+        }
         parallel failFast: false,
-            quality: { runQuality(slug, candidateRef) },
             macos: { buildMac(slug, candidateRef, version, publishRelease) },
             linuxWindows: {
                 buildLinux(slug, candidateRef, version)
@@ -325,6 +539,9 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                         }
                     }
                 }
+                if (managed) {
+                    sh "node scripts/fork-integration.ts verified ${integrationArgs(resolved)} --build '${env.BUILD_URL}'"
+                }
                 archiveArtifacts artifacts: 'release-complete/*', fingerprint: true
                 stash name: "release-complete-${slug}", includes: 'release-complete/*'
             }
@@ -334,7 +551,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                     withCredentials([string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN')]) {
                         sshagent(credentials: ['github-pockeo-ssh']) {
                             def branch = publishRelease ? 'main' : 'integration/upstream-main'
-                            def observed = publishRelease ? resolved.observedMainSha : sh(returnStdout: true, script: "git ls-remote origin refs/heads/${branch} | cut -f1").trim()
+                            def observed = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
                             if (!observed) { observed = '0000000000000000000000000000000000000000' }
                             def tagArg = publishRelease ? "--tag ${resolved.releaseTag}" : ''
                             sh "node scripts/fork-release.ts promote --candidate refs/remotes/fork-candidate --branch ${branch} --observed-sha ${observed} ${tagArg} --dry-run ${params.DRY_RUN}"
@@ -343,10 +560,13 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 }
             }
         }
-        if (!params.DRY_RUN && params.ACTION != 'validate-only') { recoverIncidents(resolved) }
+        if (!params.DRY_RUN && params.ACTION != 'validate-only') {
+            recoverIncidents(resolved)
+            if (incremental) queueIntegrationFollowup(resolved)
+        }
     } catch (error) {
         if (!params.DRY_RUN && params.ACTION != 'validate-only') {
-            reportIncident(resolved, failureClass, "${slug} failed at ${failureClass}")
+            reportIncident(resolved, failureClass, "${slug} failed at ${failureClass}: ${error.message}")
         }
         throw error
     }
@@ -363,7 +583,7 @@ pipeline {
     }
 
     triggers {
-        cron('H 2 * * *')
+        cron(env.BRANCH_NAME == 'main' ? 'H 2 * * *' : '')
     }
 
     parameters {
@@ -375,6 +595,7 @@ pipeline {
 
     environment {
         FORK_RELEASE_STATE_DIR = '/var/lib/jenkins/t3code-fork-release'
+        FORK_REPAIR_PROJECT_ROOT = '/home/jjb/Work/OpenCode/t3code-fork-maintenance'
     }
 
     stages {
@@ -395,6 +616,7 @@ pipeline {
                     if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
                         error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
                     }
+                    withWorkflowLock {
                     Map nightly
                     Map stable
                     node('built-in') {
@@ -432,12 +654,17 @@ pipeline {
                     } else if (stable.firstRelease) {
                         runCandidate(stable, 'automatic-stable-release', true)
                     } else {
-                        runCandidate(nightly, 'nightly-integration', false)
-                        if (stable.releaseRequired) {
-                            runCandidate(stable, 'automatic-stable-release', true)
-                        } else {
-                            echo 'No new upstream stable release; nightly integration completed without publication.'
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+                            runCandidate(nightly, 'nightly-integration', false)
                         }
+                        if (stable.releaseRequired) {
+                            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+                                runCandidate(stable, 'automatic-stable-release', true)
+                            }
+                        } else {
+                            echo 'No new upstream stable release requires a fork release.'
+                        }
+                    }
                     }
                 }
             }

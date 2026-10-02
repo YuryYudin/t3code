@@ -1,12 +1,12 @@
 # Fork releases
 
-The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously proving that the fork remains replayable on upstream `main`. Its nightly schedule first validates and promotes a non-release candidate to `integration/upstream-main`. When a new upstream stable tag appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
+The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. Independently, when a new upstream stable release appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
 
 Use **Build with Parameters** for these manual actions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
 - `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
-- `sync-upstream` immediately replays onto current upstream `main`, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
+- `sync-upstream` immediately merges current upstream `main` into the persistent integration branch, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
 
 `apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.
 
@@ -40,7 +40,7 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 
 Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. The Jenkins account does not need sudo after that provisioning step.
 
-Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It is the durable incident/promotion journal and contains no credentials.
+Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It holds the durable incident, repair, lock, and verification journals plus validated Git rerere resolutions. It contains no credentials.
 
 Configure the credential IDs referenced by `Jenkinsfile`:
 
@@ -48,7 +48,7 @@ Configure the credential IDs referenced by `Jenkinsfile`:
 - existing Apple credentials: `apple-certificate`, `apple-certificate-password`, `apple-api-issuer`, `apple-api-key-id`, and `apple-api-key-p8`;
 - public production configuration copied from the upstream stable desktop build: `t3code-clerk-publishable-key`, `t3code-clerk-jwt-template`, `t3code-clerk-cli-oauth-client-id`, and `t3code-relay-url`;
 - the immutable full SHA of the originally reviewed bootstrap source commit: `t3code-bootstrap-source-sha`. Do not replace it with the current `bootstrap/0.0.41-1-source` branch HEAD; that branch later received Jenkinsfile maintenance;
-- incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, `t3code-jenkins-token`, and `t3code-jenkins-model-selection`. The model-selection credential is the selected project's current default model JSON and is used only by the v0.0.40 compatibility path.
+- incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, `t3code-jenkins-token`, and `t3code-jenkins-model-selection`. The model-selection credential is the selected project's current default model JSON and is used for automatic repairs and the v0.0.40 incident compatibility path.
 
 Issue the T3 credential once on kubuntu and paste its output directly into the secret-text credential:
 
@@ -61,7 +61,11 @@ npx t3 auth session issue \
   --token-only
 ```
 
-The selected T3 project must exist and have a default model. Jenkins only creates passive incident threads; it never starts a turn or settles them.
+The selected T3 project must exist and have a default model. Automatic repair uses the existing `orchestration:operate` token and model selection; no broader token or Jenkins administrator permission is required. The T3 environment and Jenkins controller must share this machine. `FORK_REPAIR_PROJECT_ROOT` identifies the existing project directory so Jenkins can grant its owner access to isolated repair checkouts with `setfacl`. Jenkins creates these under its own private temporary root, retains them across build retries, and binds one durable worker thread per integration/stable workflow to the selected checkout. It does not modify the user's project directory or directly open live T3 state for writing.
+
+The worker returns a request-specific completion file; command acceptance alone is not completion. Jenkins checks the frozen HEAD, unresolved paths, staged changes, input ancestry, and protected automation files before creating a commit. Integration candidates merge stable fork `main` and upstream into the last verified integration tip, preserving prior resolutions. Stable candidates replay every canonical fork patch onto the exact official stable tag with linear history. A source/upstream/integration tuple receives at most two agent attempts, including test feedback. Jenkins restarts reuse pending requests and candidate state. Only candidates which pass quality, native compatibility when applicable, the desktop matrix, and asset verification may populate the shared resolution cache or be promoted.
+
+Fast quality checks run before packaging. Mobile dependency or native changes additionally compile an Android development APK on `ggnode2`, using its provisioned Java and Android SDK. No emulator is launched or app installed. The current macOS worker has Xcode 15.4 and no CocoaPods, so it cannot compile current upstream iOS native clients; desktop macOS packaging and mobile TypeScript/tests remain required. Provision a compatible iOS worker before adding an iOS native compile gate.
 
 The macOS stage signs `com.tapnetix.t3code` with the existing Developer ID certificate and notarizes it with the existing App Store Connect API key. Fork builds explicitly disable Clerk passkeys, so they do not request Associated Domains and do not need an App ID or provisioning profile. The regular Electron hardened-runtime entitlements continue to come from the signing tool's defaults.
 
@@ -96,9 +100,11 @@ Updater manifest sizes and SHA-512 hashes are finalized from the completed artif
 
 Configure a linear-history ruleset for `main`: require pull requests, allow only squash/rebase merging, block merge commits and direct human pushes, and grant the Jenkins Git actor the only promotion bypass. `integration/upstream-main` and `main` are always moved with an observed lease; a stale lease is an incident, never an unconditional force push.
 
-One open GitHub issue and one passive T3 thread represent each repository/job/mode/target/failure-class incident. The durable outbox is written before either service is contacted. Retries reuse the same deterministic command IDs, and recovery is appended to T3 before Jenkins closes GitHub. Do not delete outbox files manually; retain them for audit and let subsequent serialized runs reconcile them.
+One open GitHub issue and one incident T3 thread represent each unresolved repository/workflow episode. New upstream SHAs, branch-job retries, and changing failure classes update that episode instead of creating a new thread. Legacy unresolved episodes retain their original incident key during migration. Recovery links point to the successful build. The durable outbox is written before either service is contacted. Retries reuse the same deterministic command IDs, and recovery is appended to T3 before Jenkins closes GitHub. Do not delete outbox files manually; retain them for audit and let subsequent serialized runs reconcile them.
 
-If a nightly replay fails, resolve every upstream conflict on a reviewed branch. Do not drop mobile, server, web, or desktop changes to make the replay pass. Test the candidate, then use the authorized promotion path; a successful rerun records recovery in the existing incident thread.
+A workflow lock spans all branch jobs, using Jenkins run IDs and `waitForBuild` to wait for the previous owner rather than guessing whether a timed lease has expired. Promotion uses the branch SHA observed before preparation. If a different actor moves a branch, promotion fails closed. Unchanged integration inputs with matching verified branch evidence skip rebuilding. Failed integration work does not prevent the independent stable-release attempt, and an Apple account rejection does not block integration.
+
+If both automatic repair attempts fail, the existing incident retains the target, conflict paths, attempt count, and build evidence. A later input may trigger another bounded repair; retries of the same failed input do not start duplicate agents. A successful rerun records recovery in that incident thread. Inspect the durable journal and Jenkins logs before taking over a repair; do not drop mobile, server, web, or desktop changes to make a candidate pass.
 
 ## What happened on 2026-09-30
 

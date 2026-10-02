@@ -12,6 +12,7 @@ import {
   finalizeReleaseAssets,
   firstForkVersion,
   incidentKey,
+  workflowIncidentKey,
   incidentMarker,
   isIncidentRecoverable,
   outboxRecordId,
@@ -132,6 +133,15 @@ describe("fork incident identities", () => {
         failureClass: "patch-replay",
       }),
     ).toMatch(/^jenkins:issue:42:recovery:target:[0-9a-f]{64}:class:patch-replay$/);
+  });
+
+  it("keeps the same workflow incident across targets and separates integration from stable releases", () => {
+    expect(workflowIncidentKey("YuryYudin/t3code", "nightly-integration")).toBe(
+      "jenkins:YuryYudin/t3code:nightly-integration:workflow",
+    );
+    expect(workflowIncidentKey("YuryYudin/t3code", "nightly-integration")).not.toBe(
+      workflowIncidentKey("YuryYudin/t3code", "automatic-stable-release"),
+    );
   });
 
   it("rejects unqualified and abbreviated target identities", () => {

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off globalFetch:off
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
