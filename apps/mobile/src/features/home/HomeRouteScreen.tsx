@@ -8,8 +8,10 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Platform, useWindowDimensions } from "react-native";
 
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
@@ -90,7 +92,7 @@ function SplitHomeRouteScreen() {
 function CompactHomeRouteScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -101,6 +103,20 @@ function CompactHomeRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const projectCollections = useProjectCollections();
+  const handleNewThreadOnBranch = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      navigation.navigate("NewTaskSheet", {
+        screen: "NewTaskDraft",
+        params: {
+          environmentId: String(thread.environmentId),
+          projectId: String(thread.projectId),
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+        },
+      });
+    },
+    [navigation],
+  );
 
   useEffect(() => {
     void checkForAppUpdateOnLaunch();
@@ -307,17 +323,7 @@ function CompactHomeRouteScreen() {
           onSelectThread={handleSelectThread}
           onSelectPendingTask={openPendingTask}
           onDeletePendingTask={confirmDeletePendingTask}
-          onNewThreadOnBranch={(thread) => {
-            navigation.navigate("NewTaskSheet", {
-              screen: "NewTaskDraft",
-              params: {
-                environmentId: String(thread.environmentId),
-                projectId: String(thread.projectId),
-                branch: thread.branch,
-                worktreePath: thread.worktreePath,
-              },
-            });
-          }}
+          onNewThreadOnBranch={handleNewThreadOnBranch}
           onNewThreadInProject={(project) => {
             navigation.navigate("NewTaskSheet", {
               screen: "NewTaskDraft",

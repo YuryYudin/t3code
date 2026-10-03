@@ -4,29 +4,41 @@ import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 
 import { ProjectId } from "./baseSchemas.ts";
-import { ThreadExternalAlertUpsertCommand } from "./orchestration.ts";
+import {
+  OrchestrationV2Command,
+  ThreadExternalAlertUpsertCommand,
+} from "./orchestrationV2.ts";
 
 const decodeExternalAlert = Schema.decodeUnknownEffect(ThreadExternalAlertUpsertCommand);
+const decodeClientCommand = Schema.decodeUnknownEffect(OrchestrationV2Command);
+const externalAlertCommand = {
+  type: "thread.external-alert.upsert",
+  commandId: "jenkins:issue:42:failure:job:t3code%2Fmain:build:123:class:validation",
+  projectId: "fork-maintenance",
+  threadId: "fork-maintenance-42",
+  incidentKey:
+    "jenkins:YuryYudin/t3code:t3code/main:automatic-stable-release:stable:0.0.40:validation",
+  title: "Fork maintenance failed",
+  state: "failing",
+  summary: "Stable validation failed",
+  detail: "See the Jenkins build for sanitized details.",
+  url: "http://kubuntu:8080/job/t3code/job/main/123/",
+  createdAt: "2026-09-14T10:00:00.000Z",
+} as const;
 
 it.effect("decodes a bounded passive external alert command", () =>
   Effect.gen(function* () {
-    const command = yield* decodeExternalAlert({
-      type: "thread.external-alert.upsert",
-      commandId: "jenkins:issue:42:failure:job:t3code%2Fmain:build:123:class:validation",
-      projectId: "fork-maintenance",
-      threadId: "fork-maintenance-42",
-      incidentKey:
-        "jenkins:YuryYudin/t3code:t3code/main:automatic-stable-release:stable:0.0.40:validation",
-      title: "Fork maintenance failed",
-      state: "failing",
-      summary: "Stable validation failed",
-      detail: "See the Jenkins build for sanitized details.",
-      url: "http://kubuntu:8080/job/t3code/job/main/123/",
-      createdAt: "2026-09-14T10:00:00.000Z",
-    });
+    const command = yield* decodeExternalAlert(externalAlertCommand);
 
     assert.strictEqual(command.state, "failing");
     assert.strictEqual(command.projectId, ProjectId.make("fork-maintenance"));
+  }),
+);
+
+it.effect("keeps external alerts out of the client WebSocket command union", () =>
+  Effect.gen(function* () {
+    const exit = yield* Effect.exit(decodeClientCommand(externalAlertCommand));
+    assert.isTrue(Exit.isFailure(exit));
   }),
 );
 
