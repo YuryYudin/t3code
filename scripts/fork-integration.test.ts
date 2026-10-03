@@ -355,22 +355,24 @@ describe("workflow ownership", () => {
 });
 
 describe("incident delivery", () => {
-  it("updates one incident across new targets and records the successful recovery URL", async () => {
-    const f = fixture();
-    f.git(["checkout", "--detach", f.target]);
-    const nextTarget = f.commit("later.txt", "next upstream\n");
-    const ghState = NodePath.join(f.root, "github.json");
-    NodeFS.writeFileSync(ghState, JSON.stringify({ issues: [], comments: [] }));
-    const fakeGh = NodePath.join(f.root, "gh");
-    NodeFS.writeFileSync(
-      fakeGh,
-      String.raw`#!/usr/bin/env python3
+  it.each([false, true])(
+    "keeps one thread across modes, recovery, and new episodes (legacy=%s)",
+    async (legacy) => {
+      const f = fixture();
+      f.git(["checkout", "--detach", f.target]);
+      const nextTarget = f.commit("later.txt", "next upstream\n");
+      const ghState = NodePath.join(f.root, "github.json");
+      NodeFS.writeFileSync(ghState, JSON.stringify({ issues: [], comments: [] }));
+      const fakeGh = NodePath.join(f.root, "gh");
+      NodeFS.writeFileSync(
+        fakeGh,
+        String.raw`#!/usr/bin/env python3
 import json,os,sys
 p=os.environ['FAKE_GH_STATE']; s=json.load(open(p)); a=sys.argv[1:]
 def value(flag): return a[a.index(flag)+1]
 if a[:2]==['issue','list']: print(json.dumps(s['issues']))
 elif a[:2]==['issue','create']:
-    issue={'number':len(s['issues'])+1,'state':'OPEN','body':value('--body'),'title':value('--title'),'url':'https://example.test/issues/1'}
+    issue={'number':len(s['issues'])+1,'state':'OPEN','body':value('--body'),'title':value('--title'),'url':'https://example.test/issues/'+str(len(s['issues'])+1)}
     s['issues'].append(issue); print(issue['url'])
 elif a[:2]==['issue','comment']: s['comments'].append({'body':value('--body')})
 elif a[:2]==['issue','close']: s['issues'][int(a[2])-1]['state']='CLOSED'
@@ -378,122 +380,219 @@ elif a[0]=='api': print(json.dumps([s['comments']]))
 else: raise Exception(a)
 json.dump(s,open(p,'w'))
 `,
-      { mode: 0o755 },
-    );
-    const dispatched: Array<{ threadId: string; incidentKey: string; state: string; url: string }> =
-      [];
-    const server = NodeHttp.createServer((request, response) => {
-      let body = "";
-      request.on("data", (chunk) => {
-        body += chunk;
-      });
-      request.on("end", () => {
-        dispatched.push(JSON.parse(body));
-        response.setHeader("Content-Type", "application/json");
-        response.end(JSON.stringify({ sequence: dispatched.length }));
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("Missing HTTP address.");
-      const execute = (args: string[], build: string) =>
-        new Promise<void>((resolve, reject) => {
-          const child = NodeChildProcess.spawn(
-            process.execPath,
-            [
-              "--experimental-strip-types",
-              NodePath.resolve(import.meta.dirname, "fork-release.ts"),
-              "incident",
-              ...args,
-              "--state-dir",
-              f.stateDir,
-            ],
-            {
-              cwd: f.repo,
-              env: {
-                ...process.env,
-                PATH: `${f.root}:${process.env.PATH}`,
-                FAKE_GH_STATE: ghState,
-                JOB_NAME: "t3code/main",
-                BUILD_NUMBER: build,
-                T3CODE_JENKINS_BASE_URL: `http://127.0.0.1:${address.port}`,
-                T3CODE_JENKINS_TOKEN: "test-credential",
-                T3CODE_JENKINS_PROJECT_ID: "project",
-              },
-            },
-          );
-          let stderr = "";
-          child.stderr.on("data", (chunk) => {
-            stderr += chunk;
-          });
-          child.on("error", reject);
-          child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
+        { mode: 0o755 },
+      );
+      const dispatched: Array<{
+        threadId: string;
+        incidentKey: string;
+        state: string;
+        url: string;
+        type: string;
+        title: string;
+      }> = [];
+      const createdThreads = new Set<string>();
+      const legacyUpdates: Array<{ threadId: string; title: string }> = [];
+      const server = NodeHttp.createServer((request, response) => {
+        let body = "";
+        request.on("data", (chunk) => {
+          body += chunk;
         });
-      const common = [
-        "open",
-        "--mode",
-        "nightly-integration",
-        "--title",
-        "Maintenance failed",
-        "--summary",
-        "Repair required",
-      ];
-      await execute(
-        [
-          ...common,
-          "--target-identity",
-          `commit:${f.target}`,
-          "--failure-class",
-          "patch-replay",
-          "--url",
-          "https://build/failed-1",
-        ],
-        "1",
-      );
-      await execute(
-        [
-          ...common,
-          "--target-identity",
-          `commit:${nextTarget}`,
-          "--failure-class",
-          "validation",
-          "--url",
-          "https://build/failed-2",
-        ],
-        "2",
-      );
-      const pending = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as {
-        issues: Array<{ state: string }>;
-        comments: Array<{ body: string }>;
-      };
-      expect(pending.issues).toHaveLength(1);
-      expect(pending.comments).toHaveLength(2);
-      expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
-      expect(new Set(dispatched.map((item) => item.incidentKey)).size).toBe(1);
-      await execute(
-        ["recover", "--target-identity", `commit:${nextTarget}`, "--url", "https://build/success"],
-        "3",
-      );
-      const recovered = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as typeof pending;
-      expect(recovered.issues[0]!.state).toBe("CLOSED");
-      expect(
-        recovered.comments
-          .filter((c) => c.body.startsWith("Recovered by"))
-          .every((c) => c.body.includes("https://build/success")),
-      ).toBe(true);
-      expect(
-        dispatched
-          .filter((item) => item.state === "recovered")
-          .every((item) => item.url === "https://build/success"),
-      ).toBe(true);
-      const count = dispatched.length;
-      await execute(["drain"], "4");
-      expect(dispatched).toHaveLength(count);
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-    }
-  });
+        request.on("end", () => {
+          const payload = JSON.parse(body) as (typeof dispatched)[number];
+          if (payload.type === "thread.external-alert.upsert") {
+            dispatched.push(payload);
+            if (legacy) {
+              response.statusCode = 400;
+              response.end("Unknown command");
+              return;
+            }
+          }
+          if (payload.type === "thread.create") {
+            if (createdThreads.has(payload.threadId)) {
+              response.statusCode = 500;
+              response.end("Thread already exists");
+              return;
+            }
+            createdThreads.add(payload.threadId);
+          }
+          if (payload.type === "thread.meta.update") legacyUpdates.push(payload);
+          response.setHeader("Content-Type", "application/json");
+          response.end(JSON.stringify({ sequence: dispatched.length }));
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      try {
+        const address = server.address();
+        if (!address || typeof address === "string") throw new Error("Missing HTTP address.");
+        const execute = (args: string[], build: string) =>
+          new Promise<void>((resolve, reject) => {
+            const child = NodeChildProcess.spawn(
+              process.execPath,
+              [
+                "--experimental-strip-types",
+                NodePath.resolve(import.meta.dirname, "fork-release.ts"),
+                "incident",
+                ...args,
+                "--state-dir",
+                f.stateDir,
+              ],
+              {
+                cwd: f.repo,
+                env: {
+                  ...process.env,
+                  PATH: `${f.root}:${process.env.PATH}`,
+                  FAKE_GH_STATE: ghState,
+                  JOB_NAME: "t3code/main",
+                  BUILD_NUMBER: build,
+                  T3CODE_JENKINS_BASE_URL: `http://127.0.0.1:${address.port}`,
+                  T3CODE_JENKINS_TOKEN: "test-credential",
+                  T3CODE_JENKINS_PROJECT_ID: "project",
+                  T3CODE_JENKINS_MODEL_SELECTION: JSON.stringify({
+                    instanceId: "test",
+                    model: "test",
+                  }),
+                },
+              },
+            );
+            let stderr = "";
+            child.stderr.on("data", (chunk) => {
+              stderr += chunk;
+            });
+            child.on("error", reject);
+            child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
+          });
+        const common = [
+          "open",
+          "--mode",
+          "nightly-integration",
+          "--title",
+          "Maintenance failed",
+          "--summary",
+          "Repair required",
+        ];
+        await execute(
+          [
+            ...common,
+            "--target-identity",
+            `commit:${f.target}`,
+            "--failure-class",
+            "patch-replay",
+            "--url",
+            "https://build/failed-1",
+          ],
+          "1",
+        );
+        await execute(
+          [
+            ...common,
+            "--target-identity",
+            `commit:${nextTarget}`,
+            "--failure-class",
+            "validation",
+            "--url",
+            "https://build/failed-2",
+          ],
+          "2",
+        );
+        const pending = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as {
+          issues: Array<{ state: string }>;
+          comments: Array<{ body: string }>;
+        };
+        expect(pending.issues).toHaveLength(1);
+        expect(pending.comments).toHaveLength(2);
+        expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
+        expect(new Set(dispatched.map((item) => item.incidentKey)).size).toBe(1);
+        await execute(
+          [
+            "recover",
+            "--target-identity",
+            `commit:${nextTarget}`,
+            "--url",
+            "https://build/success",
+          ],
+          "3",
+        );
+        const recovered = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as typeof pending;
+        expect(recovered.issues[0]!.state).toBe("CLOSED");
+        expect(
+          recovered.comments
+            .filter((c) => c.body.startsWith("Recovered by"))
+            .every((c) => c.body.includes("https://build/success")),
+        ).toBe(true);
+        expect(
+          dispatched
+            .filter((item) => item.state === "recovered")
+            .every((item) => item.url === "https://build/success"),
+        ).toBe(true);
+        await execute(
+          [
+            "open",
+            "--mode",
+            "automatic-stable-release",
+            "--target-identity",
+            "stable:0.0.45",
+            "--failure-class",
+            "mac-signing",
+            "--title",
+            "Maintenance failed",
+            "--summary",
+            "Apple rejected notarization",
+            "--url",
+            "https://build/apple-failure",
+          ],
+          "4",
+        );
+        await execute(
+          [
+            ...common,
+            "--target-identity",
+            `commit:${nextTarget}`,
+            "--failure-class",
+            "validation",
+            "--url",
+            "https://build/new-episode",
+          ],
+          "5",
+        );
+        expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
+        expect(new Set(dispatched.map((item) => item.incidentKey)).size).toBe(1);
+        await execute(
+          [
+            "recover",
+            "--target-identity",
+            `commit:${nextTarget}`,
+            "--url",
+            "https://build/integration-recovered",
+          ],
+          "6",
+        );
+        expect(dispatched.at(-1)?.state).toBe("failing");
+        if (legacy) expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(false);
+        await execute(
+          [
+            "recover",
+            "--target-identity",
+            "stable:0.0.45",
+            "--url",
+            "https://build/release-recovered",
+          ],
+          "7",
+        );
+        expect(dispatched.at(-1)?.state).toBe("recovered");
+        expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
+        if (legacy) {
+          expect(createdThreads.size).toBe(1);
+          expect(new Set(legacyUpdates.map((item) => item.threadId)).size).toBe(1);
+          expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(true);
+        }
+        const count = dispatched.length;
+        await execute(["drain"], "8");
+        expect(dispatched).toHaveLength(count);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
 });

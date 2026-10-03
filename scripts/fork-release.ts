@@ -18,7 +18,7 @@ import {
   failureCommandId,
   workflowIncidentKey,
   incidentMarker,
-  incidentThreadId,
+  maintenanceNotificationRoute,
   isIncidentRecoverable,
   outboxRecordId,
   parseUpstreamStableRelease,
@@ -508,7 +508,13 @@ function legacyT3ModelSelection(): unknown {
   return parsed;
 }
 
-function callT3(record: IncidentRecord, state: "failing" | "recovered", commandId: string): number {
+function callT3(
+  record: IncidentRecord,
+  state: "failing" | "recovered",
+  commandId: string,
+  route: { threadId: string; incidentKey: string },
+  pending: ReadonlyArray<IncidentRecord>,
+): number {
   const baseUrl = process.env.T3CODE_JENKINS_BASE_URL;
   const token = process.env.T3CODE_JENKINS_TOKEN;
   const projectId = process.env.T3CODE_JENKINS_PROJECT_ID;
@@ -516,16 +522,21 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
     throw new Error("T3 incident credentials/configuration are incomplete.");
   }
   const createdAt = new Date().toISOString();
+  const remaining = pending.filter((item) => item.repository === record.repository);
+  const notificationState = remaining.length ? "failing" : state;
+  const summary = remaining.length
+    ? `Maintenance needs attention: ${[...new Set(remaining.map((item) => `${item.mode}: ${item.failureClass}`))].join("; ")}`
+    : `Recovered: ${record.summary}`;
   const payload = {
     type: "thread.external-alert.upsert",
     commandId,
     projectId,
-    threadId: incidentThreadId(record.issueNumber),
-    incidentKey: record.incidentKey,
-    title: record.title,
-    state,
-    summary: state === "failing" ? record.summary : `Recovered: ${record.summary}`,
-    ...(record.detail ? { detail: record.detail } : {}),
+    threadId: route.threadId,
+    incidentKey: route.incidentKey,
+    title: "T3 Code fork maintenance",
+    state: notificationState,
+    summary,
+    detail: `${record.mode}: ${record.targetIdentity}\n${record.detail ?? ""}\n${remaining.map((item) => `${item.mode}: ${item.targetIdentity}, ${item.failureClass}, ${item.evidenceUrl}`).join("\n")}`,
     url:
       state === "recovered"
         ? (record.recoveryEvidenceUrl ?? record.evidenceUrl)
@@ -539,10 +550,10 @@ function callT3(record: IncidentRecord, state: "failing" | "recovered", commandI
   // internal activity append over HTTP. Keep escalation passive by creating a
   // normal thread and reflecting incident state in its title.
   const legacyTitle =
-    state === "failing"
-      ? `${record.title} (#${record.issueNumber})`
-      : `Recovered: ${record.title} (#${record.issueNumber})`;
-  if (state === "failing") {
+    notificationState === "failing"
+      ? "T3 Code fork maintenance needs attention"
+      : "Recovered: T3 Code fork maintenance";
+  if (notificationState === "failing") {
     const created = dispatchT3(
       {
         type: "thread.create",
@@ -641,6 +652,30 @@ function incidentCommand(args: ParsedArguments): void {
   const records = NodeFS.readdirSync(outbox)
     .filter((name) => name.endsWith(".json"))
     .sort();
+  const snapshot = records.map((name) => readJsonFile<IncidentRecord>(NodePath.join(outbox, name)));
+  const recoverable = new Set(
+    operation === "recover"
+      ? snapshot
+          .filter((record) =>
+            isIncidentRecoverable({
+              mode: record.mode,
+              failedTargetIdentity: record.targetIdentity,
+              successfulTargetIdentity: flag(args, "target-identity"),
+              isAncestor: (failed, successful) =>
+                NodeChildProcess.spawnSync("git", [
+                  "merge-base",
+                  "--is-ancestor",
+                  failed,
+                  successful,
+                ]).status === 0,
+            }),
+          )
+          .map((record) => record.recordId)
+      : [],
+  );
+  const pending = snapshot.filter(
+    (record) => !record.githubCompleted && !recoverable.has(record.recordId),
+  );
   for (const name of records) {
     const filePath = NodePath.join(outbox, name);
     let record = readJsonFile<IncidentRecord>(filePath);
@@ -697,19 +732,25 @@ function incidentCommand(args: ParsedArguments): void {
       record = { ...record, githubFailureCommented: true };
       atomicWriteJson(filePath, record);
     }
-    if (record.failureReceiptSequence === undefined) {
-      const commandId =
-        record.failureCommandId ??
-        failureCommandId({
-          issueNumber: record.issueNumber!,
-          jobFullName: record.jobFullName,
-          buildNumber: record.buildNumber,
-          failureClass: record.failureClass,
-        });
+    const route = maintenanceNotificationRoute(stateDir, record.repository);
+    if (
+      record.failureReceiptSequence === undefined ||
+      record.notificationThreadId !== route.threadId
+    ) {
+      const commandId = `${failureCommandId({
+        issueNumber: record.issueNumber!,
+        jobFullName: record.jobFullName,
+        buildNumber: record.buildNumber,
+        failureClass: record.failureClass,
+      })}:thread:${route.threadId}`;
       record = { ...record, failureCommandId: commandId };
       atomicWriteJson(filePath, record);
-      const sequence = callT3(record, "failing", commandId);
-      record = { ...record, failureReceiptSequence: sequence };
+      const sequence = callT3(record, "failing", commandId, route, pending);
+      record = {
+        ...record,
+        failureReceiptSequence: sequence,
+        notificationThreadId: route.threadId,
+      };
       atomicWriteJson(filePath, record);
     }
     if (operation === "recover" && !record.githubCompleted) {
@@ -725,21 +766,24 @@ function incidentCommand(args: ParsedArguments): void {
         })
       )
         continue;
-      const commandId =
-        record.recoveryCommandId ??
-        recoveryCommandId({
-          issueNumber: record.issueNumber!,
-          targetIdentity: successfulIdentity,
-          failureClass: record.failureClass,
-        });
+      const commandId = `${recoveryCommandId({
+        issueNumber: record.issueNumber!,
+        targetIdentity: successfulIdentity,
+        failureClass: record.failureClass,
+      })}:thread:${route.threadId}`;
+      const recoveryDelivered =
+        record.recoveryCommandId === commandId && record.recoveryReceiptSequence !== undefined;
       record = {
         ...record,
         recoveryCommandId: commandId,
         recoveryEvidenceUrl: record.recoveryEvidenceUrl ?? flag(args, "url", process.env.BUILD_URL),
       };
       atomicWriteJson(filePath, record);
-      if (record.recoveryReceiptSequence === undefined) {
-        record = { ...record, recoveryReceiptSequence: callT3(record, "recovered", commandId) };
+      if (!recoveryDelivered) {
+        record = {
+          ...record,
+          recoveryReceiptSequence: callT3(record, "recovered", commandId, route, pending),
+        };
         atomicWriteJson(filePath, record);
       }
       gh([

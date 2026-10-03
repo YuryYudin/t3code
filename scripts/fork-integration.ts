@@ -48,6 +48,7 @@ async function main() {
       const state = integration.read();
       return output({
         kind: state.kind,
+        checkout: state.checkout,
         inputs: state.inputs,
         status: state.status,
         conflicts: state.conflicts,

@@ -74,6 +74,13 @@ def requestIntegrationRepair(Map resolved, String feedback = '') {
             def feedbackArg = ''
             if (feedback) {
                 unstash feedback
+                sh "node scripts/fork-integration.ts inspect ${integrationArgs(resolved)} > .fork-repair-location.json"
+                def repairCheckout = readJsonScalar('.fork-repair-location.json', 'checkout')
+                // A feedback attempt must be able to discover follow-on failures
+                // locally instead of spending another bounded agent request.
+                dir(repairCheckout) {
+                    installWorkspace()
+                }
                 feedbackArg = '--feedback .fork-quality.log'
             }
             withCredentials([
@@ -225,6 +232,21 @@ def diagnoseAppleNotarizationAccount() {
     if (failed) error('Apple Notary API diagnostics failed; compare the sanitized responses from both hosts.')
 }
 
+def ensureMacBuildSpace() {
+    def freeBytes = {
+        sh(returnStdout: true, script: "python3 -c 'import shutil,tempfile; print(shutil.disk_usage(tempfile.gettempdir()).free)'").trim().toLong()
+    }
+    if (freeBytes() < 12L * 1024 * 1024 * 1024) {
+        echo 'Mac build storage is low; pruning regenerable Jenkins package downloads.'
+        sh 'corepack pnpm store prune'
+        // pip reports a nonzero status when its cache is already empty.
+        sh(returnStatus: true, script: 'python3 -m pip cache purge')
+    }
+    if (freeBytes() < 8L * 1024 * 1024 * 1024) {
+        error('Mac packaging requires at least 8 GiB free after cache cleanup.')
+    }
+}
+
 def buildMac(String slug, String candidateRef, String version, boolean publishRelease) {
     node('macos') {
         stage("${slug}: macOS arm64 + x64") {
@@ -237,6 +259,7 @@ def buildMac(String slug, String candidateRef, String version, boolean publishRe
                         'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
                         'T3CODE_MACOS_PASSKEYS=false',
                     ]) {
+                        ensureMacBuildSpace()
                         installWorkspace()
                         sh 'rustup update stable --no-self-update'
                         sh 'rustup target add x86_64-apple-darwin'
