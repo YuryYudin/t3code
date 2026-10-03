@@ -1,3 +1,5 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { makeThreadShellFixture } from "../../test-fixtures";
 import type { ProjectCollectionsView } from "../projects/useProjectCollections";
 import {
   CommandId,
@@ -16,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const runtime = vi.hoisted(() => ({
   projectCollections: null as ProjectCollectionsView | null,
   projects: [] as ReadonlyArray<Record<string, unknown>>,
-  threads: [] as ReadonlyArray<Record<string, unknown>>,
+  threads: [] as ReadonlyArray<EnvironmentThreadShell>,
   pendingTasks: [] as ReadonlyArray<Record<string, unknown>>,
   confirmDeletePendingTask: vi.fn(),
   openPendingTask: vi.fn(),
@@ -30,6 +32,7 @@ const runtime = vi.hoisted(() => ({
 const atoms = vi.hoisted(() => ({
   preferences: Symbol("preferences"),
   serverConfigs: Symbol("serverConfigs"),
+  listEnvironments: Symbol("listEnvironments"),
 }));
 
 vi.mock("react-native", () => ({
@@ -61,13 +64,28 @@ vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: symbol) =>
     atom === atoms.preferences
       ? { _tag: "Success", value: { projectCollectionScope: runtime.projectCollectionScope } }
-      : new Map(),
+      : atom === atoms.listEnvironments
+        ? {
+            providersByEnvironmentId: new Map(),
+            machineByEnvironmentId: new Map(),
+            settlementEnvironmentIds: new Set(),
+            snoozeEnvironmentIds: new Set(),
+            pinningEnvironmentIds: new Set(),
+            autoSettleOptOutEnvironmentIds: new Set(),
+            pinReorderEnvironmentIds: new Set(),
+            activeReorderEnvironmentIds: new Set(),
+            titleRegenerationEnvironmentIds: new Set(),
+          }
+        : new Map(),
 }));
 vi.mock("../../state/preferences", () => ({
   mobilePreferencesAtom: atoms.preferences,
   updateMobilePreferencesAtom: Symbol("updateMobilePreferencesAtom"),
 }));
-vi.mock("../../state/server", () => ({ environmentServerConfigsAtom: atoms.serverConfigs }));
+vi.mock("../../state/server", () => ({
+  environmentServerConfigsAtom: atoms.serverConfigs,
+  threadListEnvironmentsAtom: atoms.listEnvironments,
+}));
 vi.mock("../../state/entities", () => ({
   useProjects: () => runtime.projects,
   useNavigationThreadShells: () => runtime.threads,
@@ -241,15 +259,17 @@ const PROJECTS = [
   project("work", "github.com/acme/work", "2026-09-03T00:00:00.000Z"),
   project("personal", "github.com/acme/personal", "2026-09-01T00:00:00.000Z"),
 ];
-const THREADS = PROJECTS.map((candidate, index) => ({
-  environmentId: ENVIRONMENT_ID,
-  id: `thread-${index}`,
-  projectId: candidate.id,
-  title: candidate.title,
-  archivedAt: null,
-  createdAt: candidate.createdAt,
-  updatedAt: candidate.updatedAt,
-}));
+const THREADS = PROJECTS.map((candidate, index) =>
+  makeThreadShellFixture({
+    environmentId: ENVIRONMENT_ID,
+    id: ThreadId.make(`thread-${index}`),
+    projectId: candidate.id,
+    title: candidate.title,
+    archivedAt: null,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt,
+  }),
+);
 
 function document(): ProjectCollectionsDocument {
   return {
@@ -429,15 +449,15 @@ describe("ThreadNavigationSidebar project collections", () => {
     runtime.projects = [...PROJECTS, remoteProject];
     runtime.threads = [
       ...THREADS,
-      {
+      makeThreadShellFixture({
         environmentId: remoteProject.environmentId,
-        id: "thread-remote",
+        id: ThreadId.make("thread-remote"),
         projectId: remoteProject.id,
         title: remoteProject.title,
         archivedAt: null,
         createdAt: remoteProject.createdAt,
         updatedAt: remoteProject.updatedAt,
-      },
+      }),
     ];
     runtime.selectedEnvironmentId = ENVIRONMENT_ID;
     runtime.projectCollectionScope = { kind: "collection", collectionId: WORK_ID };
