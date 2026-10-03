@@ -20,7 +20,8 @@ export type DiffPanelSelection =
 const DIFF_PANEL_STORAGE_KEY = "t3code:diff-panel-state:v1";
 const DIFF_PANEL_STORAGE_VERSION = 2;
 
-const DEFAULT_SELECTION: DiffPanelSelection = { kind: "unstaged" };
+// "branch" is the Changes view: everything this checkout changed since its base.
+const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
