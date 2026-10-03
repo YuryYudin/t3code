@@ -375,7 +375,7 @@ describe("pickFolder", () => {
           Layer.mock(ElectronDialog.ElectronDialog)({
             pickFolder: (input) => {
               owners.push(input.owner);
-              return Effect.succeed(Option.some("/projects/app"));
+              return Effect.succeedSome("/projects/app");
             },
           }),
           appWindowRegistryLayer([first, second]),

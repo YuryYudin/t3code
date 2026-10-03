@@ -3,12 +3,13 @@ import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
-  ProviderInstanceId,
   ThreadId,
   type ProjectCollectionsDocument,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+
+import { makeThreadShellFixture } from "../../test-fixtures";
 
 import { buildMobileProjectCollectionsModel } from "./mobileProjectCollections";
 
@@ -48,29 +49,16 @@ const freshUnidentified = {
   updatedAt: "2026-09-02T00:00:00.000Z",
 };
 const projects = [identified, freshUnidentified];
-const threads = projects.map((project, index) => ({
-  environmentId: project.environmentId,
-  id: ThreadId.make(`thread-${index}`),
-  projectId: project.id,
-  title: project.title,
-  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-  runtimeMode: "full-access" as const,
-  interactionMode: "default" as const,
-  branch: null,
-  pullRequests: [],
-  worktreePath: null,
-  latestTurn: null,
-  archivedAt: null,
-  session: null,
-  latestUserMessageAt: null,
-  hasPendingApprovals: false,
-  hasPendingUserInput: false,
-  hasActionableProposedPlan: false,
-  settledOverride: null,
-  settledAt: null,
-  createdAt: project.createdAt,
-  updatedAt: project.updatedAt,
-}));
+const threads = projects.map((project, index) =>
+  makeThreadShellFixture({
+    environmentId: project.environmentId,
+    id: ThreadId.make(`thread-${index}`),
+    projectId: project.id,
+    title: project.title,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  }),
+);
 const document: ProjectCollectionsDocument = {
   schemaVersion: 1,
   collections: [

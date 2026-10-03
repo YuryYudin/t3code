@@ -2539,13 +2539,14 @@ export default function Sidebar() {
     },
     [setProjectCollectionScope],
   );
-  const projectCollectionsEnvironment = useMemo(
-    () =>
-      environments.find(
-        (environment) => environment.environmentId === projectCollections.referenceEnvironmentId,
-      ) ?? null,
-    [environments, projectCollections.referenceEnvironmentId],
-  );
+  const projectCollectionsEnvironment = useMemo(() => {
+    const environment = environments.find(
+      (environment) => environment.environmentId === projectCollections.referenceEnvironmentId,
+    );
+    return environment
+      ? { ...environment, serverConfig: serverConfigs.get(environment.environmentId) ?? null }
+      : null;
+  }, [environments, projectCollections.referenceEnvironmentId, serverConfigs]);
   const scopedProjectKeys = projectCollectionsModel.scopedProjectKeys;
   // Named scopes can go stale after a remote delete. Project scopes wait for
   // every project snapshot so a disconnected environment is not mistaken for
@@ -4644,52 +4645,54 @@ export default function Sidebar() {
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)] pt-1">
-            <SidebarThreadHeader
-              hasProjects={false}
-              projectScope={null}
-              onNewProject={openAddProjectCommandPalette}
-              onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
-              newThreadShortcutLabel={newThreadShortcutLabel}
-              newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
-              searchInputRef={threadSearchInputRef}
-              searchQuery={threadSearchQuery}
-              onSearchQueryChange={(value) => {
-                setThreadSearchQuery(value);
-                setActiveSearchResultIndex(0);
-              }}
-              onSearchKeyDown={handleThreadSearchKeyDown}
-              isSearching={isSearchingThreads}
-              searchResultCount={threadSearchResults.length}
-              activeSearchResultIndex={activeSearchResultIndex}
-              onClearSearch={clearThreadSearch}
-            />
-            {projectGroups.length > 0 ? (
-              <SidebarProjectCollections
-                model={projectCollectionsModel}
-                view={projectCollections}
-                environment={projectCollectionsEnvironment}
-                scopePickerOpen={projectCollectionPickerOpen}
-                onScopePickerOpenChange={setProjectCollectionPickerOpen}
-                onScopeChange={setProjectCollectionScope}
+          <SidebarGroup className="relative z-[1]">
+            <div className="flex flex-col gap-1">
+              <SidebarThreadHeader
+                hasProjects={false}
+                projectScope={null}
                 onNewProject={openAddProjectCommandPalette}
-                onProjectSettings={(project) => {
-                  const projectRef = project.identity.group.memberProjectRefs[0];
-                  const projectGroup = projectRef
-                    ? projectGroups.find((group) =>
-                        group.memberProjectRefs.some(
-                          (candidate) =>
-                            candidate.environmentId === projectRef.environmentId &&
-                            candidate.projectId === projectRef.projectId,
-                        ),
-                      )
-                    : null;
-                  if (projectGroup) openProjectSettings(projectGroup);
+                onNewThread={handleNewThreadClick}
+                newThreadDisabled={projects.length === 0}
+                newThreadShortcutLabel={newThreadShortcutLabel}
+                newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
+                showNewThreadInProjectHint={projectGroups.length > 1}
+                searchInputRef={threadSearchInputRef}
+                searchQuery={threadSearchQuery}
+                onSearchQueryChange={(value) => {
+                  setThreadSearchQuery(value);
+                  setActiveSearchResultIndex(0);
                 }}
+                onSearchKeyDown={handleThreadSearchKeyDown}
+                isSearching={isSearchingThreads}
+                searchResultCount={threadSearchResults.length}
+                activeSearchResultIndex={activeSearchResultIndex}
+                onClearSearch={clearThreadSearch}
               />
-            ) : null}
+              {projectGroups.length > 0 ? (
+                <SidebarProjectCollections
+                  model={projectCollectionsModel}
+                  view={projectCollections}
+                  environment={projectCollectionsEnvironment}
+                  scopePickerOpen={projectCollectionPickerOpen}
+                  onScopePickerOpenChange={setProjectCollectionPickerOpen}
+                  onScopeChange={setProjectCollectionScope}
+                  onNewProject={openAddProjectCommandPalette}
+                  onProjectSettings={(project) => {
+                    const projectRef = project.identity.group.memberProjectRefs[0];
+                    const projectGroup = projectRef
+                      ? projectGroups.find((group) =>
+                          group.memberProjectRefs.some(
+                            (candidate) =>
+                              candidate.environmentId === projectRef.environmentId &&
+                              candidate.projectId === projectRef.projectId,
+                          ),
+                        )
+                      : null;
+                    if (projectGroup) openProjectSettings(projectGroup);
+                  }}
+                />
+              ) : null}
+            </div>
           </SidebarGroup>
         }
       >
@@ -4917,7 +4920,7 @@ export default function Sidebar() {
                                     projectLabel: collectionProject.label,
                                     onOpenPicker: openProjectCollectionPicker,
                                     onDragEnd: closeProjectCollectionPicker,
-                                }
+                                  }
                             }
                             changeRequestSnapshot={
                               changeRequestSnapshotByKey.get(threadKey) ?? null

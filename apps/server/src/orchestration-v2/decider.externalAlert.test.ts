@@ -134,7 +134,7 @@ it.effect.each([
     [incidentItem()],
     modelSelection,
   ],
-] as const)("rejects %s", (_label, alert, existingThread, turnItems, defaultModelSelection) =>
+] as const)("rejects %s", ([_label, alert, existingThread, turnItems, defaultModelSelection]) =>
   planExternalAlertCommand({
     command: alert,
     project: { defaultModelSelection },

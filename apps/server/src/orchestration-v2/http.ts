@@ -30,6 +30,7 @@ import {
   OLDER_THREAD_USER_TURN_LIMIT,
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import { dispatchMaintenanceCommand } from "./MaintenanceDispatch.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import { buildActiveShellSnapshot } from "./ShellStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
@@ -170,11 +171,11 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
 
     return handlers
       .handle(
-        "dispatchExternalAlert",
+        "dispatchMaintenance",
         Effect.fn("environment.orchestration.dispatchExternalAlert")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
-          return yield* threadManagement.dispatch(args.payload).pipe(
+          return yield* dispatchMaintenanceCommand(args.payload).pipe(
             Effect.map((result) => ({ sequence: result.sequence })),
             Effect.catch((cause) =>
               failEnvironmentInternal("orchestration_dispatch_failed", cause),

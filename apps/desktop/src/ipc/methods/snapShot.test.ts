@@ -375,7 +375,7 @@ describe("window capture IPC", () => {
             ),
           ),
           Layer.succeed(ElectronWindow.ElectronWindow, {
-            main: Effect.succeed(Option.some({ webContents: { id: 7 } })),
+            main: Effect.succeedSome({ webContents: { id: 7 } }),
           } as ElectronWindow.ElectronWindow["Service"]),
           Layer.succeed(DesktopSnapShot.DesktopSnapShot, {
             previewConfig: () =>
