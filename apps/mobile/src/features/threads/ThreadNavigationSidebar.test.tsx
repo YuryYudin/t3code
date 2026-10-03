@@ -70,6 +70,7 @@ vi.mock("../../state/preferences", () => ({
 vi.mock("../../state/server", () => ({ environmentServerConfigsAtom: atoms.serverConfigs }));
 vi.mock("../../state/entities", () => ({
   useProjects: () => runtime.projects,
+  useNavigationThreadShells: () => runtime.threads,
   useThreadShells: () => runtime.threads,
 }));
 vi.mock("../../state/queries", () => ({

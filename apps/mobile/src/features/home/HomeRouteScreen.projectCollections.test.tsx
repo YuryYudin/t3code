@@ -52,6 +52,7 @@ vi.mock("../../native/StackHeader", () => ({
 }));
 vi.mock("../../state/entities", () => ({
   useProjects: () => runtime.projects,
+  useNavigationThreadShells: () => runtime.threads,
   useThreadShells: () => runtime.threads,
 }));
 vi.mock("../../state/use-pending-new-tasks", () => ({ usePendingNewTasks: () => [] }));
