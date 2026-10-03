@@ -239,7 +239,8 @@ def ensureMacBuildSpace() {
     if (freeBytes() < 12L * 1024 * 1024 * 1024) {
         echo 'Mac build storage is low; pruning regenerable Jenkins package downloads.'
         sh 'corepack pnpm store prune'
-        sh 'python3 -m pip cache purge'
+        // pip reports a nonzero status when its cache is already empty.
+        sh(returnStatus: true, script: 'python3 -m pip cache purge')
     }
     if (freeBytes() < 8L * 1024 * 1024 * 1024) {
         error('Mac packaging requires at least 8 GiB free after cache cleanup.')
