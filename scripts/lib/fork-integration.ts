@@ -445,7 +445,7 @@ export class Integration {
       `Protected automation files must exactly match the frozen source: ${AUTOMATION_PATHS.join(", ")}. Do not weaken tests or verification gates.`,
       "Run only focused checks relevant to the repair when tools are already available. Do not install the entire workspace just to run checks; Jenkins owns dependency installation, repository-wide checks, and native builds. If local test tooling is unavailable, finish the source resolution and return the receipt so Jenkins can supply gate feedback. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
       feedback
-        ? `Jenkins gate feedback:\n${feedback.slice(-16000)}`
+        ? `Jenkins installed the workspace dependencies in this checkout before this feedback attempt. Run the failing focused tests locally and iterate until they pass, including follow-on errors that the first missing mock export may have hidden. Run the relevant scoped type checks for production changes. Parser checks alone are not sufficient when the test runner is available.\nJenkins gate feedback:\n${feedback.slice(-16000)}`
         : "Inspect the merge diff and relevant upstream commits before adapting the fork.",
       `Before returning the receipt, run node scripts/fork-integration.ts share --checkout ${state.checkout} --uid ${process.getuid?.()} from this checkout. It grants Jenkins access only to files you own here, excluding dependencies and symlink targets.`,
       `Stage all intended tracked repairs, ensure no unresolved paths or unstaged edits remain, then write ${NodePath.join(state.checkout, ".fork-repair-complete.json")} atomically with exactly {"requestId":${JSON.stringify(id)},"status":"completed"}. Create the receipt with mode 0644 so Jenkins can read it. This receipt is the last filesystem operation; finish the turn immediately afterward. If unable to resolve, write the same receipt with status "failed" and a concise detail. Never fabricate success.`,
@@ -710,15 +710,15 @@ export async function dispatchRepair(
   feedback = "",
 ): Promise<RepairRequest> {
   const { state, request } = integration.request(feedback);
-  const threadId = `t3-fork-maintenance-${state.kind}`;
+  const threadId = "t3-fork-maintenance-integration";
   // Persisted request IDs let a restarted Jenkins build reuse the same turn.
   if (request.receiptSequence !== undefined) return request;
   await dispatch({
     type: "thread.create",
-    commandId: `fork-maintenance:${state.kind}:create`,
+    commandId: "fork-maintenance:create",
     threadId,
     projectId,
-    title: `Automatic fork ${state.kind} maintenance`,
+    title: "Automatic fork maintenance",
     modelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",

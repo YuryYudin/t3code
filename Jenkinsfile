@@ -74,6 +74,13 @@ def requestIntegrationRepair(Map resolved, String feedback = '') {
             def feedbackArg = ''
             if (feedback) {
                 unstash feedback
+                sh "node scripts/fork-integration.ts inspect ${integrationArgs(resolved)} > .fork-repair-location.json"
+                def repairCheckout = readJsonScalar('.fork-repair-location.json', 'checkout')
+                // A feedback attempt must be able to discover follow-on failures
+                // locally instead of spending another bounded agent request.
+                dir(repairCheckout) {
+                    installWorkspace()
+                }
                 feedbackArg = '--feedback .fork-quality.log'
             }
             withCredentials([

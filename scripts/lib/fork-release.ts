@@ -88,6 +88,7 @@ export interface IncidentRecord {
   readonly issueNumber?: number;
   readonly failureCommandId?: string;
   readonly failureReceiptSequence?: number;
+  readonly notificationThreadId?: string;
   readonly recoveryCommandId?: string;
   readonly recoveryReceiptSequence?: number;
   readonly githubCompleted?: boolean;
@@ -231,6 +232,40 @@ export function isIncidentRecoverable(input: {
 
 export function incidentThreadId(issueNumber: number): string {
   return `t3-fork-incident-${issueNumber}`;
+}
+
+export function maintenanceNotificationRoute(
+  stateDir: string,
+  repository: string,
+): {
+  threadId: string;
+  incidentKey: string;
+} {
+  const repositoryHash = NodeCrypto.createHash("sha256").update(repository).digest("hex");
+  const path = NodePath.join(stateDir, `maintenance-thread-${repositoryHash}.json`);
+  if (NodeFS.existsSync(path)) return readJsonFile(path);
+  const outbox = NodePath.join(stateDir, "incident-outbox");
+  const records = NodeFS.existsSync(outbox)
+    ? NodeFS.readdirSync(outbox)
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readJsonFile<IncidentRecord>(NodePath.join(outbox, name)))
+        .filter((record) => record.repository === repository && record.issueNumber !== undefined)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : [];
+  const existing =
+    records.find((record) => !record.githubCompleted && record.mode === "nightly-integration") ??
+    records.find((record) => !record.githubCompleted) ??
+    records[0];
+  const route = existing
+    ? { threadId: incidentThreadId(existing.issueNumber!), incidentKey: existing.incidentKey }
+    : {
+        threadId: `t3-fork-incident-maintenance-${repositoryHash.slice(0, 12)}`,
+        incidentKey: `jenkins:${repository}:maintenance`,
+      };
+  // This binding survives recovery and new GitHub issues. T3 ownership is
+  // attached to the thread, so retain the adopted thread's original owner.
+  atomicWriteJson(path, route);
+  return route;
 }
 
 export function outboxRecordId(key: string, buildNumber: string): string {
