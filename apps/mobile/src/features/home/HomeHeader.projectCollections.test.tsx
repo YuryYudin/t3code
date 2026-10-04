@@ -184,6 +184,27 @@ describe("HomeHeader project collections", () => {
     expect(callbacks.onProjectCollectionScopeChange).toHaveBeenCalledTimes(2);
   });
 
+  it("renders the collection scope strip below the Material toolbar on Android", () => {
+    // Regression: with headerShown false, only the toolbar applies the
+    // status-bar inset. A strip rendered above it in the tree renders above
+    // it on screen too (plain flex flow, no absolute positioning here), so it
+    // sat under the status bar. Render order is the layout order.
+    act(() => {
+      renderer = create(<AndroidHomeHeader {...props} />);
+    });
+
+    const tree = renderer!.toJSON();
+    const topLevelNodes = Array.isArray(tree) ? tree : [tree];
+    const toolbarIndex = topLevelNodes.findIndex(
+      (node) => node?.type === "material-thread-list-toolbar",
+    );
+    const stripIndex = topLevelNodes.findIndex(
+      (node) => node?.props?.testID === "project-collection-scope-strip",
+    );
+    expect(toolbarIndex).toBeGreaterThanOrEqual(0);
+    expect(stripIndex).toBeGreaterThan(toolbarIndex);
+  });
+
   it("does not mark All projects selected for an Android collection scope", () => {
     act(() => {
       renderer = create(
