@@ -128,7 +128,6 @@ export function HomeHeader(props: HomeHeaderProps) {
   return (
     <>
       <NativeStackScreenOptions options={{ headerShown: false }} />
-      <ProjectCollectionScopeStrip {...props} />
       <MaterialThreadListToolbar
         searchQuery={props.searchQuery}
         onSearchQueryChange={props.onSearchQueryChange}
@@ -138,6 +137,10 @@ export function HomeHeader(props: HomeHeaderProps) {
         onOpenSettings={props.onOpenSettings}
         onOpenEnvironments={props.onOpenEnvironments}
       />
+      {/* Below the toolbar: with headerShown false, the toolbar is the only
+          thing applying the status-bar inset (see useMaterialToolbarLayout).
+          A strip rendered above it would sit under the status bar. */}
+      <ProjectCollectionScopeStrip {...props} />
     </>
   );
 }
