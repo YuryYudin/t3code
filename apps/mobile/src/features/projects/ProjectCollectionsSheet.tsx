@@ -475,7 +475,13 @@ export function ProjectCollectionsSheetView(props: ProjectCollectionsSheetViewPr
       : null;
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet" testID="project-collections-sheet">
+    <View
+      collapsable={false}
+      className="flex-1 bg-sheet"
+      testID="project-collections-sheet"
+      // iOS presents the pageSheet Modal below the status bar; Android's is edge-to-edge.
+      style={Platform.OS === "android" ? { paddingTop: insets.top } : undefined}
+    >
       <View
         accessibilityElementsHidden={modalOpen && Platform.OS === "ios"}
         className="flex-1"
