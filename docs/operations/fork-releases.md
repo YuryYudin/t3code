@@ -21,6 +21,24 @@ On 2026-10-01, `v0.0.45-1`, `v0.0.45-2`, and `v0.0.45-3` were withdrawn from the
 
 Keep the original tags and artifacts for the withdrawn releases. Renaming their GitHub tags or files would not change the version embedded in the signed apps or updater manifests. The corrected allocator reserves these archived tags but requires a published stable fork release on the exact upstream version before treating that upstream release as covered.
 
+## Building the fork Android APK by hand
+
+Jenkins does not yet publish a fork Android release. To build one locally so it installs side-by-side with the upstream Play Store app (`com.t3tools.t3code`), from `apps/mobile`:
+
+```sh
+export T3CODE_MOBILE_DISTRIBUTION=fork
+export T3CODE_ANDROID_KEYSTORE_FILE=/absolute/path/to/release.keystore
+export T3CODE_ANDROID_KEYSTORE_PASSWORD=...
+export T3CODE_ANDROID_KEY_ALIAS=...
+export T3CODE_ANDROID_KEY_PASSWORD=...
+APP_VARIANT=production EXPO_NO_GIT_STATUS=1 npx expo prebuild --platform android --clean
+cd android && ./gradlew assembleRelease
+```
+
+The APK lands at `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`. `T3CODE_MOBILE_DISTRIBUTION=fork` points the app at `com.tapnetix.t3code`, names it "T3 Code Fork", and disables expo-updates so the binary never takes an upstream OTA. The four `T3CODE_ANDROID_*` env vars are read by Gradle at build time and never written to a generated file; `assembleRelease` fails before signing if any are missing instead of falling back to the debug key.
+
+Back up the release keystore and its passwords permanently, outside this repository. A lost key cannot be replaced: Android refuses to install an update signed with a different key, so every user would have to uninstall and reinstall to get a future release.
+
 ## Access from the maintainer workspace
 
 Jenkins is at `http://kubuntu:8080`. `curl --netrc` uses the existing local `~/.netrc` login. Check authenticated `/api/json` before concluding that an anonymous HTTP 403 requires a new credential. Keep `~/.netrc`, Jenkins crumbs, cookies, and API tokens out of logs, commits, and replies.
@@ -74,7 +92,6 @@ The macOS stage signs `com.tapnetix.t3code` with the existing Developer ID certi
 The macOS stage also runs `scripts/ensure-apple-developer-id-g2.py`, which fetches Apple's **public** Developer ID G2 intermediate, verifies its pinned SHA-256, and makes it visible in the Jenkins user's keychain search list. This is separate from the private Developer ID identity in `apple-certificate`; do not rotate that credential merely because `security find-identity -v` reports zero valid identities. Compare a failing build with a known signed build and inspect the certificate chain and keychain search list first.
 
 An Apple notarization HTTP 403 reporting a missing or expired agreement is an Apple response, not proof of an unsigned agreement. Before requesting account changes, run `ACTION=apple-account-check`: it reads the Notary API directly from kubuntu and macOS with the existing credential bindings, reports clock skew and a public key fingerprint, and uploads nothing. Compare both responses with `notarytool` and Apple's service status. If account inspection identifies pending terms or a membership issue, the [Account Holder](https://developer.apple.com/help/account/access/roles) must resolve it; the Jenkins API key cannot accept legal terms. Developer ID notarization is separate from App Store submission. On 2026-10-01, code-signature verification succeeded with the existing setup, but Apple returned this agreement error at 09:54 UTC. The last confirmed accepted notarization was earlier that same day at 02:57 UTC in [main build #5](http://kubuntu:8080/job/t3code/job/main/5/), which completed at 03:02 UTC and promoted the tested upstream snapshot to `integration/upstream-main`. This narrows the observed authorization failure window to 02:57–09:54 UTC. Do not rotate Jenkins credentials or rebuild all platforms merely to retry this account check. The [direct API diagnostic build #8](http://kubuntu:8080/job/t3code/job/fix%252Ffork-release-versioning/8/) at 2026-10-01 10:52 UTC received `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED` from both hosts. The public key fingerprints matched, locally verified JWT signatures passed, clock skew was 0–1 seconds, no proxy environment was configured, and TLS verification was enabled. Apple listed no Developer ID Notary Service incident at the time. These checks isolate the rejection to Apple authorization rather than a Mac-only tool failure; they cannot distinguish a real pending agreement from stale Apple account state. Neither probe submitted software or changed any release. A read-only [Redrafter diagnostic build #36](http://kubuntu:8080/job/redrafter/job/main/36/) at 11:46 UTC reproduced the same HTTP 403 using Redrafter's own job context and existing credentials. It used Jenkins Replay to replace that run with only `notarytool history`; the repository pipeline, app, signing keychain, and releases were unchanged. This confirms the rejection affects both apps, rather than T3-specific build configuration.
-
 
 ### Checking whether stored Apple credentials changed
 
