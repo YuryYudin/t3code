@@ -45,7 +45,8 @@ export function ProjectCollectionScopeStrip(props: HomeHeaderProps) {
   return (
     <View
       testID="project-collection-scope-strip"
-      className="flex-row items-center gap-2 px-4 py-2"
+      // On Android the strip sits below the Material toolbar and shares its surface.
+      className="flex-row items-center gap-2 px-4 py-2 android:bg-header"
       // The native iOS navigation bar is translucent, so content begins behind
       // it. Prefer the navigator's measured height and retain a safe fallback
       // for previews and tests outside a header-providing screen.
