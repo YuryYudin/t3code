@@ -10,7 +10,11 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
-const forkDistribution = resolveForkDistribution(repoEnv.T3CODE_MOBILE_DISTRIBUTION, APP_VARIANT);
+const forkDistribution = resolveForkDistribution(
+  repoEnv.T3CODE_MOBILE_DISTRIBUTION,
+  APP_VARIANT,
+  repoEnv.T3CODE_MOBILE_FORK_VERSION,
+);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
@@ -487,5 +491,11 @@ const config: ExpoConfig = {
   },
   ...(forkDistribution ? {} : { owner: "pingdotgg" }),
 };
+
+// Applied after the literal so upstream version bumps don't conflict with the fork.
+if (forkDistribution?.androidVersionName !== undefined) {
+  config.version = forkDistribution.androidVersionName;
+  config.android = { ...config.android, versionCode: forkDistribution.androidVersionCode };
+}
 
 export default config;
