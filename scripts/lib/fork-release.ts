@@ -360,6 +360,10 @@ export function requiredReleaseAssets(names: ReadonlyArray<string>, version: str
       "Windows x64 NSIS",
       (name) => name.includes(versionToken) && name.includes("x64") && name.endsWith(".exe"),
     ],
+    [
+      "Android arm64 APK",
+      (name) => name.includes(versionToken) && name.includes("android") && name.endsWith(".apk"),
+    ],
     ["canonical macOS update manifest", (name) => name === "latest-mac.yml"],
     ["Linux update manifest", (name) => name === "latest-linux.yml"],
     ["Windows update manifest", (name) => name === "latest.yml"],

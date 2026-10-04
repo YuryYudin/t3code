@@ -21,12 +21,15 @@ On 2026-10-01, `v0.0.45-1`, `v0.0.45-2`, and `v0.0.45-3` were withdrawn from the
 
 Keep the original tags and artifacts for the withdrawn releases. Renaming their GitHub tags or files would not change the version embedded in the signed apps or updater manifests. The corrected allocator reserves these archived tags but requires a published stable fork release on the exact upstream version before treating that upstream release as covered.
 
-## Building the fork Android APK by hand
+## Fork Android APK
 
-Jenkins does not yet publish a fork Android release. To build one locally so it installs side-by-side with the upstream Play Store app (`com.t3tools.t3code`), from `apps/mobile`:
+Jenkins publishes `T3-Code-Fork-<version>-android-arm64.apk` as a release asset with every fork release, built for arm64 only (about 95 MB). It installs side-by-side with the upstream Play Store app (`com.t3tools.t3code`) and updates in place from `com.tapnetix.t3code`. A phone can track new releases with [Obtainium](https://github.com/ImranR98/Obtainium).
+
+To build one locally, from `apps/mobile`:
 
 ```sh
 export T3CODE_MOBILE_DISTRIBUTION=fork
+export T3CODE_MOBILE_FORK_VERSION=0.0.45-2
 export T3CODE_ANDROID_KEYSTORE_FILE=/absolute/path/to/release.keystore
 export T3CODE_ANDROID_KEYSTORE_PASSWORD=...
 export T3CODE_ANDROID_KEY_ALIAS=...
@@ -35,7 +38,7 @@ APP_VARIANT=production EXPO_NO_GIT_STATUS=1 npx expo prebuild --platform android
 cd android && ./gradlew assembleRelease
 ```
 
-The APK lands at `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`. `T3CODE_MOBILE_DISTRIBUTION=fork` points the app at `com.tapnetix.t3code`, names it "T3 Code Fork", and disables expo-updates so the binary never takes an upstream OTA. The four `T3CODE_ANDROID_*` env vars are read by Gradle at build time and never written to a generated file; `assembleRelease` fails before signing if any are missing instead of falling back to the debug key.
+The APK lands at `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`. `T3CODE_MOBILE_DISTRIBUTION=fork` points the app at `com.tapnetix.t3code`, names it "T3 Code Fork", and disables expo-updates so the binary never takes an upstream OTA. `T3CODE_MOBILE_FORK_VERSION` sets the APK's versionName and a monotonic versionCode so Android treats later fork releases as updates; see `apps/mobile/forkDistribution.ts`. The four `T3CODE_ANDROID_*` env vars are read by Gradle at build time and never written to a generated file; `assembleRelease` fails before signing if any are missing instead of falling back to the debug key.
 
 Back up the release keystore and its passwords permanently, outside this repository. A lost key cannot be replaced: Android refuses to install an update signed with a different key, so every user would have to uninstall and reinstall to get a future release.
 
@@ -54,7 +57,8 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 - controller and durable state: `built-in` on kubuntu;
 - Linux x64: `linux` (`ggnode*`);
 - macOS arm64 and cross-built x64: `macos` (`mbook`);
-- Windows x64: `pockeo-windows-3`, the provisioned member of the `pockeo-windows` pool. `pockeo-windows-1` lacked Python 3 and Visual Studio C++ prerequisites during the 2026-09-30 nightly build. Do not widen the selection until other workers pass the Windows preflight.
+- Windows x64: `pockeo-windows-3`, the provisioned member of the `pockeo-windows` pool. `pockeo-windows-1` lacked Python 3 and Visual Studio C++ prerequisites during the 2026-09-30 nightly build. Do not widen the selection until other workers pass the Windows preflight;
+- Android arm64 APK: `ggnode2`, the same node that compiles the mobile native compatibility check, using its provisioned Java and Android SDK.
 
 macOS packaging needs at least 8 GiB of free space. Below 12 GiB, Jenkins prunes regenerable pnpm and pip download caches before installing dependencies; if space remains insufficient, it stops before packaging.
 
@@ -67,6 +71,7 @@ Configure the credential IDs referenced by `Jenkinsfile`:
 - Git/GitHub: `github-pockeo-ssh`, `github-release-token` for release contents, and `github-incident-token` with Issues write access;
 - existing Apple credentials: `apple-certificate`, `apple-certificate-password`, `apple-api-issuer`, `apple-api-key-id`, and `apple-api-key-p8`;
 - public production configuration copied from the upstream stable desktop build: `t3code-clerk-publishable-key`, `t3code-clerk-jwt-template`, `t3code-clerk-cli-oauth-client-id`, and `t3code-relay-url`;
+- fork Android release signing: `t3code-android-keystore`, a "Secret file" holding the PKCS12 keystore, and `t3code-android-keystore-password`, a "Secret text" holding its password. The key alias is `t3code-fork`; the key password and store password are the same;
 - the immutable full SHA of the originally reviewed bootstrap source commit: `t3code-bootstrap-source-sha`. Do not replace it with the current `bootstrap/0.0.41-1-source` branch HEAD; that branch later received Jenkinsfile maintenance;
 - incident delivery: `t3code-jenkins-base-url`, `t3code-jenkins-project-id`, `t3code-jenkins-token`, and `t3code-jenkins-model-selection`. The model-selection credential is the selected project's current default model JSON and is used for automatic repairs and the v0.0.40 incident compatibility path.
 
