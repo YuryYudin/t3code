@@ -431,6 +431,8 @@ def buildWindows(String slug, String candidateRef, String version) {
 }
 
 def buildAndroid(String slug, String candidateRef, String version) {
+    // SHA-256 of the t3code-android-keystore certificate; Android only accepts updates signed by it.
+    def releaseCertSha256 = '5c2ddb47261f35bac585e6b1561db8fd86499288ba7c459c9ff6a09ade9937e0'
     node('ggnode2') {
         stage("${slug}: Android arm64 APK") {
             try {
@@ -463,9 +465,12 @@ def buildAndroid(String slug, String candidateRef, String version) {
                         export ANDROID_HOME="\$HOME/Android/Sdk"
                         apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
                         build_tools_dir=\$(ls -d \$ANDROID_HOME/build-tools/*/ | sort -V | tail -n 1)
-                        signer=\$("\${build_tools_dir}apksigner" verify --print-certs "\$apk" | awk -F 'DN: ' '/Signer #1 certificate DN/ { print \$2 }')
-                        if [ "\$signer" != "CN=T3 Code Fork, O=Tapnetix" ]; then
-                            echo "Unexpected APK signer: \$signer" >&2
+                        # Pin the release certificate, not its DN: anyone can mint a key with the same DN,
+                        # and apksigner's line labels differ between build-tools versions.
+                        certs=\$("\${build_tools_dir}apksigner" verify --print-certs "\$apk")
+                        if ! echo "\$certs" | grep -qi 'certificate SHA-256 digest: ${releaseCertSha256}'; then
+                            echo "APK is not signed with the fork release certificate:" >&2
+                            echo "\$certs" >&2
                             exit 1
                         fi
                         badging=\$("\${build_tools_dir}aapt2" dump badging "\$apk")
