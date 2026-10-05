@@ -430,6 +430,64 @@ def buildWindows(String slug, String candidateRef, String version) {
     }
 }
 
+def buildAndroid(String slug, String candidateRef, String version) {
+    // SHA-256 of the t3code-android-keystore certificate; Android only accepts updates signed by it.
+    def releaseCertSha256 = '5c2ddb47261f35bac585e6b1561db8fd86499288ba7c459c9ff6a09ade9937e0'
+    node('ggnode2') {
+        stage("${slug}: Android arm64 APK") {
+            try {
+                checkoutCandidate("candidate-${slug}", candidateRef)
+                withEnv([
+                    'EXPO_NO_DOTENV=1',
+                    'EXPO_NO_GIT_STATUS=1',
+                    'APP_VARIANT=production',
+                    'T3CODE_MOBILE_DISTRIBUTION=fork',
+                    "T3CODE_MOBILE_FORK_VERSION=${version}",
+                ]) {
+                    installWorkspace()
+                    withCredentials([
+                        file(credentialsId: 't3code-android-keystore', variable: 'T3CODE_ANDROID_KEYSTORE_FILE'),
+                        string(credentialsId: 't3code-android-keystore-password', variable: 'T3CODE_ANDROID_KEYSTORE_PASSWORD'),
+                    ]) {
+                        sh '''#!/usr/bin/env bash
+                            set -euo pipefail
+                            export ANDROID_HOME="$HOME/Android/Sdk"
+                            test -d "$ANDROID_HOME"
+                            export T3CODE_ANDROID_KEY_ALIAS=t3code-fork
+                            export T3CODE_ANDROID_KEY_PASSWORD="$T3CODE_ANDROID_KEYSTORE_PASSWORD"
+                            cd apps/mobile
+                            corepack pnpm exec expo prebuild --clean --platform android --no-install
+                            cd android
+                            ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+                        '''
+                    }
+                    sh """
+                        export ANDROID_HOME="\$HOME/Android/Sdk"
+                        apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+                        build_tools_dir=\$(ls -d \$ANDROID_HOME/build-tools/*/ | sort -V | tail -n 1)
+                        # Pin the release certificate, not its DN: anyone can mint a key with the same DN,
+                        # and apksigner's line labels differ between build-tools versions.
+                        certs=\$("\${build_tools_dir}apksigner" verify --print-certs "\$apk")
+                        if ! echo "\$certs" | grep -qi 'certificate SHA-256 digest: ${releaseCertSha256}'; then
+                            echo "APK is not signed with the fork release certificate:" >&2
+                            echo "\$certs" >&2
+                            exit 1
+                        fi
+                        badging=\$("\${build_tools_dir}aapt2" dump badging "\$apk")
+                        echo "\$badging" | grep -q "package: name='com.tapnetix.t3code'"
+                        echo "\$badging" | grep -q "versionName='${version}'"
+                        mkdir -p artifacts/android
+                        cp "\$apk" "artifacts/android/T3-Code-Fork-${version}-android-arm64.apk"
+                    """
+                    stash name: "artifacts-android-${slug}", includes: 'artifacts/android/*'
+                }
+            } finally {
+                deleteDir()
+            }
+        }
+    }
+}
+
 def reportIncident(Map resolved, String failureClass, String summary) {
     node('built-in') {
         checkout scm
@@ -531,6 +589,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         }
         parallel failFast: false,
             macos: { buildMac(slug, candidateRef, version, publishRelease) },
+            android: { buildAndroid(slug, candidateRef, version) },
             linuxWindows: {
                 buildLinux(slug, candidateRef, version)
                 buildWindows(slug, candidateRef, version)
@@ -542,10 +601,11 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 unstash "artifacts-mac-${slug}"
                 unstash "artifacts-linux-${slug}"
                 unstash "artifacts-windows-${slug}"
+                unstash "artifacts-android-${slug}"
                 installWorkspace()
                 sh '''
                     mkdir -p release-complete
-                    for artifact in artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/*; do
+                    for artifact in artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/* artifacts/android/*; do
                         if [ "${artifact##*/}" != builder-debug.yml ]; then
                             cp "$artifact" release-complete/
                         fi

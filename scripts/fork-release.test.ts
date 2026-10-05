@@ -220,6 +220,7 @@ describe("release asset gate", () => {
     "T3-Code-0.0.41-1-x64.zip",
     "T3-Code-0.0.41-1-x86_64.AppImage",
     "T3-Code-Setup-0.0.41-1-x64.exe",
+    "T3-Code-Fork-0.0.41-1-android-arm64.apk",
     "latest-mac.yml",
     "latest-linux.yml",
     "latest.yml",
@@ -237,6 +238,15 @@ describe("release asset gate", () => {
     expect(() => requiredReleaseAssets([...assets, "latest-mac-x64.yml"], "0.0.41-1")).toThrow(
       /must be merged/,
     );
+  });
+
+  it("requires the Android arm64 APK", () => {
+    expect(() =>
+      requiredReleaseAssets(
+        assets.filter((name) => !name.endsWith(".apk")),
+        "0.0.41-1",
+      ),
+    ).toThrow(/Android arm64/);
   });
 
   function releaseFixture() {
@@ -362,6 +372,19 @@ describe("Jenkins release pipeline", () => {
       "--wsl-runtime artifacts\\\\wsl-runtime\\\\t3-${version}-linux-x64.tar.gz",
     );
     expect(pipeline).not.toContain("--wsl-prebuild");
+  });
+
+  it("builds the fork Android APK alongside the desktop matrix", () => {
+    const pipeline = NodeFS.readFileSync(
+      NodePath.resolve(import.meta.dirname, "..", "Jenkinsfile"),
+      "utf8",
+    );
+
+    expect(pipeline).toContain("android: { buildAndroid(slug, candidateRef, version) }");
+    expect(pipeline).toContain("credentialsId: 't3code-android-keystore'");
+    expect(pipeline).toContain("credentialsId: 't3code-android-keystore-password'");
+    expect(pipeline).toContain('stash name: "artifacts-android-${slug}"');
+    expect(pipeline).toContain('unstash "artifacts-android-${slug}"');
   });
 });
 
