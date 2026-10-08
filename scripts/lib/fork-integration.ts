@@ -251,14 +251,7 @@ export class Integration {
         if (result.status !== 0 && !NodeFS.existsSync(mergeHead))
           throw new Error(`Integration merge failed: ${result.stderr || result.stdout}`);
       }
-      let conflicts = unresolved(state.checkout);
-      if (merging === "source") {
-        for (const path of conflicts.filter((path) => AUTOMATION_PATHS.includes(path))) {
-          integrationGit(state.checkout, ["checkout", "--theirs", "--", path]);
-          integrationGit(state.checkout, ["add", "--", path]);
-        }
-        conflicts = unresolved(state.checkout);
-      }
+      let conflicts = this.resolveAutomationConflicts(state);
       if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml") {
         integrationGit(state.checkout, ["checkout", "--ours", "--", "pnpm-lock.yaml"]);
         run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], state.checkout);
@@ -269,6 +262,22 @@ export class Integration {
       state = this.commitMerge(state);
     }
     return this.save({ ...state, status: "prepared", merging: undefined });
+  }
+  private resolveAutomationConflicts(state: IntegrationState): string[] {
+    // Historical automation revisions do not override the reviewed frozen source,
+    // and must not spend repair attempts intended for application compatibility.
+    for (const path of unresolved(state.checkout).filter((path) =>
+      AUTOMATION_PATHS.includes(path),
+    )) {
+      if (
+        integrationGit(state.checkout, ["ls-tree", "--name-only", state.inputs.source, "--", path])
+      ) {
+        integrationGit(state.checkout, ["checkout", state.inputs.source, "--", path]);
+      } else {
+        integrationGit(state.checkout, ["rm", "-f", "--", path]);
+      }
+    }
+    return unresolved(state.checkout);
   }
   private advanceStable(initial: IntegrationState): IntegrationState {
     let state = initial;
@@ -293,7 +302,7 @@ export class Integration {
         )
           throw new Error(`Stable replay failed: ${result.stderr || result.stdout}`);
       }
-      let conflicts = unresolved(state.checkout);
+      let conflicts = this.resolveAutomationConflicts(state);
       if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml") {
         integrationGit(state.checkout, ["checkout", "--ours", "--", "pnpm-lock.yaml"]);
         run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], state.checkout);

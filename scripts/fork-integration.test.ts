@@ -330,6 +330,32 @@ describe("interrupted state transitions", () => {
 });
 
 describe("stable candidate repair", () => {
+  it("replays historical automation using the frozen source without repair attempts", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.source]);
+    f.commit("Jenkinsfile", "old automation\n");
+    f.commit("Jenkinsfile", "intermediate automation\n");
+    const source = f.commit("Jenkinsfile", "current reviewed automation\n");
+    f.git(["checkout", "--detach", f.target]);
+    const target = f.commit("Jenkinsfile", "new upstream automation\n");
+    const stable = new Integration(
+      f.stateDir,
+      { ...f.inputs, source, target },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    expect(stable.prepare(f.repo).conflicts).toEqual(["feature.txt"]);
+    stable.request();
+    const candidate = f.repair(stable);
+    stable.assertCandidate();
+    expect(candidate.status).toBe("prepared");
+    expect(candidate.requests).toHaveLength(1);
+    expect(candidate.replay?.index).toBe(4);
+    expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "Jenkinsfile"), "utf8")).toBe(
+      "current reviewed automation\n",
+    );
+  });
+
   it("replays every fork patch onto the exact stable target without merge commits", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);
