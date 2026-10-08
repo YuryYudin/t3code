@@ -20,7 +20,7 @@ import {
 } from "@t3tools/client-runtime/state/project-collections";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { ProjectCollectionsDocument } from "@t3tools/contracts/settings";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useEnvironments } from "../../state/environments";

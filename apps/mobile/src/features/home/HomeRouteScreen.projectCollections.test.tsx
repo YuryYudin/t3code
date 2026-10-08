@@ -55,6 +55,9 @@ vi.mock("../../state/entities", () => ({
   useNavigationThreadShells: () => runtime.threads,
   useThreadShells: () => runtime.threads,
 }));
+vi.mock("../../state/threads", () => ({
+  environmentThreadShells: { navigationThreadShellsAtom: Symbol("navigationThreadShellsAtom") },
+}));
 vi.mock("../../state/use-pending-new-tasks", () => ({ usePendingNewTasks: () => [] }));
 vi.mock("../../state/workspace", () => ({
   useWorkspaceState: () => ({
@@ -112,6 +115,10 @@ vi.mock("./home-list-options", () => ({
   }),
 }));
 vi.mock("./home-thread-navigation", () => ({ useHomeThreadSelection: () => vi.fn() }));
+vi.mock("./home-route-visibility", () => ({
+  useHomeRouteVisible: () => true,
+  useAtomValueWhileVisible: () => runtime.threads,
+}));
 vi.mock("./usePendingTaskListActions", () => ({
   usePendingTaskListActions: () => ({
     openPendingTask: vi.fn(),

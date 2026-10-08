@@ -675,6 +675,7 @@ export const OrchestrationV2Subagent = Schema.Struct({
   prompt: Schema.String,
   title: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
   // Parent-wake policy for app-owned tasks: "always" offers a continuation on
   // every terminal (async delegations; queue_after_active sequences it behind
   // a live parent run), "settled_only" offers only when the parent has no
@@ -839,6 +840,34 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;
 
+export const OrchestrationV2ProviderGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  "blocked",
+  "usage_limited",
+  "budget_limited",
+  "complete",
+]);
+export type OrchestrationV2ProviderGoalStatus = typeof OrchestrationV2ProviderGoalStatus.Type;
+
+/**
+ * A provider-native goal set with `/goal` (Codex and Claude). The provider
+ * keeps working until it judges the objective met and owns this state; T3
+ * mirrors the latest native report. Usage fields are provider-specific.
+ */
+export const OrchestrationV2ProviderGoal = Schema.Struct({
+  objective: TrimmedNonEmptyString,
+  status: OrchestrationV2ProviderGoalStatus,
+  /** Codex accounting for the goal across its turns. */
+  tokensUsed: Schema.optional(NonNegativeInt),
+  tokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  timeUsedSeconds: Schema.optional(NonNegativeInt),
+  /** Claude: evaluator checks that found the goal unmet, and the latest reason. */
+  checks: Schema.optional(NonNegativeInt),
+  lastCheck: Schema.optional(Schema.String),
+});
+export type OrchestrationV2ProviderGoal = typeof OrchestrationV2ProviderGoal.Type;
+
 export const OrchestrationV2ProviderThread = Schema.Struct({
   id: ProviderThreadId,
   driver: ProviderDriverKind,
@@ -867,6 +896,10 @@ export const OrchestrationV2ProviderThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   nativeMetadata: Schema.optional(Schema.NullOr(OrchestrationV2ProviderThreadNativeMetadata)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Native goal on this provider thread; rows written before goals decode to null. */
+  goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   createdAt: Schema.DateTimeUtc,
@@ -969,6 +1002,25 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   turnTokenUsage: Schema.optional(TurnTokenUsage),
 });
 export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
+
+/**
+ * The provider turn a run attempt is on or ended with. A Codex goal keeps one
+ * run open across several native turns, so an attempt's first turn is not
+ * always its last.
+ */
+export function latestProviderTurnForAttempt<
+  Turn extends Pick<OrchestrationV2ProviderTurn, "runAttemptId" | "ordinal">,
+>(
+  providerTurns: ReadonlyArray<Turn>,
+  attemptId: RunAttemptId | null | undefined,
+): Turn | undefined {
+  let latest: Turn | undefined;
+  for (const turn of providerTurns) {
+    if (attemptId == null || turn.runAttemptId !== attemptId) continue;
+    if (latest === undefined || turn.ordinal > latest.ordinal) latest = turn;
+  }
+  return latest;
+}
 
 export const OrchestrationV2RuntimeRequest = Schema.Struct({
   id: RuntimeRequestId,
@@ -1312,6 +1364,26 @@ export const OrchestrationV2WebSearchResult = Schema.Struct({
 });
 export type OrchestrationV2WebSearchResult = typeof OrchestrationV2WebSearchResult.Type;
 
+export const OrchestrationV2SecretRequestStatus = Schema.Literals([
+  "pending",
+  "saved",
+  "declined",
+  "cancelled",
+]);
+export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
+
+/**
+ * A secret an agent asked the user for. The value never passes through
+ * orchestration: the item carries only what was asked and how it was answered.
+ */
+const OrchestrationV2SecretRequestFields = {
+  type: Schema.Literal("secret_request"),
+  label: TrimmedNonEmptyString,
+  reason: Schema.String,
+  placeholder: Schema.optional(Schema.String),
+  secretStatus: OrchestrationV2SecretRequestStatus,
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1490,6 +1562,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
     targetRunId: Schema.NullOr(RunId),
     targetProviderInstanceId: ProviderInstanceId,
     targetModel: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2SecretRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1829,6 +1905,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   providerInstanceHistory: Schema.optional(Schema.Array(ProviderInstanceId)).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Native goal on the active provider thread; omitted by servers without goals. */
+  goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,
@@ -2259,6 +2337,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     targetRunId: Schema.NullOr(RunId),
     targetProviderInstanceId: ProviderInstanceId,
     targetModel: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2SecretRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -2862,6 +2944,10 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     runId: RunId,
     reason: Schema.optional(Schema.String),
+    /**
+     * Set by the Stop button. Stop also holds the queue, ends the thread's pull request
+     * watches, and stops every delegated task under the thread.
+     */
     holdQueue: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
@@ -2988,6 +3074,7 @@ export const OrchestrationV2Command = Schema.Union([
     targetThreadId: ThreadId,
     targetRunId: Schema.NullOr(RunId),
   }),
+
   Schema.Struct({
     type: Schema.Literal("provider.switch"),
     commandId: CommandId,
@@ -3045,6 +3132,33 @@ const OrchestrationV2InternalCommand = Schema.Union([
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
     providerTurnId: ProviderTurnId,
+  }),
+  /**
+   * Stop for one thread, whatever it is doing: interrupts its running turn, holds its queue,
+   * ends its pull request watches, and drops pending delegated-task wakes. Nothing to stop is
+   * an accepted no-op. Delegated tasks under the thread get their own `thread.stop`.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.stop"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    reason: Schema.optional(Schema.String),
+  }),
+  /**
+   * Records or updates a secret an agent asked the user for. Internal so no
+   * client can mark a request saved without the value being stored.
+   */
+  Schema.Struct({
+    type: Schema.Literal("secret_request.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    turnItemId: TurnItemId,
+    label: TrimmedNonEmptyString,
+    reason: Schema.String,
+    placeholder: Schema.optional(Schema.String),
+    secretStatus: OrchestrationV2SecretRequestStatus,
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
@@ -3164,6 +3278,11 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Allows snapshot fallbacks to contain a bounded, pageable history window. */
   acceptBoundedSnapshot: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Allows bounded snapshot fallbacks to omit `projection.turnItems` entries
+   * that repeat local visible rows. See `turnItemsOmitLocalVisible`.
+   */
+  acceptCompactTurnItems: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
 
@@ -3203,6 +3322,12 @@ export const OrchestrationV2ThreadBoundedSnapshot = Schema.Struct({
   latestLocalTurnOrdinal: Schema.NullOr(NonNegativeInt),
   /** True when complete turns or required live control state exceed the usual byte budget. */
   payloadBudgetExceeded: Schema.optional(Schema.Boolean),
+  /**
+   * Set only for clients that opted in: `projection.turnItems` omits the items
+   * of local visible rows, which lead the full list. Clients must restore them
+   * with `boundedSnapshotProjection` before using the projection.
+   */
+  turnItemsOmitLocalVisible: Schema.optionalKey(Schema.Literal(true)),
 });
 export type OrchestrationV2ThreadBoundedSnapshot = typeof OrchestrationV2ThreadBoundedSnapshot.Type;
 
@@ -3283,6 +3408,8 @@ export const OrchestrationV2ThreadStreamItem = Schema.Union([
     hasMoreHistory: Schema.optionalKey(Schema.Boolean),
     latestLocalTurnOrdinal: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
     payloadBudgetExceeded: Schema.optionalKey(Schema.Boolean),
+    /** Same meaning as on `OrchestrationV2ThreadBoundedSnapshot`. */
+    turnItemsOmitLocalVisible: Schema.optionalKey(Schema.Literal(true)),
   }),
   Schema.Struct({
     kind: Schema.Literal("event"),

@@ -1,22 +1,25 @@
+import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
 import { DEFAULT_PROJECT_COLLECTIONS_DOCUMENT } from "@t3tools/contracts";
 import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AsyncResult } from "effect/reactivity";
+import { use, useCallback, useEffect, useMemo, useState, type ContextType } from "react";
 import { Modal, Platform, useWindowDimensions } from "react-native";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProjects, useNavigationThreadShells } from "../../state/entities";
+import { useProjects } from "../../state/entities";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { environmentThreadShells } from "../../state/threads";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { checkForAppUpdateOnLaunch, startAppUpdateForegroundRecheck } from "../updates/app-updates";
@@ -24,6 +27,7 @@ import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
+import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
 import { useHomeThreadSelection } from "./home-thread-navigation";
 import {
   buildMobileProjectCollectionsModel,
@@ -38,11 +42,13 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
+  const nativePrimaryColumn = use(NativePrimaryColumnContext);
   const { layout } = useAdaptiveWorkspaceLayout();
-  // In split layouts the persistent sidebar IS the thread list, and it owns the
-  // collection scope. Keeping the two branches in separate components stops the
-  // empty detail pane from mounting a second collections controller.
-  return layout.usesSplitView ? <SplitHomeRouteScreen /> : <CompactHomeRouteScreen />;
+  return layout.usesSplitView && nativePrimaryColumn === null ? (
+    <SplitHomeRouteScreen />
+  ) : (
+    <CompactHomeRouteScreen nativePrimaryColumn={nativePrimaryColumn} />
+  );
 }
 
 function SplitHomeRouteScreen() {
@@ -89,10 +95,22 @@ function SplitHomeRouteScreen() {
   );
 }
 
-function CompactHomeRouteScreen() {
+function CompactHomeRouteScreen({
+  nativePrimaryColumn,
+}: {
+  readonly nativePrimaryColumn: ContextType<typeof NativePrimaryColumnContext>;
+}) {
   const { width: windowWidth } = useWindowDimensions();
+  const columnMetrics = useNativeColumnLayoutMetrics();
+  const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
   const projects = useProjects();
-  const threads = useNavigationThreadShells();
+  // Streaming turns rewrite thread shells many times a second. While a Thread
+  // covers Home, rebuilding this list is invisible work.
+  const visible = useHomeRouteVisible();
+  const threads = useAtomValueWhileVisible(
+    environmentThreadShells.navigationThreadShellsAtom,
+    visible,
+  );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -246,10 +264,12 @@ function CompactHomeRouteScreen() {
             shallow-merged. The brand slot also doubles as the connection
             status surface while an environment reconnects. */}
         <NativeStackScreenOptions
-          optionsVersion={windowWidth}
+          optionsVersion={headerWidth}
           options={{
             ...getConnectionAwareBrandHeaderOptions({
-              headerWidth: windowWidth,
+              headerWidth,
+              trailingItemCount:
+                nativePrimaryColumn && Platform.OS === "ios" && Platform.isPad ? 2 : 1,
               onOpenEnvironments: () =>
                 navigation.navigate("SettingsSheet", {
                   screen: "SettingsContent",
