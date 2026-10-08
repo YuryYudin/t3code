@@ -211,14 +211,22 @@ export function isIncidentRecoverable(input: {
   readonly mode: IncidentMode;
   readonly failedTargetIdentity: string;
   readonly successfulTargetIdentity: string;
+  readonly release?: { readonly upstreamVersion: string; readonly sourceSha: string };
   readonly isAncestor: (failedCommit: string, successfulCommit: string) => boolean;
 }): boolean {
   if (input.mode === "out-of-cycle-release") {
-    return input.failedTargetIdentity === input.successfulTargetIdentity;
+    if (input.failedTargetIdentity === input.successfulTargetIdentity) return true;
+    const failed = input.failedTargetIdentity.match(/^candidate:([0-9a-f]{40})$/)?.[1];
+    return (
+      input.release !== undefined &&
+      failed !== undefined &&
+      input.isAncestor(failed, input.release.sourceSha)
+    );
   }
   if (input.mode === "automatic-stable-release") {
     const failed = input.failedTargetIdentity.match(/^stable:(.+)$/)?.[1];
-    const successful = input.successfulTargetIdentity.match(/^stable:(.+)$/)?.[1];
+    const successful =
+      input.release?.upstreamVersion ?? input.successfulTargetIdentity.match(/^stable:(.+)$/)?.[1];
     return (
       failed !== undefined &&
       successful !== undefined &&

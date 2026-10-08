@@ -175,6 +175,51 @@ describe("fork incident identities", () => {
       }),
     ).toBe(false);
   });
+
+  it("uses a verified release to recover covered stable and earlier source failures", () => {
+    const release = { upstreamVersion: "0.0.45", sourceSha: "a".repeat(40) };
+    const success = {
+      successfulTargetIdentity: `candidate:${release.sourceSha}`,
+      release,
+      isAncestor: (failed: string, source: string) =>
+        failed === fullSha && source === release.sourceSha,
+    };
+    expect(
+      isIncidentRecoverable({
+        ...success,
+        mode: "automatic-stable-release",
+        failedTargetIdentity: "stable:0.0.45",
+      }),
+    ).toBe(true);
+    expect(
+      isIncidentRecoverable({
+        ...success,
+        mode: "automatic-stable-release",
+        failedTargetIdentity: "stable:0.0.46",
+      }),
+    ).toBe(false);
+    expect(
+      isIncidentRecoverable({
+        ...success,
+        mode: "out-of-cycle-release",
+        failedTargetIdentity: `candidate:${fullSha}`,
+      }),
+    ).toBe(true);
+    expect(
+      isIncidentRecoverable({
+        ...success,
+        mode: "out-of-cycle-release",
+        failedTargetIdentity: `candidate:${"b".repeat(40)}`,
+      }),
+    ).toBe(false);
+    expect(
+      isIncidentRecoverable({
+        ...success,
+        mode: "nightly-integration",
+        failedTargetIdentity: `commit:${fullSha}`,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("bootstrap manifest", () => {
