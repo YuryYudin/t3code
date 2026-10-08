@@ -508,6 +508,11 @@ def reportIncident(Map resolved, String failureClass, String summary) {
 }
 
 def recoverIncidents(Map resolved) {
+    // A verified release covers the official stable version and its frozen
+    // canonical source, regardless of whether auto or out-of-cycle ran it.
+    def releaseEvidence = resolved.candidateKind == 'stable'
+        ? "--released-upstream-version ${resolved.target.version} --released-source-sha ${resolved.candidateSourceSha}"
+        : ''
     node('built-in') {
         checkout scm
         sh 'git clean -ffdx'
@@ -518,7 +523,7 @@ def recoverIncidents(Map resolved) {
             string(credentialsId: 't3code-jenkins-project-id', variable: 'T3CODE_JENKINS_PROJECT_ID'),
             string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
         ]) {
-            sh "node scripts/fork-release.ts incident recover --state-dir '${env.FORK_RELEASE_STATE_DIR}' --target-identity '${resolved.targetIdentity}' --url '${env.BUILD_URL}'"
+            sh "node scripts/fork-release.ts incident recover --state-dir '${env.FORK_RELEASE_STATE_DIR}' --target-identity '${resolved.targetIdentity}' ${releaseEvidence} --url '${env.BUILD_URL}'"
         }
     }
 }
