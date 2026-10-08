@@ -48,6 +48,7 @@ vi.mock("react-native-safe-area-context", () => ({
 vi.mock("react-native-gesture-handler", () => ({
   Gesture: { Native: () => ({}) },
   GestureDetector: ({ children }: { readonly children?: ReactNode }) => children,
+  useNativeGesture: () => ({}),
 }));
 vi.mock("@legendapp/list/react-native", async () => {
   const React = await import("react");
