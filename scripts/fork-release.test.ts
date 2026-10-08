@@ -176,6 +176,31 @@ describe("fork incident identities", () => {
     ).toBe(false);
   });
 
+  it("recovers legacy integration SHAs only with verified commit ancestry", () => {
+    const successfulTargetIdentity = `commit:${"a".repeat(40)}`;
+    const input = {
+      mode: "nightly-integration" as const,
+      failedTargetIdentity: fullSha,
+      successfulTargetIdentity,
+    };
+    expect(isIncidentRecoverable({ ...input, isAncestor: () => true })).toBe(true);
+    expect(isIncidentRecoverable({ ...input, isAncestor: () => false })).toBe(false);
+    expect(
+      isIncidentRecoverable({
+        ...input,
+        successfulTargetIdentity: `candidate:${"a".repeat(40)}`,
+        isAncestor: () => true,
+      }),
+    ).toBe(false);
+    expect(
+      isIncidentRecoverable({
+        ...input,
+        failedTargetIdentity: fullSha.slice(0, 7),
+        isAncestor: () => true,
+      }),
+    ).toBe(false);
+  });
+
   it("uses a verified release to recover covered stable and earlier source failures", () => {
     const release = { upstreamVersion: "0.0.45", sourceSha: "a".repeat(40) };
     const success = {

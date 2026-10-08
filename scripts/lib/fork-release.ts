@@ -233,7 +233,8 @@ export function isIncidentRecoverable(input: {
       compareStableVersions(failed, successful) <= 0
     );
   }
-  const failed = input.failedTargetIdentity.match(/^commit:([0-9a-f]{40})$/)?.[1];
+  // Early incident records stored the full upstream SHA without a namespace.
+  const failed = input.failedTargetIdentity.match(/^(?:commit:)?([0-9a-f]{40})$/)?.[1];
   const successful = input.successfulTargetIdentity.match(/^commit:([0-9a-f]{40})$/)?.[1];
   return failed !== undefined && successful !== undefined && input.isAncestor(failed, successful);
 }
