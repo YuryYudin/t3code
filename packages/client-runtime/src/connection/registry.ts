@@ -18,19 +18,16 @@ import {
   type ConnectionRegistration,
   type PlatformConnectionRegistration,
   type PrimaryConnectionRegistration,
+  ConnectionCredential,
+  ConnectionProfile,
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as Connectivity from "./connectivity.ts";
-import type {
-  ConnectionAttemptError,
-  ConnectionTarget,
-  NetworkStatus,
-  SupervisorConnectionState,
-} from "./model.ts";
-import { ConnectionBlockedError } from "./model.ts";
+import type { ConnectionAttemptError, NetworkStatus, SupervisorConnectionState } from "./model.ts";
+import { ConnectionBlockedError, ConnectionTarget } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionDriver from "./driver.ts";
@@ -41,6 +38,9 @@ import {
 } from "./githubRoutingPermissions.ts";
 
 const isSshConnectionProfile = Schema.is(SshConnectionProfile);
+const equivalentTarget = Schema.toEquivalence(ConnectionTarget);
+const equivalentProfile = Option.makeEquivalence(Schema.toEquivalence(ConnectionProfile));
+const equivalentCredential = Option.makeEquivalence(Schema.toEquivalence(ConnectionCredential));
 
 export class EnvironmentNotRegisteredError extends Schema.TaggedError<EnvironmentNotRegisteredError>()(
   "EnvironmentNotRegisteredError",
@@ -194,6 +194,24 @@ export const make = Effect.gen(function* () {
   const persistedTargetsByEnvironment = yield* Ref.make<
     ReadonlyMap<EnvironmentId, ConnectionTarget>
   >(new Map(persistedTargets.map((target) => [target.environmentId, target])));
+  const persistedCredentialsByEnvironment = yield* Ref.make<
+    ReadonlyMap<EnvironmentId, Option.Option<ConnectionCredential>>
+  >(
+    new Map(
+      storage.changes === undefined
+        ? []
+        : yield* Effect.forEach(
+            persistedTargets,
+            Effect.fn(function* (target) {
+              const credential =
+                target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+                  ? yield* credentials.get(target.connectionId)
+                  : Option.none<ConnectionCredential>();
+              return [target.environmentId, credential] as const;
+            }),
+          ),
+    ),
+  );
   interface LeaseLock {
     readonly semaphore: Semaphore.Semaphore;
     readonly users: number;
@@ -473,6 +491,14 @@ export const make = Effect.gen(function* () {
           );
         }
         yield* registrations.register(registration);
+        yield* Ref.update(persistedCredentialsByEnvironment, (current) =>
+          new Map(current).set(
+            environmentId,
+            registration._tag === "BearerConnectionRegistration"
+              ? Option.some(registration.credential)
+              : Option.none(),
+          ),
+        );
         yield* Ref.update(persistedTargetsByEnvironment, (current) => {
           const next = new Map(current);
           next.set(environmentId, registration.target);
@@ -671,6 +697,11 @@ export const make = Effect.gen(function* () {
 
         yield* githubRoutingPermissions.forget(environmentId);
         yield* registrations.remove(target);
+        yield* Ref.update(persistedCredentialsByEnvironment, (current) => {
+          const next = new Map(current);
+          next.delete(environmentId);
+          return next;
+        });
         yield* Ref.update(persistedTargetsByEnvironment, (current) => {
           const next = new Map(current);
           next.delete(environmentId);
@@ -869,6 +900,109 @@ export const make = Effect.gen(function* () {
       }),
     );
   });
+
+  const reconcileSavedConnections = Effect.fn("EnvironmentRegistry.reconcileSavedConnections")(
+    function* () {
+      const environmentIds = new Set([
+        ...(yield* Ref.get(persistedTargetsByEnvironment)).keys(),
+        ...(yield* storage.list).map((target) => target.environmentId),
+      ]);
+      yield* Effect.forEach(
+        environmentIds,
+        (environmentId) =>
+          withLeaseLock(
+            environmentId,
+            Effect.gen(function* () {
+              if ((yield* Ref.get(platformEnvironmentIds)).has(environmentId)) return;
+              // Read inside the lease lock so an in-flight local registration wins
+              // over the notification it generated.
+              const target = (yield* storage.list).find(
+                (candidate) => candidate.environmentId === environmentId,
+              );
+              const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+              if (target === undefined) {
+                yield* closeServiceScope(environmentId);
+                yield* Ref.update(persistedTargetsByEnvironment, (current) => {
+                  const next = new Map(current);
+                  next.delete(environmentId);
+                  return next;
+                });
+                yield* Ref.update(persistedCredentialsByEnvironment, (current) => {
+                  const next = new Map(current);
+                  next.delete(environmentId);
+                  return next;
+                });
+                yield* SubscriptionRef.update(entries, (current) => {
+                  const next = new Map(current);
+                  next.delete(environmentId);
+                  return next;
+                });
+                yield* ownedDataCleanup.clear(environmentId);
+                return;
+              }
+              const profile =
+                target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+                  ? yield* profiles.get(target.connectionId)
+                  : Option.none<ConnectionProfile>();
+              const credential =
+                target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+                  ? yield* credentials.get(target.connectionId)
+                  : Option.none<ConnectionCredential>();
+              const entry: ConnectionCatalogEntry = {
+                target,
+                profile,
+                enabled: !(yield* storage.listDisabled).includes(environmentId),
+              };
+              const sameEndpoint =
+                previous !== undefined &&
+                gitHubRoutingConnectionKey(previous) === gitHubRoutingConnectionKey(entry);
+              const next =
+                sameEndpoint && previous.unsupportedReason !== undefined
+                  ? { ...entry, unsupportedReason: previous.unsupportedReason }
+                  : entry;
+              const previousCredential =
+                (yield* Ref.get(persistedCredentialsByEnvironment)).get(environmentId) ??
+                Option.none();
+              if (
+                previous !== undefined &&
+                equivalentTarget(previous.target, target) &&
+                equivalentProfile(previous.profile, profile) &&
+                previous.enabled === next.enabled &&
+                previous.unsupportedReason === next.unsupportedReason &&
+                equivalentCredential(previousCredential, credential)
+              )
+                return;
+              if (previous !== undefined && !sameEndpoint) {
+                yield* githubRoutingPermissions.forget(environmentId);
+              }
+              yield* Ref.update(persistedTargetsByEnvironment, (current) =>
+                new Map(current).set(environmentId, target),
+              );
+              yield* Ref.update(persistedCredentialsByEnvironment, (current) =>
+                new Map(current).set(environmentId, credential),
+              );
+              // Persistence already changed in the other window. Installing only
+              // the runtime avoids writing the catalog back or disconnecting a
+              // shared desktop SSH backend.
+              yield* installEntryLocked(next);
+            }),
+          ),
+        { discard: true },
+      );
+    },
+  );
+  if (storage.changes !== undefined) {
+    yield* storage.changes.pipe(
+      Stream.runForEach(() =>
+        reconcileSavedConnections().pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not reconcile changed saved connections.", { error }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+  }
 
   return EnvironmentRegistry.of({
     entries,
