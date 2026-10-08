@@ -532,7 +532,7 @@ json.dump(s,open(p,'w'))
           [
             ...common,
             "--target-identity",
-            `commit:${f.target}`,
+            f.target,
             "--failure-class",
             "patch-replay",
             "--url",
