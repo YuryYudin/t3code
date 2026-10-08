@@ -465,7 +465,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       assert.deepEqual(next.projectCollections, patch.projectCollections);
       assert.deepEqual(persisted.projectCollections, patch.projectCollections);
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
+    }).pipe(Effect.provide(layerServerSettings())),
   );
 
   it.effect("creates provider instances atomically without overwriting a concurrent add", () =>
