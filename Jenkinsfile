@@ -10,7 +10,10 @@ def readResolvedPlan(String fileName) {
         action: readJsonScalar(fileName, 'action'),
         mode: readJsonScalar(fileName, 'mode'),
         dryRun: readJsonScalar(fileName, 'dryRun') == 'true',
-        target: [commit: readJsonScalar(fileName, 'target.commit')],
+        target: [
+            commit: readJsonScalar(fileName, 'target.commit'),
+            version: readJsonScalar(fileName, 'target.version'),
+        ],
         targetIdentity: readJsonScalar(fileName, 'targetIdentity'),
         observedMainSha: readJsonScalar(fileName, 'observedMainSha'),
         observedIntegrationSha: readJsonScalar(fileName, 'observedIntegrationSha'),
