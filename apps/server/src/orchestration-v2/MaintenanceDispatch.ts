@@ -4,7 +4,7 @@ import {
   type ThreadExternalAlertUpsertCommand,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as OrchestrationEventStore from "../persistence/Services/OrchestrationEventStore.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 
 export const dispatchMaintenanceCommand = Effect.fn("orchestrationV2.maintenance.dispatch")(

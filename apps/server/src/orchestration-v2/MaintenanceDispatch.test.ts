@@ -11,15 +11,15 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { dispatchMaintenanceCommand } from "./MaintenanceDispatch.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import { layerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const adapter = {
@@ -29,15 +29,15 @@ const adapter = {
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("This test does not launch a provider"),
 } as ProviderAdapterV2Shape;
-const orchestratorLayer = makeOrchestratorV2ReplayLayerWithRegistry(
+const orchestratorLayer = layerWithRegistry(
   { name: "maintenance-dispatch" },
-  ProviderAdapterRegistry.makeLayer([adapter]),
-  { databaseLayer: SqlitePersistenceMemory, runEffectWorker: false },
+  ProviderAdapterRegistry.layerFromAdapters([adapter]),
+  { databaseLayer: SqlitePersistence.layerMemory, runEffectWorker: false },
 );
 const testLayer = Layer.mergeAll(
   orchestratorLayer,
   ThreadManagementService.layer.pipe(Layer.provide(orchestratorLayer)),
-  OrchestrationEventStoreLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+  OrchestrationEventStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
 );
 const decode = Schema.decodeSync(MaintenanceCommand);
 

@@ -9,8 +9,8 @@ import * as NetService from "@t3tools/shared/Net";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
-import * as CliError from "effect/unstable/cli/CliError";
-import { Command } from "effect/unstable/cli";
+import * as CliError from "effect/cli/CliError";
+import { Command } from "effect/cli";
 
 import { cli } from "../binCli.ts";
 
@@ -54,13 +54,7 @@ it.effect("issues a restricted session and normalizes duplicate scopes", () =>
 );
 
 it.effect("rejects unsupported session scopes before issuing a token", () =>
-  runCli([
-    "auth",
-    "session",
-    "issue",
-    "--scope",
-    "administrator:everything",
-  ]).pipe(
+  runCli(["auth", "session", "issue", "--scope", "administrator:everything"]).pipe(
     Effect.provide(CliRuntimeLayer),
     Effect.flip,
     Effect.tap((error) => Effect.sync(() => assert.isTrue(CliError.isCliError(error)))),
