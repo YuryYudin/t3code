@@ -628,15 +628,39 @@ json.dump(s,open(p,'w'))
         if (legacy) expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(false);
         await execute(
           [
-            "recover",
+            "open",
+            "--mode",
+            "out-of-cycle-release",
             "--target-identity",
-            "stable:0.0.45",
+            `candidate:${f.base}`,
+            "--failure-class",
+            "mac-signing",
+            "--title",
+            "Maintenance failed",
+            "--summary",
+            "Earlier reviewed source failed notarization",
             "--url",
-            "https://build/release-recovered",
+            "https://build/out-of-cycle-failure",
           ],
           "7",
         );
+        await execute(
+          [
+            "recover",
+            "--target-identity",
+            `candidate:${f.source}`,
+            "--released-upstream-version",
+            "0.0.45",
+            "--released-source-sha",
+            f.source,
+            "--url",
+            "https://build/release-recovered",
+          ],
+          "8",
+        );
         expect(dispatched.at(-1)?.state).toBe("recovered");
+        const finished = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as typeof pending;
+        expect(finished.issues.every((issue) => issue.state === "CLOSED")).toBe(true);
         expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
         if (legacy) {
           expect(createdThreads.size).toBe(1);
@@ -644,7 +668,7 @@ json.dump(s,open(p,'w'))
           expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(true);
         }
         const count = dispatched.length;
-        await execute(["drain"], "8");
+        await execute(["drain"], "9");
         expect(dispatched).toHaveLength(count);
       } finally {
         await new Promise<void>((resolve, reject) =>
