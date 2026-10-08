@@ -42,7 +42,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -1855,7 +1855,7 @@ function encodePowerShellCommand(input: string): string {
     bytes[index * 2] = code & 0xff;
     bytes[index * 2 + 1] = code >>> 8;
   }
-  return Encoding.encodeBase64(bytes);
+  return Base64.encode(bytes);
 }
 
 function windowsPowerShellExecutable(): string {

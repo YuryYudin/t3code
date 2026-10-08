@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -1105,7 +1105,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.include(powershellCommand, "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
         assert.include(powershellArgs, "-EncodedCommand");
         const encodedCommand = powershellArgs.at(-1)!;
-        const encodedBytes = yield* Effect.fromResult(Encoding.decodeBase64(encodedCommand));
+        const encodedBytes = yield* Effect.fromResult(Base64.decode(encodedCommand));
         const powershell = new TextDecoder("utf-16le").decode(encodedBytes);
         assert.include(powershell, "Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
         assert.include(powershell, "lib\\spectre\\x64");
