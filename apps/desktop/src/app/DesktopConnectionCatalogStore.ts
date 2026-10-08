@@ -21,6 +21,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
@@ -164,6 +166,7 @@ export class DesktopConnectionCatalogStore extends Context.Service<
       DesktopConnectionCatalogStoreWriteError | DesktopConnectionCatalogStoreProtectionError
     >;
     readonly clear: Effect.Effect<void>;
+    readonly changes: Stream.Stream<void>;
   }
 >()("@t3tools/desktop/app/DesktopConnectionCatalogStore") {}
 
@@ -385,6 +388,7 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
   const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
+  const revision = yield* SubscriptionRef.make(0);
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
     Effect.mapError(
       (cause) =>
@@ -472,6 +476,7 @@ export const make = Effect.gen(function* () {
   });
 
   return DesktopConnectionCatalogStore.of({
+    changes: SubscriptionRef.changes(revision).pipe(Stream.map(() => undefined)),
     get: Effect.gen(function* () {
       const document = yield* readDocument(fileSystem, catalogPath);
       if (Option.isNone(document)) {
@@ -501,9 +506,11 @@ export const make = Effect.gen(function* () {
         return false;
       }
       yield* writeCatalog(catalog);
+      yield* SubscriptionRef.update(revision, (value) => value + 1);
       return true;
     }),
     clear: fileSystem.remove(catalogPath, { force: true }).pipe(
+      Effect.tap(() => SubscriptionRef.update(revision, (value) => value + 1)),
       Effect.catch((error) =>
         Effect.logWarning("Could not clear the desktop connection catalog.", {
           catalogPath,
