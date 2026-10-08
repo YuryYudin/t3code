@@ -148,6 +148,38 @@ describe("persistent integration", () => {
     expect(() => next.assertCandidate()).toThrow(/dependency patch assets/);
   });
 
+  it("preserves upstream vendored references with whitespace while rejecting edits", () => {
+    const f = fixture();
+    const reference = "upstream reference with trailing space \n\n";
+    const target = f.commit(".repos/example/reference.txt", reference);
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    next.prepare(f.repo);
+    next.request();
+    f.repair(next);
+    next.assertCandidate();
+    const checkout = next.read().checkout;
+    const path = NodePath.join(checkout, ".repos/example/reference.txt");
+    expect(NodeFS.readFileSync(path, "utf8")).toBe(reference);
+    NodeFS.writeFileSync(path, "reformatted reference\n");
+    integrationGit(checkout, ["add", ".repos"]);
+    integrationGit(checkout, ["commit", "-m", "Corrupt vendored reference"]);
+    next.save({ ...next.read(), head: integrationGit(checkout, ["rev-parse", "HEAD"]) });
+    expect(() => next.assertCandidate()).toThrow(/upstream vendored references/);
+  });
+
+  it("still rejects whitespace errors in repaired application code", () => {
+    const f = fixture();
+    f.integration.prepare(f.repo);
+    f.integration.request();
+    expect(() => f.repair(f.integration, "application code with trailing space \n")).toThrow(
+      /feature.txt.*trailing whitespace/s,
+    );
+  });
+
   it("reuses the same pending turn after Jenkins restarts and limits repairs per input", async () => {
     const f = fixture();
     f.integration.prepare(f.repo);
@@ -298,6 +330,32 @@ describe("interrupted state transitions", () => {
 });
 
 describe("stable candidate repair", () => {
+  it("replays historical automation using the frozen source without repair attempts", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.source]);
+    f.commit("Jenkinsfile", "old automation\n");
+    f.commit("Jenkinsfile", "intermediate automation\n");
+    const source = f.commit("Jenkinsfile", "current reviewed automation\n");
+    f.git(["checkout", "--detach", f.target]);
+    const target = f.commit("Jenkinsfile", "new upstream automation\n");
+    const stable = new Integration(
+      f.stateDir,
+      { ...f.inputs, source, target },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    expect(stable.prepare(f.repo).conflicts).toEqual(["feature.txt"]);
+    stable.request();
+    const candidate = f.repair(stable);
+    stable.assertCandidate();
+    expect(candidate.status).toBe("prepared");
+    expect(candidate.requests).toHaveLength(1);
+    expect(candidate.replay?.index).toBe(4);
+    expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "Jenkinsfile"), "utf8")).toBe(
+      "current reviewed automation\n",
+    );
+  });
+
   it("replays every fork patch onto the exact stable target without merge commits", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);
@@ -570,15 +628,39 @@ json.dump(s,open(p,'w'))
         if (legacy) expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(false);
         await execute(
           [
-            "recover",
+            "open",
+            "--mode",
+            "out-of-cycle-release",
             "--target-identity",
-            "stable:0.0.45",
+            `candidate:${f.base}`,
+            "--failure-class",
+            "mac-signing",
+            "--title",
+            "Maintenance failed",
+            "--summary",
+            "Earlier reviewed source failed notarization",
             "--url",
-            "https://build/release-recovered",
+            "https://build/out-of-cycle-failure",
           ],
           "7",
         );
+        await execute(
+          [
+            "recover",
+            "--target-identity",
+            `candidate:${f.source}`,
+            "--released-upstream-version",
+            "0.0.45",
+            "--released-source-sha",
+            f.source,
+            "--url",
+            "https://build/release-recovered",
+          ],
+          "8",
+        );
         expect(dispatched.at(-1)?.state).toBe("recovered");
+        const finished = JSON.parse(NodeFS.readFileSync(ghState, "utf8")) as typeof pending;
+        expect(finished.issues.every((issue) => issue.state === "CLOSED")).toBe(true);
         expect(new Set(dispatched.map((item) => item.threadId)).size).toBe(1);
         if (legacy) {
           expect(createdThreads.size).toBe(1);
@@ -586,7 +668,7 @@ json.dump(s,open(p,'w'))
           expect(legacyUpdates.at(-1)?.title.startsWith("Recovered:")).toBe(true);
         }
         const count = dispatched.length;
-        await execute(["drain"], "8");
+        await execute(["drain"], "9");
         expect(dispatched).toHaveLength(count);
       } finally {
         await new Promise<void>((resolve, reject) =>

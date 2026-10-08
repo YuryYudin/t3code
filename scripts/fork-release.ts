@@ -20,6 +20,7 @@ import {
   incidentMarker,
   maintenanceNotificationRoute,
   isIncidentRecoverable,
+  normalizeStableVersion,
   outboxRecordId,
   parseUpstreamStableRelease,
   publishedReleaseVersions,
@@ -597,6 +598,19 @@ function incidentCommand(args: ParsedArguments): void {
   }
   const dryRun = booleanFlag(args, "dry-run");
   if (dryRun) return output({ status: "dry-run", operation });
+  const releasedUpstream = optionalFlag(args, "released-upstream-version");
+  const releasedSource = optionalFlag(args, "released-source-sha");
+  if ((releasedUpstream !== undefined) !== (releasedSource !== undefined))
+    throw new Error("Release recovery requires both the upstream version and frozen source SHA.");
+  if (releasedUpstream && operation !== "recover")
+    throw new Error("Release evidence is accepted only for incident recovery.");
+  const release =
+    releasedUpstream && releasedSource
+      ? {
+          upstreamVersion: normalizeStableVersion(releasedUpstream),
+          sourceSha: assertFullSha(releasedSource, "Released frozen source"),
+        }
+      : undefined;
   const stateDir = assertAbsoluteStateDirectory(
     flag(args, "state-dir", process.env.FORK_RELEASE_STATE_DIR),
   );
@@ -661,6 +675,7 @@ function incidentCommand(args: ParsedArguments): void {
               mode: record.mode,
               failedTargetIdentity: record.targetIdentity,
               successfulTargetIdentity: flag(args, "target-identity"),
+              ...(release ? { release } : {}),
               isAncestor: (failed, successful) =>
                 NodeChildProcess.spawnSync("git", [
                   "merge-base",
@@ -755,17 +770,7 @@ function incidentCommand(args: ParsedArguments): void {
     }
     if (operation === "recover" && !record.githubCompleted) {
       const successfulIdentity = flag(args, "target-identity");
-      if (
-        !isIncidentRecoverable({
-          mode: record.mode,
-          failedTargetIdentity: record.targetIdentity,
-          successfulTargetIdentity: successfulIdentity,
-          isAncestor: (failed, successful) =>
-            NodeChildProcess.spawnSync("git", ["merge-base", "--is-ancestor", failed, successful])
-              .status === 0,
-        })
-      )
-        continue;
+      if (!recoverable.has(record.recordId)) continue;
       const commandId = `${recoveryCommandId({
         issueNumber: record.issueNumber!,
         targetIdentity: successfulIdentity,
