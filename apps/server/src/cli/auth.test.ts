@@ -46,7 +46,6 @@ it.effect("issues a restricted session and normalizes duplicate scopes", () =>
         "--json",
       ]),
     );
-    // @effect-diagnostics-next-line preferSchemaOverJson:off - assertion reads CLI JSON output.
     const issued = JSON.parse(output) as { readonly scopes: ReadonlyArray<string> };
 
     assert.deepEqual(issued.scopes, ["orchestration:operate"]);
