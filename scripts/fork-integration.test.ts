@@ -148,6 +148,38 @@ describe("persistent integration", () => {
     expect(() => next.assertCandidate()).toThrow(/dependency patch assets/);
   });
 
+  it("preserves upstream vendored references with whitespace while rejecting edits", () => {
+    const f = fixture();
+    const reference = "upstream reference with trailing space \n\n";
+    const target = f.commit(".repos/example/reference.txt", reference);
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    next.prepare(f.repo);
+    next.request();
+    f.repair(next);
+    next.assertCandidate();
+    const checkout = next.read().checkout;
+    const path = NodePath.join(checkout, ".repos/example/reference.txt");
+    expect(NodeFS.readFileSync(path, "utf8")).toBe(reference);
+    NodeFS.writeFileSync(path, "reformatted reference\n");
+    integrationGit(checkout, ["add", ".repos"]);
+    integrationGit(checkout, ["commit", "-m", "Corrupt vendored reference"]);
+    next.save({ ...next.read(), head: integrationGit(checkout, ["rev-parse", "HEAD"]) });
+    expect(() => next.assertCandidate()).toThrow(/upstream vendored references/);
+  });
+
+  it("still rejects whitespace errors in repaired application code", () => {
+    const f = fixture();
+    f.integration.prepare(f.repo);
+    f.integration.request();
+    expect(() => f.repair(f.integration, "application code with trailing space \n")).toThrow(
+      /feature.txt.*trailing whitespace/s,
+    );
+  });
+
   it("reuses the same pending turn after Jenkins restarts and limits repairs per input", async () => {
     const f = fixture();
     f.integration.prepare(f.repo);

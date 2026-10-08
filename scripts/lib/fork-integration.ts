@@ -67,7 +67,7 @@ function run(command: string, args: ReadonlyArray<string>, cwd?: string): string
   });
   if (result.status !== 0)
     throw new Error(
-      `${command} failed: ${(result.stderr || result.stdout || result.error?.message || "").slice(-8000)}`,
+      `${command} failed: ${[result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n").slice(-8000)}`,
     );
   return result.stdout.trim();
 }
@@ -315,6 +315,7 @@ export class Integration {
       "--",
       ".",
       ":(exclude,glob)**/*.patch",
+      ":(exclude).repos",
     ]);
     const tree = integrationGit(state.checkout, ["write-tree"]);
     const message = integrationGit(state.checkout, ["show", "-s", "--format=%B", replay.pending]);
@@ -378,6 +379,7 @@ export class Integration {
       "--",
       ".",
       ":(exclude,glob)**/*.patch",
+      ":(exclude).repos",
     ]);
     const tree = integrationGit(state.checkout, ["write-tree"]);
     const result = NodeChildProcess.spawnSync(
@@ -440,7 +442,7 @@ export class Integration {
       `Work ONLY in ${state.checkout}. This is a disposable shared checkout. The user's project directory and live T3 data must not be changed.`,
       `Frozen source main: ${state.inputs.source}; upstream target: ${state.inputs.target}; observed integration: ${state.inputs.observed}; HEAD must remain ${state.head}.`,
       `Use git -c safe.directory=${state.checkout} for Git commands in this checkout. Do not create commits, reset HEAD, abort a merge, change remotes, push, release, or alter Jenkins/signing credentials. Jenkins creates commits and promotes only after its gates pass.`,
-      "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests. Preserve upstream dependency .patch assets byte for byte; blank context lines in unified diffs intentionally contain a space. Exclude **/*.patch when running git diff --check.",
+      "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests. Preserve upstream dependency .patch assets and read-only .repos references byte for byte; their whitespace is part of the upstream snapshot. Exclude **/*.patch and .repos when running git diff --check.",
       `Unresolved paths: ${state.conflicts.join(", ") || "none; repair the gate failure below"}.`,
       `Protected automation files must exactly match the frozen source: ${AUTOMATION_PATHS.join(", ")}. Do not weaken tests or verification gates.`,
       "Run only focused checks relevant to the repair when tools are already available. Do not install the entire workspace just to run checks; Jenkins owns dependency installation, repository-wide checks, and native builds. If local test tooling is unavailable, finish the source resolution and return the receipt so Jenkins can supply gate feedback. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
@@ -492,6 +494,7 @@ export class Integration {
       "--",
       ".",
       ":(exclude,glob)**/*.patch",
+      ":(exclude).repos",
     ]);
     state = {
       ...state,
@@ -566,6 +569,19 @@ export class Integration {
       ])
     )
       throw new Error("Repair changed upstream dependency patch assets.");
+    // Vendored references are upstream input, including intentional whitespace.
+    // Verify their exact snapshot instead of applying our source formatting rules.
+    if (
+      integrationGit(state.checkout, [
+        "diff",
+        "--name-only",
+        state.inputs.target,
+        state.head,
+        "--",
+        ".repos",
+      ])
+    )
+      throw new Error("Repair changed upstream vendored references.");
     if (
       integrationGit(state.checkout, [
         "diff",
