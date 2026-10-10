@@ -10,7 +10,10 @@ def readResolvedPlan(String fileName) {
         action: readJsonScalar(fileName, 'action'),
         mode: readJsonScalar(fileName, 'mode'),
         dryRun: readJsonScalar(fileName, 'dryRun') == 'true',
-        target: [commit: readJsonScalar(fileName, 'target.commit')],
+        target: [
+            commit: readJsonScalar(fileName, 'target.commit'),
+            version: readJsonScalar(fileName, 'target.version'),
+        ],
         targetIdentity: readJsonScalar(fileName, 'targetIdentity'),
         observedMainSha: readJsonScalar(fileName, 'observedMainSha'),
         observedIntegrationSha: readJsonScalar(fileName, 'observedIntegrationSha'),
@@ -369,6 +372,7 @@ def runQuality(String slug, String candidateRef) {
                 node scripts/fork-release.ts verify-bootstrap
                 corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
                 corepack pnpm run test:project-collections-acceptance
+                corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
                 corepack pnpm exec vp test run scripts/fork-integration.test.ts scripts/fork-release.test.ts scripts/build-desktop-artifact.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
                 corepack pnpm exec vp run --filter @t3tools/contracts --filter @t3tools/shared --filter @t3tools/client-runtime --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop typecheck
                 test -z "$(git status --porcelain)"

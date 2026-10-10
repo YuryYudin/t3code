@@ -1,6 +1,7 @@
 import {
   ConnectionTransientError,
   PrimaryConnectionTarget,
+  BearerConnectionCredential,
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { ConnectionCatalogDocument, Persistence } from "@t3tools/client-runtime/platform";
@@ -8,6 +9,8 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { afterEach, vi } from "vite-plus/test";
@@ -31,6 +34,76 @@ afterEach(() => {
 });
 
 describe("ConnectionStorage.makeCatalogStore", () => {
+  it.effect(
+    "refreshes another window's credentials and preserves them in later stale-window writes",
+    () =>
+      Effect.gen(function* () {
+        const raw = yield* Ref.make(
+          encodeCatalog({
+            ...emptyCatalog,
+            credentials: [
+              {
+                connectionId: "tailscale-server",
+                credential: new BearerConnectionCredential({ token: "expired" }),
+              },
+            ],
+          }),
+        );
+        const notifications = yield* Queue.unbounded<void>();
+        const backend = {
+          read: Ref.get(raw),
+          write: (next: string) =>
+            Ref.set(raw, next).pipe(Effect.andThen(Queue.offer(notifications, undefined))),
+          changes: Stream.fromQueue(notifications),
+        };
+        const first = yield* ConnectionStorage.makeCatalogStore(backend);
+        const second = yield* ConnectionStorage.makeCatalogStore(backend);
+        expect((yield* second.read).credentials[0]?.credential.token).toBe("expired");
+        const refreshed = yield* Deferred.make<void>();
+        yield* second.changes.pipe(
+          Stream.runForEach(() => Deferred.succeed(refreshed, undefined)),
+          Effect.forkScoped,
+        );
+        yield* first.update((document) => ({
+          ...document,
+          credentials: [
+            {
+              connectionId: "tailscale-server",
+              credential: new BearerConnectionCredential({ token: "repaired" }),
+            },
+          ],
+        }));
+        yield* Deferred.await(refreshed);
+        expect((yield* second.read).credentials[0]?.credential.token).toBe("repaired");
+
+        const stale = yield* ConnectionStorage.makeCatalogStore({
+          read: Ref.get(raw),
+          write: (next) => Ref.set(raw, next),
+        });
+        yield* stale.read;
+        yield* first.update((document) => ({
+          ...document,
+          disabledEnvironmentIds: [EnvironmentId.make("other-server")],
+        }));
+        yield* stale.update((document) => ({
+          ...document,
+          credentials: [
+            ...document.credentials,
+            {
+              connectionId: "third-server",
+              credential: new BearerConnectionCredential({ token: "third" }),
+            },
+          ],
+        }));
+        const saved = decodeCatalog(yield* Ref.get(raw));
+        expect(saved.credentials.map((entry) => entry.credential.token)).toEqual([
+          "repaired",
+          "third",
+        ]);
+        expect(saved.disabledEnvironmentIds).toEqual(["other-server"]);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("quarantines malformed catalogs and starts from an empty document", () =>
     Effect.gen(function* () {
       const writes: string[] = [];
@@ -70,6 +143,59 @@ const fixedHandle = (database: IDBDatabase) => ({
 });
 
 describe("ConnectionStorage.makeCatalogBackend", () => {
+  it.effect("serializes concurrent catalog edits from two desktop windows", () =>
+    Effect.gen(function* () {
+      let raw = encodeCatalog(emptyCatalog);
+      let pending = Promise.resolve();
+      const request = (_name: string, _options: LockOptions, callback: () => Promise<unknown>) => {
+        const result = pending.then(callback);
+        pending = result.then(
+          () => undefined,
+          () => undefined,
+        );
+        return result;
+      };
+      vi.stubGlobal("window", {
+        navigator: { locks: { request } },
+        desktopBridge: {
+          getConnectionCatalog: async () => raw,
+          setConnectionCatalog: async (next: string) => {
+            raw = next;
+            return true;
+          },
+        },
+      });
+      const first = yield* ConnectionStorage.makeCatalogStore(
+        ConnectionStorage.makeCatalogBackend(fixedHandle({} as IDBDatabase)),
+      );
+      const second = yield* ConnectionStorage.makeCatalogStore(
+        ConnectionStorage.makeCatalogBackend(fixedHandle({} as IDBDatabase)),
+      );
+      yield* first.read;
+      yield* second.read;
+      yield* Effect.all(
+        [
+          first.update((document) => ({
+            ...document,
+            disabledEnvironmentIds: [
+              ...document.disabledEnvironmentIds,
+              EnvironmentId.make("first"),
+            ],
+          })),
+          second.update((document) => ({
+            ...document,
+            disabledEnvironmentIds: [
+              ...document.disabledEnvironmentIds,
+              EnvironmentId.make("second"),
+            ],
+          })),
+        ],
+        { concurrency: "unbounded" },
+      );
+      expect(decodeCatalog(raw).disabledEnvironmentIds).toEqual(["first", "second"]);
+    }),
+  );
+
   it.effect("reports a closed IndexedDB connection as a typed read and write failure", () =>
     Effect.gen(function* () {
       vi.stubGlobal("window", {});

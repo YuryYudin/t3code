@@ -394,6 +394,70 @@ describe("mobile connection storage", () => {
     });
   });
 
+  it("round-trips every collection scope and the preferred reference independently", async () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const referenceId = EnvironmentId.make("environment-a");
+    const scopes = [
+      { kind: "all" },
+      { kind: "collection", collectionId },
+      { kind: "unfiled" },
+      { kind: "project", projectKey: "repository:acme/work" },
+    ] as const;
+
+    for (const projectCollectionScope of scopes) {
+      await savePreferencesPatch({
+        projectCollectionScope,
+        projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+      });
+      await expect(loadPreferences()).resolves.toMatchObject({
+        projectCollectionScope,
+        projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+      });
+    }
+  });
+
+  it("sanitizes malformed collection preferences and composes with stale-scope fallback", async () => {
+    mocks.setPreferencesJson(
+      JSON.stringify({
+        baseFontSize: 17,
+        projectCollectionScope: { kind: "collection", collectionId: "" },
+        projectCollectionsPreferredReferenceEnvironmentId: 42,
+      }),
+      10,
+    );
+
+    await expect(loadPreferences()).resolves.toEqual({
+      baseFontSize: 17,
+      projectCollectionScope: { kind: "all" },
+      projectCollectionsPreferredReferenceEnvironmentId: null,
+    });
+
+    const staleId = ProjectCollectionId.make("9ca527c9-9717-46fc-bdb9-d93cdde97fe0");
+    mocks.setPreferencesJson(
+      JSON.stringify({
+        projectCollectionScope: { kind: "collection", collectionId: staleId },
+      }),
+      20,
+    );
+    const stale = await loadPreferences();
+    expect(
+      sanitizeProjectCollectionScope(
+        DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        stale.projectCollectionScope ?? { kind: "all" },
+      ),
+    ).toEqual({ kind: "all" });
+
+    mocks.setPreferencesJson(
+      JSON.stringify({
+        projectCollectionScope: { kind: "project", projectKey: " repository:acme/work " },
+      }),
+      30,
+    );
+    await expect(loadPreferences()).resolves.toEqual({
+      projectCollectionScope: { kind: "all" },
+    });
+  });
+
   it("drops legacy and invalid thread list shelf expansion preferences", async () => {
     mocks.setPreferencesJson(
       JSON.stringify({

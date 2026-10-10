@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Scheduler from "effect/Scheduler";
@@ -141,6 +142,7 @@ const CACHED_SNAPSHOT: OrchestrationV2ShellSnapshot = {
 
 interface SessionControl {
   readonly closed: Deferred.Deferred<never, ConnectionTransientError>;
+  readonly environmentId: EnvironmentId;
 }
 
 const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
@@ -163,6 +165,10 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       target: ConnectionTarget,
     ) => Effect.Effect<ConnectionBlockedError | undefined>;
     readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
+    readonly catalogChanges?: Stream.Stream<void>;
+    readonly authenticate?: (
+      credential: Option.Option<ConnectionCredential>,
+    ) => Effect.Effect<void, ConnectionBlockedError>;
   },
 ) {
   const storedTargets = yield* Ref.make<ReadonlyArray<ConnectionTarget>>(initialTargets);
@@ -203,6 +209,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   const targetStore = Persistence.ConnectionTargetStore.of({
     list: Ref.get(storedTargets),
     listDisabled: Ref.get(storedDisabled).pipe(Effect.map((ids) => [...ids])),
+    ...(options?.catalogChanges === undefined ? {} : { changes: options.catalogChanges }),
   });
   const registrationStore = Persistence.ConnectionRegistrationStore.of({
     register: (registration, routes) =>
@@ -386,6 +393,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         target._tag === "BearerConnectionTarget"
           ? yield* credentialStore.get(target.connectionId)
           : Option.none();
+      yield* options?.authenticate?.(credential) ?? Effect.void;
       const prepared: PreparedConnection = {
         ...PREPARED,
         environmentId: target.environmentId,
@@ -405,7 +413,10 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       yield* Ref.update(connectedRoutes, (current) => [...current, connectionRouteId(target)]);
       yield* options?.beforeSessionConnect?.(target.environmentId) ?? Effect.void;
       const closed = yield* Deferred.make<never, ConnectionTransientError>();
-      yield* Ref.update(sessions, (current) => [...current, { closed }]);
+      yield* Ref.update(sessions, (current) => [
+        ...current,
+        { closed, environmentId: target.environmentId },
+      ]);
       const session = yield* Effect.acquireRelease(
         Effect.succeed({
           client: {} as RpcSession.RpcSession["client"],
@@ -516,6 +527,186 @@ function awaitConnectionState(
 }
 
 describe("EnvironmentRegistry", () => {
+  it.effect(
+    "reconnects a saved Tailscale server after another window repairs its expired credential",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* Queue.unbounded<void>();
+        const repaired = new BearerConnectionCredential({ token: "repaired-token" });
+        const harness = yield* makeHarness(
+          [BEARER_TARGET, TARGET],
+          [BEARER_PROFILE],
+          [[BEARER_TARGET.connectionId, BEARER_CREDENTIAL]],
+          {
+            catalogChanges: Stream.fromQueue(events),
+            authenticate: (credential) =>
+              Option.isSome(credential) && credential.value.token === repaired.token
+                ? Effect.void
+                : Effect.fail(
+                    new ConnectionBlockedError({
+                      reason: "authentication",
+                      detail: "Expired session",
+                    }),
+                  ),
+          },
+        );
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.start;
+          yield* awaitConnectionState(
+            registry,
+            TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "blocked",
+          );
+          // Re-pairing preserves the target/profile and replaces only the token.
+          yield* Ref.update(harness.storedCredentials, (current) =>
+            new Map(current).set(BEARER_TARGET.connectionId, repaired),
+          );
+          yield* Queue.offer(events, undefined);
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          expect(
+            (yield* Ref.get(harness.sessions)).map((session) => session.environmentId),
+          ).toEqual([TARGET.environmentId, BEARER_TARGET.environmentId]);
+          expect(yield* Ref.get(harness.releasedSessions)).toBe(0);
+          expect(yield* Ref.get(harness.storedCredentials)).toEqual(
+            new Map([[BEARER_TARGET.connectionId, repaired]]),
+          );
+        }).pipe(Effect.provide(harness.layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "propagates saved enable, add and remove changes while preserving platform and unrelated sessions",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* Queue.unbounded<Deferred.Deferred<void>>();
+        const changes = Stream.fromQueue(events).pipe(
+          Stream.flatMap((done) =>
+            Stream.concat(
+              Stream.succeed(undefined),
+              Stream.fromEffect(Deferred.succeed(done, undefined)).pipe(Stream.drain),
+            ),
+          ),
+        );
+        const notify = Effect.gen(function* () {
+          const done = yield* Deferred.make<void>();
+          yield* Queue.offer(events, done);
+          yield* Deferred.await(done);
+        });
+        const harness = yield* makeHarness(
+          [BEARER_TARGET, TARGET],
+          [BEARER_PROFILE],
+          [[BEARER_TARGET.connectionId, BEARER_CREDENTIAL]],
+          { catalogChanges: changes },
+        );
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.registerPlatform(
+            new PrimaryConnectionRegistration({ target: SECOND_TARGET }),
+          );
+          yield* registry.start;
+          yield* awaitConnectionState(
+            registry,
+            TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          yield* awaitConnectionState(
+            registry,
+            SECOND_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          // Equal documents and token-cache-only updates must not bounce sessions.
+          yield* Ref.update(harness.storedTargets, (current) =>
+            current.map((target) =>
+              target.environmentId === BEARER_TARGET.environmentId
+                ? new BearerConnectionTarget({ ...BEARER_TARGET })
+                : target,
+            ),
+          );
+          yield* Ref.update(harness.storedProfiles, (current) =>
+            new Map(current).set(
+              BEARER_PROFILE.connectionId,
+              new BearerConnectionProfile({ ...BEARER_PROFILE }),
+            ),
+          );
+          yield* Ref.update(harness.storedCredentials, (current) =>
+            new Map(current).set(
+              BEARER_TARGET.connectionId,
+              new BearerConnectionCredential({ ...BEARER_CREDENTIAL }),
+            ),
+          );
+          yield* notify;
+          expect(yield* Ref.get(harness.releasedSessions)).toBe(0);
+          yield* Ref.update(harness.storedCredentials, (current) =>
+            new Map(current).set(
+              BEARER_TARGET.connectionId,
+              new BearerConnectionCredential({ token: "renewed" }),
+            ),
+          );
+          yield* notify;
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          expect(yield* Ref.get(harness.releasedSessions)).toBe(1);
+          yield* Ref.set(harness.storedDisabled, new Set([BEARER_TARGET.environmentId]));
+          yield* notify;
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).get(BEARER_TARGET.environmentId)
+              ?.enabled,
+          ).toBe(false);
+          expect((yield* registry.state(BEARER_TARGET.environmentId)).desired).toBe(false);
+          yield* Ref.set(harness.storedDisabled, new Set());
+          yield* notify;
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          yield* Ref.update(harness.storedTargets, (current) =>
+            replaceRoutes(current, RELAY_TARGET.environmentId, [RELAY_TARGET]),
+          );
+          yield* notify;
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).has(RELAY_TARGET.environmentId),
+          ).toBe(true);
+          yield* Ref.update(harness.storedTargets, (current) =>
+            current.filter((target) => target.environmentId !== BEARER_TARGET.environmentId),
+          );
+          yield* notify;
+          const entries = yield* SubscriptionRef.get(registry.entries);
+          expect(entries.has(BEARER_TARGET.environmentId)).toBe(false);
+          expect(entries.has(SECOND_TARGET.environmentId)).toBe(true);
+          expect(
+            (yield* Ref.get(harness.sessions)).filter(
+              (session) => session.environmentId === TARGET.environmentId,
+            ),
+          ).toHaveLength(1);
+          expect(
+            (yield* Ref.get(harness.sessions)).filter(
+              (session) => session.environmentId === SECOND_TARGET.environmentId,
+            ),
+          ).toHaveLength(1);
+          expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([]);
+        }).pipe(Effect.provide(harness.layer));
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("replays connected state when arming a desktop commit observer", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness([TARGET]);

@@ -15,8 +15,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   type ConnectionCatalogEntry,
-  type ConnectionCredential,
-  type ConnectionProfile,
+  ConnectionCredential,
+  ConnectionProfile,
   type ConnectionRegistration,
   type ConnectionRoute,
   type PlatformConnectionRegistration,
@@ -56,6 +56,18 @@ import {
 } from "./routes.ts";
 
 const isSshConnectionProfile = Schema.is(SshConnectionProfile);
+const equivalentCredential = Option.makeEquivalence(Schema.toEquivalence(ConnectionCredential));
+type CredentialSnapshot = ReadonlyMap<string, Option.Option<ConnectionCredential>>;
+
+function credentialSnapshotsEqual(left: CredentialSnapshot, right: CredentialSnapshot): boolean {
+  return (
+    left.size === right.size &&
+    [...left].every(([connectionId, credential]) => {
+      const candidate = right.get(connectionId);
+      return candidate !== undefined && equivalentCredential(credential, candidate);
+    })
+  );
+}
 
 function unsupportedState(
   entry: ConnectionCatalogEntry,
@@ -228,6 +240,49 @@ export const make = Effect.gen(function* () {
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
   });
+  const loadCredentialSnapshot = Effect.fn("EnvironmentRegistry.loadCredentialSnapshot")(
+    function* (targets: ReadonlyArray<ConnectionTarget>) {
+      return new Map(
+        yield* Effect.forEach(
+          targets.filter(
+            (target) =>
+              target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget",
+          ),
+          Effect.fn(function* (target) {
+            return [target.connectionId, yield* credentials.get(target.connectionId)] as const;
+          }),
+          { concurrency: "unbounded" },
+        ),
+      ) satisfies CredentialSnapshot;
+    },
+  );
+  const loadPersistedEntry = Effect.fn("EnvironmentRegistry.loadPersistedEntry")(function* (input: {
+    readonly environmentId: EnvironmentId;
+    readonly targets: ReadonlyArray<ConnectionTarget>;
+    readonly enabled: boolean;
+  }) {
+    const loaded = yield* Effect.forEach(input.targets, loadRoute, { concurrency: "unbounded" });
+    // A learned route without its profile has no address to reach; it is
+    // learned again on the next connection. A paired route keeps its slot
+    // so its missing profile still surfaces as a connection error.
+    const seen = new Set<string>();
+    const usable = loaded.filter((route) => {
+      const id = connectionRouteId(route.target);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return !(id.startsWith("learned:") && Option.isNone(route.profile));
+    });
+    const routes = usable.length > 0 ? usable : loaded.slice(0, 1);
+    const first = routes[0]!;
+    return entryWithRoutes(
+      {
+        target: first.target,
+        profile: first.profile,
+        enabled: input.enabled,
+      },
+      routes,
+    );
+  });
   const persistedRoutesByEnvironment = new Map<EnvironmentId, Array<ConnectionTarget>>();
   for (const target of persistedTargets) {
     const routes = persistedRoutesByEnvironment.get(target.environmentId) ?? [];
@@ -238,29 +293,13 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       persistedRoutesByEnvironment,
       Effect.fn("EnvironmentRegistry.loadCatalogEntry")(function* ([environmentId, targets]) {
-        const loaded = yield* Effect.forEach(targets, loadRoute, { concurrency: "unbounded" });
-        // A learned route without its profile has no address to reach; it is
-        // learned again on the next connection. A paired route keeps its slot
-        // so its missing profile still surfaces as a connection error.
-        const seen = new Set<string>();
-        const usable = loaded.filter((route) => {
-          const id = connectionRouteId(route.target);
-          if (seen.has(id)) return false;
-          seen.add(id);
-          return !(id.startsWith("learned:") && Option.isNone(route.profile));
-        });
-        const routes = usable.length > 0 ? usable : loaded.slice(0, 1);
-        const first = routes[0]!;
         return [
           environmentId,
-          entryWithRoutes(
-            {
-              target: first.target,
-              profile: first.profile,
-              enabled: !disabledEnvironmentIds.has(environmentId),
-            },
-            routes,
-          ),
+          yield* loadPersistedEntry({
+            environmentId,
+            targets,
+            enabled: !disabledEnvironmentIds.has(environmentId),
+          }),
         ] as const;
       }),
       { concurrency: "unbounded" },
@@ -275,6 +314,21 @@ export const make = Effect.gen(function* () {
   const platformEnvironmentIds = yield* Ref.make<ReadonlySet<EnvironmentId>>(new Set());
   const persistedEnvironmentIds = yield* Ref.make<ReadonlySet<EnvironmentId>>(
     new Set(persistedRoutesByEnvironment.keys()),
+  );
+  const persistedCredentialSnapshots = yield* Ref.make<
+    ReadonlyMap<EnvironmentId, CredentialSnapshot>
+  >(
+    new Map(
+      storage.changes === undefined
+        ? []
+        : yield* Effect.forEach(
+            persistedRoutesByEnvironment,
+            Effect.fn(function* ([environmentId, targets]) {
+              return [environmentId, yield* loadCredentialSnapshot(targets)] as const;
+            }),
+            { concurrency: "unbounded" },
+          ),
+    ),
   );
   interface LeaseLock {
     readonly semaphore: Semaphore.Semaphore;
@@ -537,6 +591,39 @@ export const make = Effect.gen(function* () {
   const persistedRoutes = (entry: ConnectionCatalogEntry) =>
     connectionRoutes(entry).map((route) => route.target as PersistedConnectionTarget);
 
+  const rememberPersistedEntry = Effect.fn("EnvironmentRegistry.rememberPersistedEntry")(
+    function* (entry: ConnectionCatalogEntry) {
+      const environmentId = entry.target.environmentId;
+      yield* Ref.update(persistedEnvironmentIds, (current) =>
+        new Set(current).add(environmentId),
+      );
+      if (storage.changes === undefined) return;
+      const snapshot = yield* loadCredentialSnapshot(
+        connectionRoutes(entry).map((route) => route.target),
+      ).pipe(Effect.orElseSucceed(() => new Map()));
+      yield* Ref.update(persistedCredentialSnapshots, (current) =>
+        new Map(current).set(environmentId, snapshot),
+      );
+    },
+  );
+
+  const forgetPersistedEntry = (environmentId: EnvironmentId) =>
+    Effect.all(
+      [
+        Ref.update(persistedEnvironmentIds, (current) => {
+          const next = new Set(current);
+          next.delete(environmentId);
+          return next;
+        }),
+        Ref.update(persistedCredentialSnapshots, (current) => {
+          const next = new Map(current);
+          next.delete(environmentId);
+          return next;
+        }),
+      ],
+      { discard: true },
+    );
+
   /**
    * The entry after its routes change. GitHub trust and an unsupported
    * verdict both belong to the saved addresses: a changed set may reach a
@@ -584,9 +671,7 @@ export const make = Effect.gen(function* () {
           entry = next.entry;
         }
         yield* registrations.register(registration, persistedRoutes(entry));
-        yield* Ref.update(persistedEnvironmentIds, (current) =>
-          new Set(current).add(environmentId),
-        );
+        yield* rememberPersistedEntry(entry);
         yield* installEntryLocked(entry);
       }),
     );
@@ -603,6 +688,7 @@ export const make = Effect.gen(function* () {
       yield* forgetRoutingTrust(environmentId, "set-connection-routes");
     }
     yield* registrations.setRoutes(environmentId, persistedRoutes(next.entry));
+    yield* rememberPersistedEntry(next.entry);
     yield* installEntryLocked(next.entry);
   });
 
@@ -682,13 +768,7 @@ export const make = Effect.gen(function* () {
 
           if (persisted) {
             yield* registrations.remove(target.environmentId).pipe(
-              Effect.tap(() =>
-                Ref.update(persistedEnvironmentIds, (current) => {
-                  const next = new Set(current);
-                  next.delete(target.environmentId);
-                  return next;
-                }),
-              ),
+              Effect.tap(() => forgetPersistedEntry(target.environmentId)),
               Effect.catch((error) =>
                 Effect.logWarning(
                   "Could not remove a persisted registration shadowed by a platform environment.",
@@ -829,11 +909,7 @@ export const make = Effect.gen(function* () {
 
     yield* githubRoutingPermissions.forget(environmentId);
     yield* registrations.remove(environmentId);
-    yield* Ref.update(persistedEnvironmentIds, (current) => {
-      const next = new Set(current);
-      next.delete(environmentId);
-      return next;
-    });
+    yield* forgetPersistedEntry(environmentId);
     yield* closeServiceScope(environmentId);
     yield* SubscriptionRef.update(entries, (current) => {
       const next = new Map(current);
@@ -920,6 +996,7 @@ export const make = Effect.gen(function* () {
           if (profile !== null) yield* profiles.put(profile);
         }
         yield* registrations.setRoutes(input.environmentId, persistedRoutes(next));
+        yield* rememberPersistedEntry(next);
         // Update the lease in place: the live session already works, and
         // `installEntryLocked` would replace it for a route list change.
         const lease = (yield* SubscriptionRef.get(serviceScopes)).get(input.environmentId);
@@ -1152,6 +1229,92 @@ export const make = Effect.gen(function* () {
       }),
     );
   });
+
+  const reconcileSavedConnections = Effect.fn("EnvironmentRegistry.reconcileSavedConnections")(
+    function* () {
+      const environmentIds = new Set([
+        ...(yield* Ref.get(persistedEnvironmentIds)),
+        ...(yield* storage.list).map((target) => target.environmentId),
+      ]);
+      yield* Effect.forEach(
+        environmentIds,
+        (environmentId) =>
+          withLeaseLock(
+            environmentId,
+            Effect.gen(function* () {
+              if ((yield* Ref.get(platformEnvironmentIds)).has(environmentId)) return;
+              // Read inside the lease lock so an in-flight local registration wins
+              // over the notification it generated.
+              const targets = (yield* storage.list).filter(
+                (candidate) => candidate.environmentId === environmentId,
+              );
+              const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+              if (targets.length === 0) {
+                if (!(yield* Ref.get(persistedEnvironmentIds)).has(environmentId)) return;
+                yield* closeServiceScope(environmentId);
+                yield* forgetPersistedEntry(environmentId);
+                yield* SubscriptionRef.update(entries, (current) => {
+                  const next = new Map(current);
+                  next.delete(environmentId);
+                  return next;
+                });
+                yield* ownedDataCleanup.clear(environmentId);
+                return;
+              }
+              const entry = yield* loadPersistedEntry({
+                environmentId,
+                targets,
+                enabled: !(yield* storage.listDisabled).includes(environmentId),
+              });
+              const sameEndpoint =
+                previous !== undefined &&
+                gitHubRoutingConnectionKey(previous) === gitHubRoutingConnectionKey(entry);
+              const next =
+                sameEndpoint && previous !== undefined
+                  ? { ...entry, ...unsupportedState(previous) }
+                  : entry;
+              const credentialSnapshot = yield* loadCredentialSnapshot(targets);
+              const previousCredentialSnapshot = (
+                yield* Ref.get(persistedCredentialSnapshots)
+              ).get(environmentId);
+              if (
+                previous !== undefined &&
+                Equal.equals(previous, next) &&
+                previousCredentialSnapshot !== undefined &&
+                credentialSnapshotsEqual(previousCredentialSnapshot, credentialSnapshot)
+              )
+                return;
+              if (previous !== undefined && !sameEndpoint) {
+                yield* githubRoutingPermissions.forget(environmentId);
+              }
+              yield* Ref.update(persistedEnvironmentIds, (current) =>
+                new Set(current).add(environmentId),
+              );
+              yield* Ref.update(persistedCredentialSnapshots, (current) =>
+                new Map(current).set(environmentId, credentialSnapshot),
+              );
+              // Persistence already changed in the other window. Installing only
+              // the runtime avoids writing the catalog back or disconnecting a
+              // shared desktop SSH backend.
+              yield* installEntryLocked(next);
+            }),
+          ),
+        { discard: true },
+      );
+    },
+  );
+  if (storage.changes !== undefined) {
+    yield* storage.changes.pipe(
+      Stream.runForEach(() =>
+        reconcileSavedConnections().pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not reconcile changed saved connections.", { error }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+  }
 
   return EnvironmentRegistry.of({
     entries,

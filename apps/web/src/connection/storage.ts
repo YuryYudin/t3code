@@ -391,12 +391,60 @@ export interface CatalogBackend {
   readonly read: Effect.Effect<string | null, ConnectionTransientError>;
   readonly write: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
   readonly quarantine?: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
+  readonly changes?: Stream.Stream<void>;
+  readonly withWriteLock?: (
+    effect: Effect.Effect<void, ConnectionTransientError>,
+  ) => Effect.Effect<void, ConnectionTransientError>;
 }
 
 export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
   const bridge = window.desktopBridge;
+  const desktopCatalog =
+    bridge?.getConnectionCatalog !== undefined && bridge.setConnectionCatalog !== undefined;
+  const channelName = `${DATABASE_NAME}:catalog-changed`;
+  const changes = Stream.callback<void>((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const notify = () => Queue.offerUnsafe(queue, undefined);
+        const unsubscribe = desktopCatalog
+          ? bridge.onConnectionCatalogChanged?.(notify)
+          : undefined;
+        const channel =
+          !desktopCatalog && typeof BroadcastChannel !== "undefined"
+            ? new BroadcastChannel(channelName)
+            : undefined;
+        channel?.addEventListener("message", notify);
+        // Also catch up after suspension or a notification missed during startup.
+        window.addEventListener("focus", notify);
+        notify();
+        return () => {
+          unsubscribe?.();
+          channel?.close();
+          window.removeEventListener("focus", notify);
+        };
+      }),
+      (unsubscribe) => Effect.sync(unsubscribe),
+    ),
+  );
+  const locks = window.navigator?.locks;
+  const withWriteLock: CatalogBackend["withWriteLock"] = (effect) =>
+    locks === undefined
+      ? effect
+      : Effect.tryPromise({
+          try: (signal) =>
+            locks.request(`${DATABASE_NAME}:catalog-write`, { signal }, () =>
+              Effect.runPromiseExit(effect, { signal }),
+            ),
+          catch: (cause) => catalogError("save", cause),
+        }).pipe(
+          Effect.flatMap((exit) =>
+            exit._tag === "Success" ? Effect.succeed(exit.value) : Effect.failCause(exit.cause),
+          ),
+        );
   if (bridge?.getConnectionCatalog !== undefined && bridge.setConnectionCatalog !== undefined) {
     return {
+      changes,
+      withWriteLock,
       read: Effect.tryPromise({
         try: () => bridge.getConnectionCatalog!(),
         catch: (cause) => catalogError("load", cause),
@@ -421,10 +469,23 @@ export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
   }
 
   return {
+    changes,
+    withWriteLock,
     read: readDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY).pipe(
       Effect.map((value) => (typeof value === "string" ? value : null)),
     ),
-    write: (raw) => writeDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY, raw),
+    write: (raw) =>
+      writeDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY, raw).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (typeof BroadcastChannel === "undefined") return;
+            const channel = new BroadcastChannel(channelName);
+            // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel is already scoped to the current origin.
+            channel.postMessage(null);
+            channel.close();
+          }),
+        ),
+      ),
     quarantine: (raw) =>
       writeDatabaseValue(database, CATALOG_STORE_NAME, `${CATALOG_KEY}:corrupt:${Date.now()}`, raw),
   };
@@ -432,6 +493,7 @@ export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
 
 interface CatalogStore {
   readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
+  readonly changes: Stream.Stream<void>;
   readonly update: (
     transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
   ) => Effect.Effect<void, ConnectionTransientError>;
@@ -443,9 +505,9 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
   const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
   const lock = yield* Semaphore.make(1);
 
-  const loadUnlocked = Effect.fn("web.connectionStorage.loadCatalog")(function* () {
+  const loadUnlocked = Effect.fn("web.connectionStorage.loadCatalog")(function* (fresh = false) {
     const cached = yield* Ref.get(state);
-    if (Option.isSome(cached)) {
+    if (!fresh && Option.isSome(cached)) {
       return cached.value;
     }
     const raw = yield* backend.read;
@@ -484,19 +546,35 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
   });
 
   const read = lock.withPermits(1)(loadUnlocked());
+  const changes = (backend.changes ?? Stream.empty).pipe(
+    Stream.mapEffect(() =>
+      lock
+        .withPermits(1)(loadUnlocked(true))
+        .pipe(
+          Effect.asVoid,
+          Effect.catch((error) =>
+            Effect.logWarning("Could not refresh saved connections after a catalog change.", {
+              error: error.message,
+            }),
+          ),
+        ),
+    ),
+  );
   const update: CatalogStore["update"] = Effect.fn("web.connectionStorage.updateCatalog")(
     function* (transform) {
-      yield* lock.withPermits(1)(
+      const write = lock.withPermits(1)(
         Effect.gen(function* () {
-          const next = transform(yield* loadUnlocked());
+          // A second window may have replaced credentials since our last read.
+          const next = transform(yield* loadUnlocked(true));
           yield* backend.write(yield* encodeCatalog(next));
           yield* Ref.set(state, Option.some(next));
         }),
       );
+      yield* backend.withWriteLock?.(write) ?? write;
     },
   );
 
-  return { read, update } satisfies CatalogStore;
+  return { read, changes, update } satisfies CatalogStore;
 });
 
 const GITHUB_ROUTING_KEY_PREFIX = "t3code:github-routing:";
@@ -618,6 +696,7 @@ export const layer = Layer.effectContext(
         Effect.map((document) => document.disabledEnvironmentIds),
         Effect.mapError((cause) => persistenceError("list-disabled-targets", cause)),
       ),
+      changes: catalog.changes,
     });
     const registrationStore = Persistence.ConnectionRegistrationStore.of({
       register: (registration, routes) =>

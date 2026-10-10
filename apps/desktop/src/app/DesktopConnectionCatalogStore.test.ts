@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
@@ -11,6 +12,7 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
@@ -101,6 +103,44 @@ const withStore = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("DesktopConnectionCatalogStore", () => {
+  it.effect("notifies subscribers after the changed encrypted catalog is readable", () =>
+    withStore(
+      Effect.gen(function* () {
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        const ready = yield* Deferred.make<void>();
+        const saved = yield* Deferred.make<void>();
+        const cleared = yield* Deferred.make<void>();
+        const catalog = '{"schemaVersion":1,"targets":[]}';
+        let reads = 0;
+        yield* store.changes.pipe(
+          Stream.runForEach(() =>
+            Effect.gen(function* () {
+              const value = yield* store.get;
+              reads += 1;
+              if (reads === 1) {
+                assert.deepStrictEqual(value, Option.none());
+                yield* Deferred.succeed(ready, undefined);
+              } else if (reads === 2) {
+                assert.deepStrictEqual(value, Option.some(catalog));
+                yield* Deferred.succeed(saved, undefined);
+              } else {
+                assert.deepStrictEqual(value, Option.none());
+                yield* Deferred.succeed(cleared, undefined);
+              }
+            }),
+          ),
+          Effect.forkScoped,
+        );
+        yield* Deferred.await(ready);
+        assert.isTrue(yield* store.set(catalog));
+        yield* Deferred.await(saved);
+        yield* store.clear;
+        yield* Deferred.await(cleared);
+        assert.strictEqual(reads, 3);
+      }),
+    ),
+  );
+
   it.effect("persists, reads, and clears an encrypted connection catalog", () =>
     withStore(
       Effect.gen(function* () {
