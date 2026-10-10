@@ -529,12 +529,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const next = yield* serverSettings.updateSettings(patch);
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
       const persisted = JSON.parse(raw);
 
       assert.deepEqual(next.projectCollections, patch.projectCollections);
       assert.deepEqual(persisted.projectCollections, patch.projectCollections);
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
+    }).pipe(Effect.provide(layerServerSettings())),
   );
 
   it.effect("buffers changes after a subscription is acquired but before it is consumed", () =>

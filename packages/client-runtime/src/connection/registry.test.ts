@@ -396,7 +396,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         target._tag === "BearerConnectionTarget"
           ? yield* credentialStore.get(target.connectionId)
           : Option.none();
-      yield* options?.authenticate?.(credential) ?? Effect.void;
+      if (target._tag === "BearerConnectionTarget" && options?.authenticate !== undefined) {
+        yield* options.authenticate(credential);
+      }
       const prepared: PreparedConnection = {
         ...PREPARED,
         environmentId: target.environmentId,

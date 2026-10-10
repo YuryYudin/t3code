@@ -28,6 +28,20 @@ vi.mock("@react-navigation/elements", async () => {
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 12, right: 0, bottom: 0, left: 0 }),
 }));
+// Upstream's iOS HomeHeader now reads navigation and the adaptive layout directly; both
+// otherwise pull the real react-native package in through node_modules, which ships
+// Flow-only syntax vitest cannot parse.
+vi.mock("@react-navigation/native", () => ({
+  useNavigation: () => ({ addListener: () => () => {} }),
+}));
+vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
+  useAdaptiveWorkspaceLayout: () => ({
+    layout: { usesSplitView: false },
+    panes: { primarySidebarVisible: false, auxiliaryPaneVisible: false },
+    togglePrimarySidebar: () => {},
+    toggleAuxiliaryPane: () => {},
+  }),
+}));
 vi.mock("../../components/ControlPill", async () => {
   const React = await import("react");
   return {
