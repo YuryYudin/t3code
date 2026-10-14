@@ -38,6 +38,7 @@ import { useProjectCollections } from "../projects/useProjectCollections";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle";
+import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
@@ -62,7 +63,15 @@ function SplitHomeRouteScreen() {
         options={
           Platform.OS === "android"
             ? { headerShown: false }
-            : { title: "", headerTitle: "", unstable_headerLeftItems: () => [] }
+            : {
+                title: "",
+                headerTitle: "",
+                unstable_headerLeftItems: () => [],
+                // Options survive layout changes; search and settings belong to the sidebar.
+                headerSearchBarOptions: undefined,
+                unstable_headerRightItems: () => [],
+                unstable_headerToolbarItems: () => [],
+              }
         }
       />
       {Platform.OS === "ios" ? (
@@ -103,6 +112,7 @@ function CompactHomeRouteScreen({
   const { width: windowWidth } = useWindowDimensions();
   const columnMetrics = useNativeColumnLayoutMetrics();
   const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
+  const { primarySidebarSearchQuery, setPrimarySidebarSearchQuery } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   // Streaming turns rewrite thread shells many times a second. While a Thread
   // covers Home, rebuilding this list is invisible work.
@@ -114,7 +124,17 @@ function CompactHomeRouteScreen({
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
-  const [searchQuery, setSearchQuery] = useState("");
+  const workspace = useWorkspaceTabs();
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
+  const searchQuery =
+    Platform.OS === "android"
+      ? primarySidebarSearchQuery
+      : (workspace?.state.tabs.threads.query ?? localSearchQuery);
+  const setSearchQuery = (query: string) => {
+    if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
+    else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
+    else setLocalSearchQuery(query);
+  };
   const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
   const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
   const handleSelectThread = useHomeThreadSelection();
@@ -257,29 +277,33 @@ function CompactHomeRouteScreen({
 
   return (
     <AndroidHomeFabLayout
+      disabled={workspace !== null && Platform.OS !== "android"}
       onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
     >
       <>
         {/* Restore the header after leaving split view; screen options are
             shallow-merged. The brand slot also doubles as the connection
             status surface while an environment reconnects. */}
-        <NativeStackScreenOptions
-          optionsVersion={headerWidth}
-          options={{
-            ...getConnectionAwareBrandHeaderOptions({
-              headerWidth,
-              trailingItemCount:
-                nativePrimaryColumn && Platform.OS === "ios" && Platform.isPad ? 2 : 1,
-              onOpenEnvironments: () =>
-                navigation.navigate("SettingsSheet", {
-                  screen: "SettingsContent",
-                  params: { screen: "SettingsEnvironments" },
-                }),
-            }),
-            headerShown: true,
-          }}
-        />
+        {workspace !== null && Platform.OS === "ios" ? null : (
+          <NativeStackScreenOptions
+            optionsVersion={headerWidth}
+            options={{
+              ...getConnectionAwareBrandHeaderOptions({
+                headerWidth,
+                trailingItemCount:
+                  nativePrimaryColumn && Platform.OS === "ios" && Platform.isPad ? 2 : 1,
+                onOpenEnvironments: () =>
+                  navigation.navigate("SettingsSheet", {
+                    screen: "SettingsContent",
+                    params: { screen: "SettingsEnvironments" },
+                  }),
+              }),
+              headerShown: Platform.OS !== "android",
+            }}
+          />
+        )}
         <HomeHeader
+          usesWorkspaceToolbar={workspace !== null}
           environments={environments}
           projects={projectFilterOptions}
           searchQuery={searchQuery}
