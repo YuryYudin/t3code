@@ -111,6 +111,8 @@ export interface ForeignStateSync<T> {
     readonly baseline: T;
   }) => T | null;
   readonly apply: (merged: T) => void;
+  /** Deferred stores can keep local edits owned until a foreign write acknowledges them. */
+  readonly acknowledge?: (incoming: T) => T;
 }
 
 /**
@@ -140,7 +142,7 @@ export function createForeignStateHandler<T>(
       baseline = local;
       return;
     }
-    baseline = merged;
+    baseline = sync.acknowledge?.(incoming) ?? merged;
     sync.apply(merged);
   };
 }
