@@ -2094,6 +2094,86 @@ function migratePersistedComposerDraftStoreState(
   };
 }
 
+function toPersistedThreadDraft(
+  draft: ComposerThreadDraftState,
+): DeepMutable<PersistedComposerThreadDraftState> | null {
+  const hasModelData =
+    Object.keys(draft.modelSelectionByProvider).length > 0 || draft.activeProvider !== null;
+  if (
+    draft.prompt.length === 0 &&
+    draft.persistedAttachments.length === 0 &&
+    draft.files.length === 0 &&
+    draft.terminalContexts.length === 0 &&
+    draft.previewAnnotations.length === 0 &&
+    draft.reviewComments.length === 0 &&
+    !hasModelData &&
+    draft.runtimeMode === null &&
+    draft.interactionMode === null
+  ) {
+    return null;
+  }
+  const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
+    prompt: draft.prompt,
+    attachments: draft.persistedAttachments,
+    ...(draft.files.length > 0
+      ? {
+          // A file whose upload has not finished has no serializable bytes.
+          // It persists as a metadata-only marker so it can surface as a
+          // needs-reattach row after reload instead of silently vanishing.
+          files: draft.files.map((file) => ({
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            ...(file.source ? { source: file.source } : {}),
+            ...(file.uploadedAttachmentId && file.uploadEnvironmentId
+              ? {
+                  attachmentId: file.uploadedAttachmentId,
+                  environmentId: file.uploadEnvironmentId,
+                }
+              : {}),
+          })),
+        }
+      : {}),
+    ...(draft.terminalContexts.length > 0
+      ? {
+          terminalContexts: draft.terminalContexts.map((context) => ({
+            id: context.id,
+            threadId: context.threadId,
+            createdAt: context.createdAt,
+            terminalId: context.terminalId,
+            terminalLabel: context.terminalLabel,
+            lineStart: context.lineStart,
+            lineEnd: context.lineEnd,
+            text: context.text,
+          })),
+        }
+      : {}),
+    ...(draft.previewAnnotations.length > 0
+      ? {
+          previewAnnotations: draft.previewAnnotations.map(
+            (annotation) => ({ ...annotation }) as DeepMutable<PreviewAnnotationPayload>,
+          ),
+        }
+      : {}),
+    ...(draft.reviewComments.length > 0
+      ? {
+          reviewComments: draft.reviewComments.map((comment) => ({ ...comment })),
+        }
+      : {}),
+    ...(hasModelData
+      ? {
+          modelSelectionByProvider: compactModelSelectionByProvider(draft.modelSelectionByProvider),
+          activeProvider: draft.activeProvider,
+          ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+        }
+      : {}),
+    ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+    ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
+  };
+  return persistedDraft;
+}
+
 /** Select the persisted draft fields when the storage write is ready to flush. */
 export function partializeComposerDraftStoreState(
   state: ComposerDraftStoreState,
@@ -2128,82 +2208,8 @@ export function partializeComposerDraftStoreState(
     if (state.draftThreadsByThreadKey[threadKey] !== undefined && !keptSessionKeys.has(threadKey)) {
       continue;
     }
-    const hasModelData =
-      Object.keys(draft.modelSelectionByProvider).length > 0 || draft.activeProvider !== null;
-    if (
-      draft.prompt.length === 0 &&
-      draft.persistedAttachments.length === 0 &&
-      draft.files.length === 0 &&
-      draft.terminalContexts.length === 0 &&
-      draft.previewAnnotations.length === 0 &&
-      draft.reviewComments.length === 0 &&
-      !hasModelData &&
-      draft.runtimeMode === null &&
-      draft.interactionMode === null
-    ) {
-      continue;
-    }
-    const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
-      prompt: draft.prompt,
-      attachments: draft.persistedAttachments,
-      ...(draft.files.length > 0
-        ? {
-            // A file whose upload has not finished has no serializable bytes.
-            // It persists as a metadata-only marker so it can surface as a
-            // needs-reattach row after reload instead of silently vanishing.
-            files: draft.files.map((file) => ({
-              id: file.id,
-              name: file.name,
-              mimeType: file.mimeType,
-              sizeBytes: file.sizeBytes,
-              ...(file.source ? { source: file.source } : {}),
-              ...(file.uploadedAttachmentId && file.uploadEnvironmentId
-                ? {
-                    attachmentId: file.uploadedAttachmentId,
-                    environmentId: file.uploadEnvironmentId,
-                  }
-                : {}),
-            })),
-          }
-        : {}),
-      ...(draft.terminalContexts.length > 0
-        ? {
-            terminalContexts: draft.terminalContexts.map((context) => ({
-              id: context.id,
-              threadId: context.threadId,
-              createdAt: context.createdAt,
-              terminalId: context.terminalId,
-              terminalLabel: context.terminalLabel,
-              lineStart: context.lineStart,
-              lineEnd: context.lineEnd,
-              text: context.text,
-            })),
-          }
-        : {}),
-      ...(draft.previewAnnotations.length > 0
-        ? {
-            previewAnnotations: draft.previewAnnotations.map(
-              (annotation) => ({ ...annotation }) as DeepMutable<PreviewAnnotationPayload>,
-            ),
-          }
-        : {}),
-      ...(draft.reviewComments.length > 0
-        ? {
-            reviewComments: draft.reviewComments.map((comment) => ({ ...comment })),
-          }
-        : {}),
-      ...(hasModelData
-        ? {
-            modelSelectionByProvider: compactModelSelectionByProvider(
-              draft.modelSelectionByProvider,
-            ),
-            activeProvider: draft.activeProvider,
-            ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
-          }
-        : {}),
-      ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
-      ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
-    };
+    const persistedDraft = toPersistedThreadDraft(draft);
+    if (persistedDraft === null) continue;
     persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
   const persistedDraftThreadsByThreadKey: DeepMutable<
@@ -4315,6 +4321,42 @@ interface ComposerForeignState {
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
 }
 
+const equivalentPersistedDraft = Schema.toEquivalence(PersistedComposerThreadDraftState);
+const equivalentDraftThread = Schema.toEquivalence(PersistedDraftThreadState);
+
+function equivalentDraft(left: ComposerThreadDraftState, right: ComposerThreadDraftState) {
+  // Unsaved image bytes and pending uploads must stay in their owning window.
+  if (
+    left.nonPersistedImageIds.length > 0 ||
+    left.images.some((image) => !left.persistedAttachments.some((item) => item.id === image.id)) ||
+    left.files.some((file) => file.file !== null && !file.uploadedAttachmentId)
+  )
+    return false;
+  const persistedLeft = toPersistedThreadDraft(left);
+  const persistedRight = toPersistedThreadDraft(right);
+  return persistedLeft === null
+    ? persistedRight === null
+    : persistedRight !== null && equivalentPersistedDraft(persistedLeft, persistedRight);
+}
+
+function acknowledgeComposerEntries<T>(
+  local: Record<string, T>,
+  incoming: Record<string, T>,
+  equivalent: (left: T, right: T) => boolean,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(incoming).map(([key, value]) => {
+      const current = local[key];
+      return [
+        key,
+        current !== undefined && (current === value || equivalent(current, value))
+          ? current
+          : value,
+      ];
+    }),
+  );
+}
+
 function keysMissingFrom(local: Record<string, unknown>, persisted: Record<string, unknown>) {
   return Object.keys(local).filter((key) => persisted[key] === undefined);
 }
@@ -4353,27 +4395,45 @@ export const foreignComposerDraftStateSync: ForeignStateSync<ComposerForeignStat
     };
   },
   parse: (raw) => {
+    const local = useComposerDraftStore.getState();
     const normalized = migratePersistedComposerDraftStoreState(
       raw === null ? null : (JSON.parse(raw) as { state?: unknown }).state,
     );
     return {
-      draftsByThreadKey: Object.fromEntries(
-        Object.entries(normalized.draftsByThreadKey).map(([threadKey, draft]) => [
-          threadKey,
-          toHydratedThreadDraft(draft),
-        ]),
+      draftsByThreadKey: acknowledgeComposerEntries(
+        local.draftsByThreadKey,
+        Object.fromEntries(
+          Object.entries(normalized.draftsByThreadKey).map(([threadKey, draft]) => [
+            threadKey,
+            toHydratedThreadDraft(draft),
+          ]),
+        ),
+        equivalentDraft,
       ),
-      draftThreadsByThreadKey: Object.fromEntries(
-        Object.entries(normalized.draftThreadsByThreadKey).map(([threadKey, draftThread]) => [
-          threadKey,
-          toHydratedDraftThreadState(draftThread),
-        ]),
-      ) as Record<string, DraftThreadState>,
+      draftThreadsByThreadKey: acknowledgeComposerEntries(
+        local.draftThreadsByThreadKey,
+        Object.fromEntries(
+          Object.entries(normalized.draftThreadsByThreadKey).map(([threadKey, draftThread]) => [
+            threadKey,
+            toHydratedDraftThreadState(draftThread),
+          ]),
+        ) as Record<string, DraftThreadState>,
+        equivalentDraftThread,
+      ),
       logicalProjectDraftThreadKeyByLogicalProjectKey:
         normalized.logicalProjectDraftThreadKeyByLogicalProjectKey,
     };
   },
   merge: ({ local, incoming, baseline }) => {
+    if (
+      ownedEntryKeys(local.draftsByThreadKey, incoming.draftsByThreadKey).size === 0 &&
+      ownedEntryKeys(local.draftThreadsByThreadKey, incoming.draftThreadsByThreadKey).size === 0 &&
+      ownedEntryKeys(
+        local.logicalProjectDraftThreadKeyByLogicalProjectKey,
+        incoming.logicalProjectDraftThreadKeyByLogicalProjectKey,
+      ).size === 0
+    )
+      return null;
     const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
     return {
       draftsByThreadKey: mergeForeignEntries(
@@ -4406,6 +4466,10 @@ export const foreignComposerDraftStateSync: ForeignStateSync<ComposerForeignStat
     };
   },
   apply: (merged) => useComposerDraftStore.setState(merged),
+  // Applying a merge only schedules the debounced write. A second window can
+  // write an older snapshot before that flush, so only its echo acknowledges
+  // the local draft; the merge itself must not release ownership.
+  acknowledge: (incoming) => incoming,
 };
 
 subscribeStorageKey(
