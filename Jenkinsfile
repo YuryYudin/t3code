@@ -52,7 +52,7 @@ def prepareCandidate(Map resolved, String slug) {
             sh '''
                 git remote remove upstream 2>/dev/null || true
                 git remote add upstream https://github.com/pingdotgg/t3code.git
-                git fetch --prune --tags upstream '+refs/heads/main:refs/remotes/upstream/main'
+                git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
             '''
             withCredentials([string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA')]) {
                 sh "node scripts/fork-release.ts prepare --target ${resolved.target.commit} --source ${resolved.candidateSourceSha} --candidate-ref ${candidateRef} --first-release ${resolved.firstRelease} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\""
@@ -372,6 +372,7 @@ def runQuality(String slug, String candidateRef) {
                 node scripts/fork-release.ts verify-bootstrap
                 corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
                 corepack pnpm run test:project-collections-acceptance
+                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts
                 corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
                 corepack pnpm exec vp test run scripts/fork-integration.test.ts scripts/fork-release.test.ts scripts/build-desktop-artifact.test.ts apps/server/src/orchestration/decider.externalAlert.test.ts apps/server/src/bin.test.ts packages/contracts/src/orchestration.externalAlert.test.ts packages/contracts/src/orchestration.test.ts packages/contracts/src/ipc.test.ts apps/desktop/src/app/DesktopEnvironment.test.ts apps/desktop/src/app/DesktopAppIdentity.test.ts apps/desktop/src/app/DesktopPreReadyPlatform.test.ts
                 corepack pnpm exec vp run --filter @t3tools/contracts --filter @t3tools/shared --filter @t3tools/client-runtime --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop typecheck
@@ -596,6 +597,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 sh "node scripts/fork-integration.ts quality ${integrationArgs(resolved)}"
             }
         }
+        failureClass = 'packaging'
         parallel failFast: false,
             macos: { buildMac(slug, candidateRef, version, publishRelease) },
             android: { buildAndroid(slug, candidateRef, version) },
@@ -603,7 +605,6 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 buildLinux(slug, candidateRef, version)
                 buildWindows(slug, candidateRef, version)
             }
-        failureClass = 'packaging'
         node('built-in') {
             stage("${slug}: Assemble + verify") {
                 checkoutCandidate("candidate-${slug}", candidateRef)
@@ -718,7 +719,7 @@ pipeline {
                         sh '''
                             git remote remove upstream 2>/dev/null || true
                             git remote add upstream https://github.com/pingdotgg/t3code.git
-                            git fetch --prune --tags upstream '+refs/heads/main:refs/remotes/upstream/main'
+                            git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
                         '''
                         installWorkspace()
                         withCredentials([

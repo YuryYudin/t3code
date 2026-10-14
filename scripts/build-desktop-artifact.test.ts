@@ -22,6 +22,7 @@ import {
   parseWslRuntimeArchiveMembers,
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
+  readWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
   ensureWindowsPowerShellOnPath,
@@ -533,6 +534,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
   });
+
+  it.effect("validates the checked-out workspace before platform packaging", () =>
+    readWorkspaceConfig().pipe(Effect.asVoid),
+  );
 
   it("stages pnpm 11 allowBuilds and patchedDependencies in the workspace yaml", () => {
     assert.deepStrictEqual(
