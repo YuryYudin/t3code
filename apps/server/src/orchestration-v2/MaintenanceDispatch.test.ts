@@ -13,7 +13,9 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import { dispatchMaintenanceCommand } from "./MaintenanceDispatch.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
@@ -34,9 +36,16 @@ const orchestratorLayer = layerWithRegistry(
   ProviderAdapterRegistry.layerFromAdapters([adapter]),
   { databaseLayer: SqlitePersistence.layerMemory, runEffectWorker: false },
 );
+const commandReceiptStoreLayer = CommandReceiptStore.layer.pipe(
+  Layer.provide(SqlitePersistence.layerMemory),
+);
 const testLayer = Layer.mergeAll(
   orchestratorLayer,
-  ThreadManagementService.layer.pipe(Layer.provide(orchestratorLayer)),
+  ThreadManagementService.layer.pipe(
+    Layer.provide(orchestratorLayer),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(commandReceiptStoreLayer),
+  ),
   OrchestrationEventStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
 );
 const decode = Schema.decodeSync(MaintenanceCommand);
