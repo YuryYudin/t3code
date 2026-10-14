@@ -201,8 +201,39 @@ describe("persistent integration", () => {
     f.repair(resumed);
     await dispatchRepair(resumed, "project", {}, dispatch, "test failed");
     f.repair(resumed);
-    expect(() => resumed.request("still failed")).toThrow(/exhausted 2 attempts/);
+    expect(() => resumed.request()).toThrow(/exhausted 2 attempts/);
     expect(resumed.read().requests).toHaveLength(2);
+    const final = await dispatchRepair(resumed, "project", {}, dispatch, "still failed");
+    expect((await dispatchRepair(resumed, "project", {}, dispatch, "still failed")).id).toBe(
+      final.id,
+    );
+    expect(commands.filter((c) => c === "thread.turn.start")).toHaveLength(3);
+    f.repair(resumed);
+    expect(() => resumed.request("failed again")).toThrow(/exhausted 3 attempts/);
+    expect(resumed.read().requests).toHaveLength(3);
+  });
+
+  it("reserves a quality feedback repair after conflicts in both integration merges", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.base]);
+    const observed = f.commit("feature.txt", "previous integration feature\n");
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, observed },
+      NodePath.join(f.root, "workers"),
+    );
+    expect(next.prepare(f.repo).merging).toBe("source");
+    next.request();
+    expect(f.repair(next, "fork source integrated\n").merging).toBe("target");
+    next.request();
+    expect(f.repair(next).status).toBe("prepared");
+    expect(next.read().requests).toHaveLength(2);
+    expect(next.request("The upstream service needs a test fixture").request.attempt).toBe(3);
+    f.repair(next, "tested upstream compatibility\n");
+    next.assertCandidate();
+    next.markQuality();
+    next.markVerified("build/feedback-passed");
+    expect(next.read().status).toBe("verified");
   });
   it("does not treat dispatch acceptance as repair completion", () => {
     const f = fixture();

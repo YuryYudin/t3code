@@ -427,9 +427,13 @@ export class Integration {
     let state = this.read();
     const previous = state.requests.at(-1);
     if (previous && !previous.completed) return { state, request: previous };
-    if (state.requests.length >= REPAIR_LIMIT)
+    // Both source and upstream merges can need repair before tests run. Keep
+    // one extra request for quality feedback on the completed candidate.
+    const repairLimit =
+      feedback.trim() && state.status === "prepared" ? REPAIR_LIMIT + 1 : REPAIR_LIMIT;
+    if (state.requests.length >= repairLimit)
       throw new Error(
-        `Automatic repair exhausted ${REPAIR_LIMIT} attempts for input ${state.id}; unchanged retries will reuse this incident.`,
+        `Automatic repair exhausted ${repairLimit} attempts for input ${state.id}; unchanged retries will reuse this incident.`,
       );
     if (!["needs-repair", "prepared"].includes(state.status))
       throw new Error("Candidate does not need repair.");
