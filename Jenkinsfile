@@ -52,7 +52,7 @@ def prepareCandidate(Map resolved, String slug) {
             sh '''
                 git remote remove upstream 2>/dev/null || true
                 git remote add upstream https://github.com/pingdotgg/t3code.git
-                git fetch --prune --tags upstream '+refs/heads/main:refs/remotes/upstream/main'
+                git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
             '''
             withCredentials([string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA')]) {
                 sh "node scripts/fork-release.ts prepare --target ${resolved.target.commit} --source ${resolved.candidateSourceSha} --candidate-ref ${candidateRef} --first-release ${resolved.firstRelease} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\""
@@ -718,7 +718,7 @@ pipeline {
                         sh '''
                             git remote remove upstream 2>/dev/null || true
                             git remote add upstream https://github.com/pingdotgg/t3code.git
-                            git fetch --prune --tags upstream '+refs/heads/main:refs/remotes/upstream/main'
+                            git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
                         '''
                         installWorkspace()
                         withCredentials([
