@@ -3010,7 +3010,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   }
 
   yield* Effect.log("[desktop-artifact] Installing server sidecar runtime externals...");
-  const installCommand = yield* resolveSpawnCommand("pnpm", [...STAGE_INSTALL_ARGS]);
+  const installCommand = yield* resolveSpawnCommand("corepack", ["pnpm", ...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: serverStageDir,
@@ -3764,7 +3764,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  const installCommand = yield* resolveSpawnCommand("pnpm", [...STAGE_INSTALL_ARGS]);
+  // A pnpm exec parent disables pnpm's automatic version switching. Corepack
+  // still honors the staged packageManager instead of an older pnpm on PATH.
+  const installCommand = yield* resolveSpawnCommand("corepack", ["pnpm", ...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,

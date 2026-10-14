@@ -597,6 +597,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 sh "node scripts/fork-integration.ts quality ${integrationArgs(resolved)}"
             }
         }
+        failureClass = 'packaging'
         parallel failFast: false,
             macos: { buildMac(slug, candidateRef, version, publishRelease) },
             android: { buildAndroid(slug, candidateRef, version) },
@@ -604,7 +605,6 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 buildLinux(slug, candidateRef, version)
                 buildWindows(slug, candidateRef, version)
             }
-        failureClass = 'packaging'
         node('built-in') {
             stage("${slug}: Assemble + verify") {
                 checkoutCandidate("candidate-${slug}", candidateRef)
