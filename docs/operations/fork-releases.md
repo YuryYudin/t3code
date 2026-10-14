@@ -2,6 +2,8 @@
 
 The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. Independently, when a new upstream stable release appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
 
+GitHub Actions is disabled for this fork at the repository level; Jenkins owns CI and releases. This setting survives upstream workflow changes. Verify it with `gh api repos/YuryYudin/t3code/actions/permissions`; restore it with `gh api --method PUT repos/YuryYudin/t3code/actions/permissions -F enabled=false` if Actions has been enabled again.
+
 Use **Build with Parameters** for these manual actions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
@@ -12,6 +14,8 @@ Use **Build with Parameters** for these manual actions:
 
 `DRY_RUN` builds and validates everything but never pushes, publishes, or reports incidents.
 Scheduled `auto` builds perform release work only on the `main` job. The repository's Jenkinsfile guards other current branches. Reindex the multibranch project when branch jobs or their Jenkinsfiles are stale; indexing can queue builds for every changed discovered branch, so watch the queue and stop redundant builds by their exact job/build ID.
+
+Fetch upstream `main` with `--no-tags`. The release resolver fetches the selected official stable tag into `refs/upstream-tags/`; upstream movable aliases such as `android-nightly` must not share the fork's `refs/tags/` namespace. The desktop artifact tests load the checked-out workspace configuration before packaging so malformed build approvals fail in the repairable quality gate.
 
 ## Fork version policy
 
