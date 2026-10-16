@@ -42,10 +42,10 @@ vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
     toggleAuxiliaryPane: () => {},
   }),
 }));
-vi.mock("../../components/ui/ControlPill", async () => {
+vi.mock("../../components/ui/Menu", async () => {
   const React = await import("react");
   return {
-    ControlPillMenu: (props: Record<string, unknown>) =>
+    Menu: (props: Record<string, unknown>) =>
       React.createElement("control-pill-menu", props, props.children as ReactNode),
   };
 });

@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, Text as RNText, View } from "react-nat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { ControlPillMenu } from "../../components/ui/ControlPill";
+import { Menu } from "../../components/ui/Menu";
 import { ProjectCollectionIcon } from "../../components/ProjectCollectionIcon";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import type { HomeHeaderProps } from "./HomeHeader.types";
@@ -112,7 +112,7 @@ export function ProjectCollectionScopeStrip(props: HomeHeaderProps) {
       ) : (
         <View className="flex-1" />
       )}
-      <ControlPillMenu actions={addActions} isAnchoredToRight onPressAction={handleAddAction}>
+      <Menu actions={addActions} isAnchoredToRight onPressAction={handleAddAction}>
         <Pressable
           accessibilityLabel="Add project or collection"
           accessibilityRole="button"
@@ -120,7 +120,7 @@ export function ProjectCollectionScopeStrip(props: HomeHeaderProps) {
         >
           <SymbolView name="plus" size={17} tintColorClassName="accent-icon" type="monochrome" />
         </Pressable>
-      </ControlPillMenu>
+      </Menu>
     </View>
   );
 }
