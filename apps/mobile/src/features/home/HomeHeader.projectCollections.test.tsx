@@ -42,14 +42,14 @@ vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
     toggleAuxiliaryPane: () => {},
   }),
 }));
-vi.mock("../../components/ControlPill", async () => {
+vi.mock("../../components/ui/ControlPill", async () => {
   const React = await import("react");
   return {
     ControlPillMenu: (props: Record<string, unknown>) =>
       React.createElement("control-pill-menu", props, props.children as ReactNode),
   };
 });
-vi.mock("../../components/AppSymbol", () => ({ SymbolView: "native-symbol" }));
+vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/ProjectCollectionIcon", () => ({
   ProjectCollectionIcon: "project-collection-icon",
 }));
@@ -60,7 +60,14 @@ vi.mock("../../native/StackHeader", async () => {
     React.createElement(name, props, props.children as ReactNode);
   return {
     NativeStackScreenOptions: component("native-stack-screen-options"),
-    NativeHeaderToolbar: Object.assign(component("native-header-toolbar"), {
+  };
+});
+vi.mock("../../components/ui/Toolbar", async () => {
+  const React = await import("react");
+  const component = (name: string) => (props: Record<string, unknown>) =>
+    React.createElement(name, props, props.children as ReactNode);
+  return {
+    Toolbar: Object.assign(component("native-header-toolbar"), {
       Button: component("native-header-button"),
       Label: component("native-header-label"),
       Menu: component("native-header-menu"),
@@ -91,10 +98,10 @@ vi.mock("./WorkspaceConnectionTitle", () => ({
 }));
 // Upstream renders the whole Android chrome through this toolbar; stubbing it
 // keeps the assertions on the filter menu the header builds.
-vi.mock("./MaterialThreadListToolbar", async () => {
+vi.mock("./ThreadListToolbar", async () => {
   const React = await import("react");
   return {
-    MaterialThreadListToolbar: (props: Record<string, unknown>) =>
+    ThreadListToolbar: (props: Record<string, unknown>) =>
       React.createElement("material-thread-list-toolbar", props),
   };
 });

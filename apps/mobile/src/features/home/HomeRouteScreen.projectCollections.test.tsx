@@ -8,6 +8,7 @@ import {
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const runtime = vi.hoisted(() => ({
@@ -45,11 +46,18 @@ vi.mock("../../state/preferences", () => ({
   updateMobilePreferencesAtom: Symbol("updateMobilePreferencesAtom"),
 }));
 vi.mock("../../native/StackHeader", () => ({
-  NativeHeaderToolbar: {
-    Button: "native-header-button",
-  },
   NativeStackScreenOptions: "native-stack-screen-options",
 }));
+vi.mock("../../components/ui/Toolbar", async () => {
+  const React = await import("react");
+  const toolbar = (props: Record<string, unknown>) =>
+    React.createElement("native-header-toolbar", props, props.children as ReactNode);
+  return {
+    Toolbar: Object.assign(toolbar, {
+      Button: "native-header-button",
+    }),
+  };
+});
 vi.mock("../../state/entities", () => ({
   useProjects: () => runtime.projects,
   useNavigationThreadShells: () => runtime.threads,
@@ -91,7 +99,7 @@ vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
 vi.mock("../layout/WorkspaceEmptyDetail", () => ({
   WorkspaceEmptyDetail: "workspace-empty-detail",
 }));
-vi.mock("../../components/AndroidScreenHeader", () => ({
+vi.mock("../../components/ui/AndroidScreenHeader", () => ({
   AndroidScreenHeader: "android-screen-header",
 }));
 vi.mock("../updates/app-updates", () => ({

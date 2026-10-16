@@ -171,15 +171,15 @@ vi.mock("../home/thread-swipe-actions", () => ({
   SwipeableScrollGateProvider: ({ children }: { readonly children?: unknown }) => children,
   useSwipeableScrollGate: () => ({ swipeEnabled: true, scrollGateHandlers: {} }),
 }));
-vi.mock("../../components/ControlPill", async () => {
+vi.mock("../../components/ui/Menu", async () => {
   const React = await import("react");
   return {
-    ControlPillMenu: (props: Record<string, unknown>) =>
+    Menu: (props: Record<string, unknown>) =>
       React.createElement("control-pill-menu", props, props.children as ReactNode),
   };
 });
-vi.mock("../../components/AppText", () => ({ AppText: "native-text" }));
-vi.mock("../../components/AppSymbol", () => ({ SymbolView: "native-symbol" }));
+vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
+vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
 vi.mock("../home/WorkspaceConnectionTitle", () => ({
@@ -188,10 +188,10 @@ vi.mock("../home/WorkspaceConnectionTitle", () => ({
 }));
 // Upstream routes the whole Android chrome through this toolbar, which pulls in
 // native-only modules; stub it so the sidebar's own menu stays under test.
-vi.mock("../home/MaterialThreadListToolbar", async () => {
+vi.mock("../home/ThreadListToolbar", async () => {
   const React = await import("react");
   return {
-    MaterialThreadListToolbar: (props: Record<string, unknown>) =>
+    ThreadListToolbar: (props: Record<string, unknown>) =>
       React.createElement("material-thread-list-toolbar", props),
   };
 });

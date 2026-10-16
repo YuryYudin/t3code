@@ -4,8 +4,8 @@ import { useCallback, useContext, useMemo } from "react";
 import { Platform, Pressable, ScrollView, Text as RNText, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { ControlPillMenu } from "../../components/ControlPill";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { ControlPillMenu } from "../../components/ui/ControlPill";
 import { ProjectCollectionIcon } from "../../components/ProjectCollectionIcon";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import type { HomeHeaderProps } from "./HomeHeader.types";

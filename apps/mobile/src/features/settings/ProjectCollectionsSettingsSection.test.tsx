@@ -14,7 +14,7 @@ vi.mock("react-native", () => ({
   Pressable: "native-pressable",
   View: "native-view",
 }));
-vi.mock("../../components/AppText", () => ({ AppText: "native-text" }));
+vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../state/environments", () => ({
   useEnvironments: () => ({ environments: boundaryRuntime.environments }),
 }));

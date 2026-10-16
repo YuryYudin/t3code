@@ -26,7 +26,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { ProjectCollectionIcon } from "../../components/ProjectCollectionIcon";
 import { uuidv4 } from "../../lib/uuid";
 

@@ -33,7 +33,7 @@ import {
   type LucideProps,
 } from "lucide-react-native";
 import { withUniwind } from "uniwind";
-import { AppText } from "./AppText";
+import { AppText } from "./ui/AppText";
 
 const PROJECT_COLLECTION_ICON_BY_NAME: {
   readonly [Name in (typeof PROJECT_COLLECTION_ICON_NAMES)[number]]: LucideIcon;

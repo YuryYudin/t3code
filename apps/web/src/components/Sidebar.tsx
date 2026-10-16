@@ -179,7 +179,6 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
   buildThreadActionMenuItems,
@@ -269,6 +268,7 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button, InlineButton } from "./ui/button";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
@@ -2716,7 +2716,7 @@ export default function Sidebar() {
     clearSelection();
   }, [clearSelection, projectCollectionScopeKey]);
 
-  const openProjectSettings = useCallback(
+  const openProjectSettings = useStableCallback(
     (projectGroup: SidebarProjectSnapshot, projectRef?: ScopedProjectRef) => {
       if (isMobile) {
         setOpenMobile(false);
@@ -2733,7 +2733,6 @@ export default function Sidebar() {
         },
       });
     },
-    [isMobile, projectGroupingSettings, projects, router, setOpenMobile],
   );
   // Keep a dropped row at its destination while its server applies the
   // lifecycle command and any order-key writes. The next pickup waits for
@@ -3553,7 +3552,7 @@ export default function Sidebar() {
     action: SidebarSweepAction;
     keys: ReadonlySet<string>;
   } | null>(null);
-  const startActionSweep = useCallback(
+  const startActionSweep = useStableCallback(
     (threadRef: ScopedThreadRef, action: SidebarSweepAction, event: PointerEvent) => {
       const originKey = scopedThreadKey(threadRef);
       const originSection = sectionByThreadKeyRef.current.get(originKey);
@@ -3612,7 +3611,6 @@ export default function Sidebar() {
         onAbort: () => {},
       });
     },
-    [attemptUnsettle, attemptUnsnooze, serverConfigs, settleThreads],
   );
   const pinnedKeys = useMemo(
     () =>
@@ -4231,7 +4229,7 @@ export default function Sidebar() {
   );
 
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
-  const handleMultiSelectContextMenu = useCallback(
+  const handleMultiSelectContextMenu = useStableCallback(
     async (position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
@@ -4491,22 +4489,9 @@ export default function Sidebar() {
         }),
       );
     },
-    [
-      attemptUnpin,
-      clearSelection,
-      confirmThreadDelete,
-      deleteThread,
-      markThreadUnread,
-      performSnooze,
-      removeFromSelection,
-      serverConfigs,
-      settleThreads,
-      updateThreadMetadata,
-      timestampFormat,
-    ],
   );
 
-  const handleDraftContextMenu = useCallback(
+  const handleDraftContextMenu = useStableCallback(
     (draftId: DraftId, position: { x: number; y: number }) => {
       void (async () => {
         const api = readLocalApi();
@@ -4556,10 +4541,9 @@ export default function Sidebar() {
         }
       })();
     },
-    [copyBranchToClipboard, copyPathToClipboard, openProjectSettings, projectByKey],
   );
 
-  const handleThreadContextMenu = useCallback(
+  const handleThreadContextMenu = useStableCallback(
     (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       void (async () => {
         const api = readLocalApi();
@@ -4829,32 +4813,6 @@ export default function Sidebar() {
         }
       })();
     },
-    [
-      archiveThread,
-      attemptPin,
-      attemptSettle,
-      attemptSnooze,
-      attemptUnpin,
-      attemptUnsettle,
-      attemptUnsnooze,
-      confirmThreadArchive,
-      confirmThreadDelete,
-      copyBranchToClipboard,
-      copyPathToClipboard,
-      copyThreadIdToClipboard,
-      deleteThread,
-      handleMultiSelectContextMenu,
-      markThreadUnread,
-      openProjectSettings,
-      projectScopeKey,
-      projectByKey,
-      serverConfigs,
-      setProjectScopeKey,
-      setThreadAutoSettle,
-      startThreadRename,
-      updateThreadMetadata,
-      timestampFormat,
-    ],
   );
 
   // Thread jump (cmd+1..9) and prev/next traversal reuse the same commands as
