@@ -12,7 +12,6 @@ import type {
 
 import type { ProjectCollectionsView } from "../projects/useProjectCollections";
 
-/** Wait for earlier grants before choosing the settings that edits and synchronization use. */
 export function resolveAutoSettleReferenceEnvironmentId(
   environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;

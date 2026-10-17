@@ -13,7 +13,6 @@ function checkedMenuState(checked: boolean) {
 }
 
 export function HomeHeader(props: HomeHeaderProps) {
-  // Collection scopes narrow the list just like a project filter.
   const hasCustomListOptions =
     props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const menuActions = useMemo<MenuAction[]>(

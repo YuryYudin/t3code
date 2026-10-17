@@ -112,8 +112,8 @@ export class EnvironmentRegistry extends Context.Service<
     readonly networkStatus: SubscriptionRef.SubscriptionRef<NetworkStatus>;
     readonly start: Effect.Effect<void>;
     /**
-     * Saves a user registration. Succeeds with `false` and changes nothing when
-     * the environment is platform-managed, since the host owns that entry.
+     * Succeeds with `false` and changes nothing when the environment is
+     * platform-managed, since the host owns that entry.
      */
     readonly register: (
       registration: ConnectionRegistration,
@@ -132,8 +132,8 @@ export class EnvironmentRegistry extends Context.Service<
       | PlatformEnvironmentRemovalError
     >;
     /**
-     * Drops one route. Removing an environment's last route removes the
-     * environment, the same as `remove`.
+     * Removing an environment's last route removes the environment, the same as
+     * `remove`.
      */
     readonly removeRoute: (
       environmentId: EnvironmentId,
@@ -145,7 +145,6 @@ export class EnvironmentRegistry extends Context.Service<
       | EnvironmentNotRegisteredError
       | PlatformEnvironmentRemovalError
     >;
-    /** Reorders an environment's routes; `routeIds` lists every route, preferred first. */
     readonly reorderRoutes: (
       environmentId: EnvironmentId,
       routeIds: ReadonlyArray<string>,
@@ -156,10 +155,6 @@ export class EnvironmentRegistry extends Context.Service<
       | PlatformEnvironmentRemovalError
       | ConnectionBlockedError
     >;
-    /**
-     * Drops the T3 Connect route of every environment, after a cloud sign-out
-     * or account change. Environments with no other route are removed.
-     */
     readonly removeRelayEnvironments: () => Effect.Effect<
       void,
       | Persistence.ConnectionPersistenceError
@@ -167,11 +162,6 @@ export class EnvironmentRegistry extends Context.Service<
       | PlatformEnvironmentRemovalError
     >;
     readonly retryNow: (environmentId: EnvironmentId) => Effect.Effect<void>;
-    /**
-     * Switches a saved environment on or off. Off drops the socket, stops the
-     * retry ladder, and persists so the next launch stays off. Registration,
-     * credentials, and cache are untouched.
-     */
     readonly setEnabled: (
       environmentId: EnvironmentId,
       enabled: boolean,
@@ -511,7 +501,6 @@ export const make = Effect.gen(function* () {
       SubscriptionRef.changes(entries),
     ).pipe(
       Stream.map((current) => Option.fromUndefinedOr(current.get(environmentId))),
-      // Re-pairing can replace the supervisor while its catalog details stay unchanged.
       Stream.changesWith(
         (previous, current) => Option.getOrNull(previous) === Option.getOrNull(current),
       ),
@@ -630,10 +619,8 @@ export const make = Effect.gen(function* () {
     );
 
   /**
-   * The entry after its routes change. GitHub trust and an unsupported
-   * verdict both belong to the saved addresses: a changed set may reach a
-   * different server, so both are dropped and the next connection decides.
-   * Reordering keeps the same addresses, so both stay.
+   * GitHub trust and an unsupported verdict both belong to the saved addresses: a changed set may
+   * reach a different server, so both are dropped and the next connection decides.
    */
   const withRoutes = (previous: ConnectionCatalogEntry, routes: ReadonlyArray<ConnectionRoute>) => {
     const next = entryWithRoutes(previous, routes);
@@ -655,9 +642,6 @@ export const make = Effect.gen(function* () {
         if ((yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
           return false;
         }
-        // A new route joins the environment's saved routes. Registering one it
-        // already has (the same id, or a pairing to the same address) replaces
-        // it in place. Editing keeps the disabled state.
         const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
         let entry = registered;
         if (previous !== undefined) {
@@ -683,7 +667,6 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  /** Writes a new route list for a user-saved environment and restarts its connection. */
   const replaceRoutesLocked = Effect.fn("EnvironmentRegistry.replaceRoutesLocked")(function* (
     previous: ConnectionCatalogEntry,
     routes: ReadonlyArray<ConnectionRoute>,
@@ -789,13 +772,6 @@ export const make = Effect.gen(function* () {
 
           yield* installEntryLocked(entry, { retainEquivalentRuntime: true });
 
-          // The catalog entry carries no credential, so a fresh bearer keeps
-          // the equivalent runtime. Anything not yet connected may be using the
-          // old bearer: an attempt in flight would fail with it and then wait
-          // blocked for a manual retry. Retry with the new one instead. A
-          // connected session keeps its socket, but the server revoked the old
-          // bearer, so its HTTP requests (such as the session's scopes) move to
-          // the new one.
           if (bearerReplaced && registration._tag === "BearerConnectionRegistration") {
             const scope = (yield* SubscriptionRef.get(serviceScopes)).get(target.environmentId);
             if (scope !== undefined) {
@@ -833,10 +809,6 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  // Tear down a platform-managed environment that the host no longer reports
-  // (e.g. the user turned the parallel WSL backend off). Platform environments
-  // bypass the user-facing `remove` guard since they are reconciled from the
-  // bootstrap rather than removed by hand.
   const removePlatformEnvironment = Effect.fn("EnvironmentRegistry.removePlatformEnvironment")(
     function* (environmentId: EnvironmentId) {
       yield* withLeaseLock(
@@ -902,9 +874,6 @@ export const make = Effect.gen(function* () {
     yield* installPlatformRegistration(registration);
   });
 
-  // Reconcile the full set of platform-managed environments against what the
-  // host currently reports: add/refresh the desired ones and tear down any
-  // platform environment that disappeared (WSL toggled off, distro switched).
   const reconcilePlatform = Effect.fn("EnvironmentRegistry.reconcilePlatform")(function* (
     platformRegistrations: ReadonlyArray<PlatformConnectionRegistration>,
   ) {
@@ -921,7 +890,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(platformRegistrations, installPlatformRegistration, { discard: true });
   });
 
-  /** Forgets a user-saved environment. Callers hold its lease lock. */
+  /** Callers hold its lease lock. */
   const removeLocked = Effect.fn("EnvironmentRegistry.removeLocked")(function* (
     environmentId: EnvironmentId,
   ) {
@@ -984,10 +953,8 @@ export const make = Effect.gen(function* () {
     typeof globalThis.location === "undefined" || globalThis.location.protocol !== "https:";
 
   /**
-   * Saves the direct addresses a connected server reports as learned routes,
-   * replacing learned routes it no longer reports. Routes the user saved are
-   * never changed. Learned routes reuse the active route's credential, so they
-   * do not revoke GitHub routing trust the way a newly paired address does.
+   * Learned routes reuse the active route's credential, so they do not revoke GitHub routing
+   * trust the way a newly paired address does.
    */
   const learnRoutes = Effect.fn("EnvironmentRegistry.learnRoutes")(function* (input: {
     readonly environmentId: EnvironmentId;
@@ -1010,9 +977,6 @@ export const make = Effect.gen(function* () {
         });
         if (routes === null) return Option.none<ConnectionCatalogEntry>();
         const next = entryWithRoutes(entry, routes);
-        // Save new learned profiles and any whose Tailscale mark changed. A
-        // learned route owns its profile; the credential stays with the route
-        // it borrows from.
         const previousProfiles = new Map(
           connectionRoutes(entry).map((route) => [
             connectionRouteId(route.target),
@@ -1146,8 +1110,6 @@ export const make = Effect.gen(function* () {
         if (entry.enabled === enabled) {
           return;
         }
-        // Platform-managed environments are reconciled from the host and are
-        // never persisted, so only user-saved ones write the flag.
         if (!(yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
           yield* registrations.setEnabled(environmentId, enabled);
         }

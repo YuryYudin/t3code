@@ -11,6 +11,7 @@ import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { createNativeMailSearchToolbarItem } from "../layout/native-mail-search-toolbar";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
+import { useDeviceType } from "../../native/native-layout-metrics";
 import { buildHomeListFilterMenu } from "./home-list-filter-menu";
 import { createSidebarHeaderItems } from "../threads/sidebar-native-header-items";
 import type { HomeHeaderProps } from "./HomeHeader.types";
@@ -24,12 +25,13 @@ export function HomeHeader(props: HomeHeaderProps) {
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { layout, panes, togglePrimarySidebar } = useAdaptiveWorkspaceLayout();
   const usesNativeMailSearchToolbar = useNativeMailSearchToolbar();
+  const deviceType = useDeviceType();
   const primaryColumn = use(NativePrimaryColumnContext);
   const sidebarHeader =
     Platform.OS === "ios" &&
     primaryColumn !== null &&
-    (Platform.isPad || !usesNativeMailSearchToolbar);
-  const showsCompactCompose = Platform.OS === "ios" && Platform.isPad && !layout.usesSplitView;
+    (deviceType === "pad" || !usesNativeMailSearchToolbar);
+  const showsCompactCompose = deviceType === "pad" && !layout.usesSplitView;
   const searchBarRef = useRef<SearchBarCommands>(null);
   const focusAfterReveal = useRef(false);
   useEffect(
@@ -43,7 +45,6 @@ export function HomeHeader(props: HomeHeaderProps) {
     [navigation],
   );
   const iconColor = useUniwindTheme()["--color-icon"];
-  // Collection scopes narrow the list just like a project filter.
   const hasCustomListOptions =
     props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const focusSearch = useCallback(() => {
@@ -67,8 +68,6 @@ export function HomeHeader(props: HomeHeaderProps) {
       <NativeStackScreenOptions
         optionsVersion={[filterMenu.items, showsCompactCompose]}
         options={{
-          // Static header config (glass, title, fonts) lives in Stack.tsx
-          // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
           headerTintColor: iconColor,
           unstable_headerRightItems: () =>
             sidebarHeader
@@ -147,8 +146,6 @@ export function HomeHeader(props: HomeHeaderProps) {
                   ],
                 }
               : {
-                  // Pre-Liquid-Glass iOS: standard pull-down search in the nav
-                  // bar; create + sort live in the plain bottom toolbar below.
                   headerSearchBarOptions: {
                     ref: searchBarRef,
                     autoCapitalize: "none" as const,
