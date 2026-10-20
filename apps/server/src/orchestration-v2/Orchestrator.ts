@@ -59,7 +59,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
-  type TurnItemId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
@@ -493,6 +493,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "checkpoint.rollback.fail":
     case "thread.background-work.settle":
     case "thread.stop":
+    case "thread.external-alert.upsert":
     case "provider.switch":
       return command.threadId;
     case "delegated_task.request":
@@ -2240,7 +2241,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     );
 
   const dispatchThreadCreate = Effect.fn("orchestrationV2.dispatch.threadCreate")(function* (
-    command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
+    command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }> & {
+      readonly createdAt?: string;
+    },
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
     yield* Effect.annotateCurrentSpan({
@@ -2250,7 +2253,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
-    const now = yield* DateTime.now;
+    const now =
+      command.createdAt === undefined
+        ? yield* DateTime.now
+        : DateTime.makeUnsafe(command.createdAt);
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
@@ -2321,6 +2327,131 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         },
       });
     }
+  });
+
+  const dispatchExternalAlert = Effect.fn("orchestrationV2.dispatch.externalAlert")(function* (
+    command: Extract<
+      OrchestrationV2InternalCommand,
+      { readonly type: "thread.external-alert.upsert" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const project = yield* projects.get(command.projectId).pipe(mapDispatchError(command));
+    if (Option.isNone(project)) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Project '${command.projectId}' does not exist or is deleted.`,
+      });
+    }
+
+    const existingShell = yield* projectionStore
+      .getThreadShell(command.threadId)
+      .pipe(mapDispatchError(command));
+    let projection: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "runs" | "messages" | "turnItems"
+    >;
+    if (existingShell === null) {
+      if (command.state === "recovered") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Incident '${command.incidentKey}' cannot recover before its thread exists.`,
+        });
+      }
+      if (project.value.defaultModelSelection === null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Project '${command.projectId}' requires a default model before receiving external alerts.`,
+        });
+      }
+      yield* dispatchThreadCreate(
+        {
+          type: "thread.create",
+          createdBy: "system",
+          creationSource: "server",
+          commandId: command.commandId,
+          threadId: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          modelSelection: project.value.defaultModelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: command.createdAt,
+        },
+        events,
+      );
+      projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+    } else {
+      projection = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs", "messages", "turnItems"])
+        .pipe(mapDispatchError(command));
+      if (projection.thread.projectId !== command.projectId) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread '${command.threadId}' does not belong to project '${command.projectId}'.`,
+        });
+      }
+      const incidentItems = projection.turnItems.filter(
+        (item) => item.type === "notification" && item.externalAlert !== undefined,
+      );
+      const firstIncident = incidentItems[0];
+      const incidentKey =
+        firstIncident?.type === "notification"
+          ? firstIncident.externalAlert?.incidentKey
+          : undefined;
+      const isLegacyIncidentThread =
+        incidentItems.length === 0 && command.threadId.startsWith("t3-fork-incident-");
+      if (!isLegacyIncidentThread && incidentKey !== command.incidentKey) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread '${command.threadId}' is not owned by incident '${command.incidentKey}'.`,
+        });
+      }
+    }
+
+    const occurredAt = DateTime.makeUnsafe(command.createdAt);
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      providerInstanceId: projection.thread.providerInstanceId,
+      occurredAt,
+      payload: {
+        id: TurnItemId.make(`turn-item:external-alert:${encodeURIComponent(command.commandId)}`),
+        threadId: command.threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: yield* nextTurnItemOrdinal(projection),
+        status: "completed",
+        title: null,
+        startedAt: occurredAt,
+        completedAt: occurredAt,
+        updatedAt: occurredAt,
+        type: "notification",
+        source: { kind: "system" },
+        outcome: command.state === "failing" ? "failed" : "completed",
+        summary: command.summary,
+        detail: command.detail === undefined ? command.url : `${command.detail}\n\n${command.url}`,
+        externalAlert: {
+          incidentKey: command.incidentKey,
+          state: command.state,
+          url: command.url,
+        },
+      },
+    });
   });
 
   const dispatchThreadVisit = Effect.fn("orchestrationV2.dispatch.threadVisit")(function* (
@@ -10809,6 +10940,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     switch (command.type) {
       case "thread.create":
         yield* dispatchThreadCreate(command, events);
+        break;
+      case "thread.external-alert.upsert":
+        yield* dispatchExternalAlert(command, events);
         break;
       case "thread.visit":
         yield* dispatchThreadVisit(command, events);

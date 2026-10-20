@@ -9,6 +9,13 @@ import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/e
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import {
+  createForeignStateHandler,
+  mergeForeignEntries,
+  ownedEntryKeys,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
 import { resolveStorage } from "./lib/storage";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -778,4 +785,39 @@ export const useTerminalUiStateStore = create<TerminalUiStateStoreState>()(
       }),
     },
   ),
+);
+
+interface TerminalUiPersistedState {
+  terminalUiStateByThreadKey: Record<string, ThreadTerminalUiState>;
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * fold a foreign window's write into this window without a DOM.
+ */
+export const foreignTerminalUiStateSync: ForeignStateSync<TerminalUiPersistedState> = {
+  snapshot: () => ({
+    terminalUiStateByThreadKey: useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+  }),
+  parse: (raw) => {
+    const parsed = raw === null ? null : (JSON.parse(raw) as { state?: unknown; version?: number });
+    return {
+      terminalUiStateByThreadKey:
+        migratePersistedTerminalUiStateStoreState(parsed?.state ?? null, parsed?.version ?? 0)
+          .terminalUiStateByThreadKey ?? {},
+    };
+  },
+  merge: ({ local, incoming, baseline }) => ({
+    terminalUiStateByThreadKey: mergeForeignEntries(
+      local.terminalUiStateByThreadKey,
+      incoming.terminalUiStateByThreadKey,
+      ownedEntryKeys(local.terminalUiStateByThreadKey, baseline.terminalUiStateByThreadKey),
+    ),
+  }),
+  apply: (merged) => useTerminalUiStateStore.setState(merged),
+};
+
+subscribeStorageKey(
+  TERMINAL_UI_STATE_STORAGE_KEY,
+  createForeignStateHandler(foreignTerminalUiStateSync),
 );
