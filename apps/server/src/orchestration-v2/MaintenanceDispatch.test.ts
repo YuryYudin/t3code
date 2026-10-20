@@ -115,6 +115,22 @@ it.effect(
         "Repair the frozen checkout",
       ]);
       expect(projection.runs).toHaveLength(1);
+      yield* dispatchMaintenanceCommand({
+        ...create,
+        commandId: CommandId.make("maintenance:create-after-import"),
+        title: "Replacement title",
+        worktreePath: "/replacement",
+      }).pipe(Effect.flip);
+      const preserved = yield* orchestrator.getThreadProjection(threadId);
+      expect(preserved.thread.title).toBe(projection.thread.title);
+      expect(preserved.thread.worktreePath).toBe("/repair");
+      expect(preserved.thread.activeProviderThreadId).toBe(
+        projection.thread.activeProviderThreadId,
+      );
+      expect(preserved.messages.map((message) => message.id)).toEqual(
+        projection.messages.map((message) => message.id),
+      );
+
       const interrupted = yield* dispatchMaintenanceCommand(
         decode({
           type: "thread.session.stop",
@@ -127,5 +143,23 @@ it.effect(
       expect(
         (yield* orchestrator.getShellSnapshot()).threads.filter((thread) => thread.id === threadId),
       ).toHaveLength(1);
+
+      const deletedId = ThreadId.make("maintenance-deleted");
+      yield* dispatchMaintenanceCommand({
+        ...create,
+        threadId: deletedId,
+        commandId: CommandId.make("maintenance:deleted:create"),
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        threadId: deletedId,
+        commandId: CommandId.make("maintenance:deleted:delete"),
+      });
+      yield* dispatchMaintenanceCommand({
+        ...create,
+        threadId: deletedId,
+        commandId: CommandId.make("maintenance:deleted:retry"),
+      }).pipe(Effect.flip);
+      expect(yield* orchestrator.getThreadShell(deletedId)).toBeNull();
     }).pipe(Effect.provide(testLayer)),
 );
