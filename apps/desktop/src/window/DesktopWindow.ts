@@ -71,6 +71,7 @@ type WindowTitleBarOptions = Pick<
 
 type DesktopWindowRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
+  | DesktopState.DesktopState
   | DesktopAssets.DesktopAssets
   | DesktopAppSettings.DesktopAppSettings
   | DesktopClientSettings.DesktopClientSettings
@@ -79,7 +80,6 @@ type DesktopWindowRuntimeServices =
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
   | ElectronWindow.ElectronWindow
-  | DesktopState.DesktopState
   | DesktopAppWindowRegistry.DesktopAppWindowRegistry
   | DesktopRendererHistory.DesktopRendererHistory
   | PreviewManager.PreviewManager;
@@ -356,6 +356,7 @@ function bindFirstRevealTrigger(
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const desktopState = yield* DesktopState.DesktopState;
   const assets = yield* DesktopAssets.DesktopAssets;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const electronShell = yield* ElectronShell.ElectronShell;
@@ -367,7 +368,6 @@ export const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
   const electronApp = yield* ElectronApp.ElectronApp;
-  const desktopState = yield* DesktopState.DesktopState;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const backendReadyRef = yield* Ref.make(false);
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
@@ -408,9 +408,25 @@ export const make = Effect.gen(function* () {
   );
   const focusedMainWindow = currentMainWindow;
 
+  const zoomWindow = Effect.fn("desktop.window.zoomWindow")(function* (
+    window: Electron.BrowserWindow,
+    direction: MainWindowZoomDirection,
+  ) {
+    const webContents = window.webContents;
+    webContents.setZoomLevel(
+      direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
+    );
+    if (environment.platform === "darwin") syncMacosWindowButtons(window);
+    // Chromium pushes the new level down to embedded guests, which would zoom
+    // the previewed page along with the app UI. The preview browser keeps its
+    // own zoom, so put each guest back where the preview left it.
+    yield* previewManager.reapplyZoom();
+  });
+
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     input: DesktopWindowCreateInput,
-  ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
+  ): Effect.fn.Return<Option.Option<Electron.BrowserWindow>, DesktopWindowError> {
+    if (yield* Ref.get(desktopState.quitting)) return Option.none();
     yield* previewManager.getBrowserSession();
     const applicationUrl = buildDesktopWindowUrl(getDesktopUrl(environment.isDevelopment), input);
     const iconPaths = yield* assets.iconPaths;
@@ -452,6 +468,7 @@ export const make = Effect.gen(function* () {
     const initialMaximized =
       input.maximized ??
       (existingAppWindows.length === 0 ? persistedSettings.mainWindowMaximized : false);
+    if (yield* Ref.get(desktopState.quitting)) return Option.none();
     const window = yield* electronWindow.create({
       ...initialBounds,
       minWidth: 840,
@@ -480,6 +497,10 @@ export const make = Effect.gen(function* () {
         disableHtmlFullscreenWindowResize: true,
       },
     });
+    if (yield* Ref.get(desktopState.quitting)) {
+      yield* electronWindow.destroyAll;
+      return Option.none();
+    }
 
     yield* rendererHistory.register(window.webContents, { surface: "main" });
     if (environment.platform === "darwin") {
@@ -618,6 +639,10 @@ export const make = Effect.gen(function* () {
     if (existingAppWindows.length === 0) {
       previewHostWindowId = window.id;
       yield* previewManager.setMainWindow(window);
+    }
+    if (yield* Ref.get(desktopState.quitting)) {
+      yield* electronWindow.destroyAll;
+      return Option.none();
     }
     window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
       if (
@@ -782,6 +807,13 @@ export const make = Effect.gen(function* () {
     window.webContents.on("input-event", (_event, input) => {
       if (input.type === "gestureScrollEnd") window.webContents.send(TRACKPAD_SCROLL_END_CHANNEL);
     });
+    // Ctrl+wheel never reaches the menu accelerators: Chromium reports it here
+    // and leaves applying the zoom to the app. A preview guest under the
+    // pointer emits this on its own webContents and keeps its own zoom.
+    window.webContents.on("zoom-changed", (_event, direction) => {
+      if (window.isDestroyed()) return;
+      runFork(zoomWindow(window, direction));
+    });
 
     window.on("page-title-updated", (event) => {
       event.preventDefault();
@@ -895,9 +927,11 @@ export const make = Effect.gen(function* () {
       const recoverable =
         details.reason === "crashed" ||
         details.reason === "oom" ||
+        details.reason === "killed" ||
         details.reason === "abnormal-exit";
       // Recovery attempts are bounded so a renderer that dies immediately on
       // boot cannot reload-loop forever.
+
       runFork(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
@@ -993,7 +1027,7 @@ export const make = Effect.gen(function* () {
       );
     });
 
-    return window;
+    return Option.some(window);
   });
 
   const promoteToMain = (window: Electron.BrowserWindow) =>
@@ -1003,10 +1037,11 @@ export const make = Effect.gen(function* () {
       yield* logWindowInfo("main window created");
     });
 
-  const createMain = createWindow({}).pipe(
-    Effect.tap(promoteToMain),
-    Effect.withSpan("desktop.window.createMain"),
-  );
+  const createMain = Effect.gen(function* () {
+    const window = yield* createWindow({});
+    if (Option.isSome(window)) yield* promoteToMain(window.value);
+    return window;
+  }).pipe(Effect.withSpan("desktop.window.createMain"));
 
   /**
    * Reopens the windows the last session left behind, each with its own scope
@@ -1028,7 +1063,6 @@ export const make = Effect.gen(function* () {
         bounds: record.bounds,
         maximized: record.maximized,
       }).pipe(
-        Effect.map(Option.some<Electron.BrowserWindow>),
         Effect.catch((error) =>
           Effect.sync(() => {
             if (Option.isNone(firstError)) firstError = Option.some(error);
@@ -1051,15 +1085,20 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.withSpan("desktop.window.restorePersistedWindows"));
 
   const ensureMain = Effect.gen(function* () {
+    if (yield* Ref.get(desktopState.quitting)) return Option.none<Electron.BrowserWindow>();
     const existingWindow = yield* currentMainWindow;
-    if (Option.isSome(existingWindow)) {
-      return existingWindow.value;
-    }
+    if (Option.isSome(existingWindow)) return existingWindow;
     return yield* createMain;
   }).pipe(Effect.withSpan("desktop.window.ensureMain"));
 
+  const requireWindow = (window: Option.Option<Electron.BrowserWindow>) =>
+    Option.match(window, {
+      onNone: () => Effect.interrupt,
+      onSome: Effect.succeed,
+    });
+
   const revealOrCreateMain = Effect.gen(function* () {
-    const window = yield* ensureMain;
+    const window = yield* ensureMain.pipe(Effect.flatMap(requireWindow));
     yield* electronWindow.reveal(window);
     return window;
   }).pipe(Effect.withSpan("desktop.window.revealOrCreateMain"));
@@ -1070,6 +1109,7 @@ export const make = Effect.gen(function* () {
   });
 
   const createMainIfBackendReady = Effect.gen(function* () {
+    if (yield* Ref.get(desktopState.quitting)) return;
     if (yield* waitingForBackend) return;
     const existingWindow = yield* currentMainWindow;
     if (Option.isSome(existingWindow)) return;
@@ -1077,12 +1117,14 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
   const showConnectingSplash = Effect.gen(function* () {
+    if (yield* Ref.get(desktopState.quitting)) return;
     const existingSplash = yield* Ref.get(splashWindowRef);
     if (Option.isSome(existingSplash)) return;
     const existingWindow = yield* electronWindow.currentMainOrFirst;
     if (Option.isSome(existingWindow)) return;
 
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
+    if (yield* Ref.get(desktopState.quitting)) return;
     const splash = yield* electronWindow.create({
       width: 360,
       height: 220,
@@ -1102,6 +1144,10 @@ export const make = Effect.gen(function* () {
         sandbox: true,
       },
     });
+    if (yield* Ref.get(desktopState.quitting)) {
+      yield* electronWindow.destroyAll;
+      return;
+    }
     yield* rendererHistory.register(splash.webContents, { surface: "splash" });
     yield* Ref.set(splashWindowRef, Option.some(splash));
     splash.once("closed", () => {
@@ -1126,10 +1172,12 @@ export const make = Effect.gen(function* () {
     payload: unknown,
     { reveal = true }: { readonly reveal?: boolean } = {},
   ) {
+    if (yield* Ref.get(desktopState.quitting)) return;
     const existingWindow = yield* reveal ? focusedMainWindow : currentMainWindow;
     if (Option.isNone(existingWindow) && (!reveal || (yield* waitingForBackend))) return;
-    const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
-    if (targetWindow.isDestroyed()) return;
+    const window = Option.isSome(existingWindow) ? existingWindow : yield* ensureMain;
+    if (Option.isNone(window) || window.value.isDestroyed()) return;
+    const targetWindow = window.value;
     const send = Effect.sync(() => {
       if (!targetWindow.isDestroyed()) targetWindow.webContents.send(channel, payload);
     });
@@ -1146,14 +1194,14 @@ export const make = Effect.gen(function* () {
   });
 
   return DesktopWindow.of({
-    create: createWindow,
-    createMain,
+    create: (input) => createWindow(input).pipe(Effect.flatMap(requireWindow)),
+    createMain: createMain.pipe(Effect.flatMap(requireWindow)),
     setWindowScope: Effect.fn("desktop.window.setWindowScope")(function* (window, scope) {
       yield* appWindows.setScope(window, scope);
       const apply = scopeAppliers.get(window.id);
       if (apply !== undefined) yield* apply(scope);
     }),
-    ensureMain,
+    ensureMain: ensureMain.pipe(Effect.flatMap(requireWindow)),
     revealOrCreateMain,
     prepareCaptureReveal: Effect.gen(function* () {
       const existingWindow = yield* currentMainWindow;
@@ -1162,6 +1210,7 @@ export const make = Effect.gen(function* () {
       }
     }),
     activate: Effect.gen(function* () {
+      if (yield* Ref.get(desktopState.quitting)) return;
       const existingWindow = yield* currentMainWindow;
       if (Option.isSome(existingWindow)) {
         yield* electronWindow.reveal(existingWindow.value);
@@ -1205,19 +1254,11 @@ export const make = Effect.gen(function* () {
     }),
     zoomMain: Effect.fn("desktop.window.zoomMain")(function* (direction) {
       yield* Effect.annotateCurrentSpan({ direction });
-      const window = yield* focusedMainWindow;
+      const window = yield* electronWindow.main;
       if (Option.isNone(window) || window.value.isDestroyed()) {
         return;
       }
-      const webContents = window.value.webContents;
-      webContents.setZoomLevel(
-        direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
-      );
-      if (environment.platform === "darwin") syncMacosWindowButtons(window.value);
-      // Chromium pushes the new level down to embedded guests, which would zoom
-      // the previewed page along with the app UI. The preview browser keeps its
-      // own zoom, so put each guest back where the preview left it.
-      yield* previewManager.reapplyZoom();
+      yield* zoomWindow(window.value, direction);
     }),
     runMainContentsCommand: Effect.fn("desktop.window.runMainContentsCommand")(function* (command) {
       yield* Effect.annotateCurrentSpan({ command });
