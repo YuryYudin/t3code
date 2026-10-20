@@ -115,12 +115,21 @@ it.effect(
         "Repair the frozen checkout",
       ]);
       expect(projection.runs).toHaveLength(1);
-      yield* dispatchMaintenanceCommand({
-        ...create,
-        commandId: CommandId.make("maintenance:create-after-import"),
-        title: "Replacement title",
-        worktreePath: "/replacement",
-      }).pipe(Effect.flip);
+      yield* dispatchMaintenanceCommand(
+        decode({
+          type: "thread.create",
+          commandId: CommandId.make("maintenance:create-after-import"),
+          threadId,
+          projectId: ProjectId.make("maintenance"),
+          title: "Replacement title",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: "/replacement",
+          createdAt,
+        }),
+      ).pipe(Effect.flip);
       const preserved = yield* orchestrator.getThreadProjection(threadId);
       expect(preserved.thread.title).toBe(projection.thread.title);
       expect(preserved.thread.worktreePath).toBe("/repair");
