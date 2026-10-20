@@ -197,6 +197,60 @@ it.layer(layerTest)("external alert orchestration", (it) => {
     }),
   );
 
+  it.effect("preserves imported thread history when Jenkins retries thread creation", () =>
+    Effect.gen(function* () {
+      const projectId = yield* seedProject("create-retry", modelSelection);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const alert = command("create-retry", projectId, {
+        threadId: ThreadId.make("t3-fork-maintenance-integration"),
+      });
+      yield* orchestrator.dispatch(alert);
+      const error = yield* orchestrator
+        .dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("jenkins:create-retry:after-migration"),
+          threadId: alert.threadId,
+          projectId,
+          title: "Replacement title",
+          createdBy: "system",
+          creationSource: "server",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: "/replacement-checkout",
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "OrchestratorDispatchError");
+      const projection = yield* orchestrator.getThreadRecords(alert.threadId, ["turnItems"]);
+      assert.equal(projection.thread.title, alert.title);
+      assert.equal(projection.thread.worktreePath, null);
+      assert.lengthOf(projection.turnItems, 1);
+    }),
+  );
+
+  it.effect("does not resurrect a deleted incident when another failure arrives", () =>
+    Effect.gen(function* () {
+      const projectId = yield* seedProject("deleted", modelSelection);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const alert = command("deleted", projectId);
+      yield* orchestrator.dispatch(alert);
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("jenkins:deleted:delete"),
+        threadId: alert.threadId,
+      });
+      const error = yield* orchestrator
+        .dispatch({
+          ...alert,
+          commandId: CommandId.make("jenkins:deleted:failure-again"),
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "OrchestratorDispatchError");
+      assert.isNull(yield* orchestrator.getThreadShell(alert.threadId));
+    }),
+  );
+
   it.effect("rejects recovery before the incident thread exists", () =>
     Effect.gen(function* () {
       const projectId = yield* seedProject("missing", modelSelection);
