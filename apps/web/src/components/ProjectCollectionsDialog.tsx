@@ -350,7 +350,7 @@ export function ProjectCollectionsDialogView<TProject extends EnvironmentProject
           draggable={!mutationDisabled}
           disabled={mutationDisabled}
           aria-label={`Drag ${project.label}`}
-          className="cursor-grab rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="cursor-grab rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData(DRAG_MIME, key);
@@ -411,7 +411,7 @@ export function ProjectCollectionsDialogView<TProject extends EnvironmentProject
               Move a project to include all its checkouts and threads.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="flex min-h-0 flex-col gap-4">
+          <DialogPanel className="flex min-h-0 flex-col">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">
                 Collections follow your project sort. Changes sync across devices.
@@ -547,7 +547,7 @@ export function ProjectCollectionsDialogView<TProject extends EnvironmentProject
         }}
       >
         <DialogPopup className="w-full sm:w-[28rem]">
-          <form onSubmit={submitEditor}>
+          <form className="flex min-h-0 flex-col" onSubmit={submitEditor}>
             <DialogHeader>
               <DialogTitle>
                 {editor?.kind === "edit" ? "Edit collection" : "New collection"}
@@ -556,7 +556,7 @@ export function ProjectCollectionsDialogView<TProject extends EnvironmentProject
                 Name and icon appear on all your connected devices.
               </DialogDescription>
             </DialogHeader>
-            <DialogPanel className="flex flex-col gap-4">
+            <DialogPanel className="flex flex-col">
               <label className="flex flex-col gap-1.5 text-sm font-medium">
                 Name
                 <Input
