@@ -331,39 +331,49 @@ export class Integration {
       ":(exclude).repos",
     ]);
     const tree = integrationGit(state.checkout, ["write-tree"]);
-    const message = integrationGit(state.checkout, ["show", "-s", "--format=%B", replay.pending]);
-    const result = NodeChildProcess.spawnSync(
-      "git",
-      ["-c", `safe.directory=${state.checkout}`, "commit-tree", tree, "-p", state.head],
-      {
-        cwd: state.checkout,
-        input: `${message}\n`,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          GIT_AUTHOR_NAME: integrationGit(state.checkout, [
-            "show",
-            "-s",
-            "--format=%an",
-            replay.pending,
-          ]),
-          GIT_AUTHOR_EMAIL: integrationGit(state.checkout, [
-            "show",
-            "-s",
-            "--format=%ae",
-            replay.pending,
-          ]),
-          GIT_AUTHOR_DATE: integrationGit(state.checkout, [
-            "show",
-            "-s",
-            "--format=%aI",
-            replay.pending,
-          ]),
+    const [originalParent, originalTree] = integrationGit(state.checkout, [
+      "rev-parse",
+      `${replay.pending}^`,
+      `${replay.pending}^{tree}`,
+    ]).split("\n");
+    // A new committer timestamp would sever integration ancestry on every
+    // fork revision, even when the stable base and patch are unchanged.
+    let head = replay.pending;
+    if (originalParent !== state.head || originalTree !== tree) {
+      const message = integrationGit(state.checkout, ["show", "-s", "--format=%B", replay.pending]);
+      const result = NodeChildProcess.spawnSync(
+        "git",
+        ["-c", `safe.directory=${state.checkout}`, "commit-tree", tree, "-p", state.head],
+        {
+          cwd: state.checkout,
+          input: `${message}\n`,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: integrationGit(state.checkout, [
+              "show",
+              "-s",
+              "--format=%an",
+              replay.pending,
+            ]),
+            GIT_AUTHOR_EMAIL: integrationGit(state.checkout, [
+              "show",
+              "-s",
+              "--format=%ae",
+              replay.pending,
+            ]),
+            GIT_AUTHOR_DATE: integrationGit(state.checkout, [
+              "show",
+              "-s",
+              "--format=%aI",
+              replay.pending,
+            ]),
+          },
         },
-      },
-    );
-    if (result.status !== 0) throw new Error(result.stderr);
-    const head = assertFullSha(result.stdout.trim(), "Stable replay candidate");
+      );
+      if (result.status !== 0) throw new Error(result.stderr);
+      head = assertFullSha(result.stdout.trim(), "Stable replay candidate");
+    }
     integrationGit(state.checkout, ["rerere"]);
     state = this.save({
       ...state,

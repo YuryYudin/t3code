@@ -387,6 +387,42 @@ describe("interrupted state transitions", () => {
 });
 
 describe("stable candidate repair", () => {
+  it("retains commit identities on the same stable base and rebases a changed base", () => {
+    const f = fixture();
+    const first = new Integration(f.stateDir, f.inputs, NodePath.join(f.root, "workers"), "stable");
+    first.prepare(f.repo);
+    first.request();
+    const initial = f.repair(first);
+    f.git(["fetch", initial.checkout, `${initial.head}:refs/heads/verified-stable`]);
+    f.git(["checkout", "--detach", initial.head]);
+    const source = f.commit("next-fork-patch.txt", "next fork revision\n");
+    const same = new Integration(
+      f.stateDir,
+      { ...f.inputs, source, observed: initial.head },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    const reused = same.prepare(f.repo);
+    expect(reused.status).toBe("prepared");
+    expect(reused.head).toBe(source);
+    expect(reused.requests).toHaveLength(0);
+    same.assertCandidate();
+
+    f.git(["checkout", "--detach", f.target]);
+    const target = f.commit("new-upstream.txt", "next official stable base\n");
+    const changed = new Integration(
+      f.stateDir,
+      { source, target, observed: source },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    const rebased = changed.prepare(f.repo);
+    expect(rebased.status).toBe("prepared");
+    expect(rebased.head).not.toBe(source);
+    expect(integrationGit(rebased.checkout, ["merge-base", target, rebased.head])).toBe(target);
+    changed.assertCandidate();
+  });
+
   it("continues through independent replay conflicts and reserves quality repairs", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);
