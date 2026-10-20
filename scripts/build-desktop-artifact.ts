@@ -50,6 +50,7 @@ import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -62,7 +63,7 @@ import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+const DESKTOP_APP_ID = "com.tapnetix.t3code";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -953,6 +954,7 @@ interface ResolvedBuildOptions {
   readonly skipBuild: boolean;
   readonly keepStage: boolean;
   readonly signed: boolean;
+  readonly macPasskeys: boolean;
   readonly verbose: boolean;
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
@@ -1677,6 +1679,7 @@ const BuildEnvConfig = Config.all({
   skipBuild: Config.Boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
   keepStage: Config.Boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
   signed: Config.Boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  macPasskeys: Config.Boolean("T3CODE_MACOS_PASSKEYS").pipe(Config.withDefault(true)),
   verbose: Config.Boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.String("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
@@ -1784,6 +1787,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     skipBuild,
     keepStage,
     signed,
+    macPasskeys: env.macPasskeys,
     verbose,
     mockUpdates,
     mockUpdateServerPort,
@@ -2036,15 +2040,59 @@ function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
   const spectreArch = arch === "arm64" ? "arm64" : "x64";
   return [
     "$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'",
-    "if (!(Test-Path $vswhere)) { exit 1 }",
+    "if (!(Test-Path $vswhere)) { Write-Error 'vswhere.exe was not found'; exit 1 }",
     `$install = & $vswhere -latest -products * -requires ${toolComponents.join(" ")} -property installationPath`,
-    "if (!$install) { exit 1 }",
+    "if (!$install) { Write-Error 'No compatible Visual Studio installation was found'; exit 1 }",
     "$kitsRoot = Get-ItemPropertyValue 'HKLM:\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots' -Name KitsRoot10 -ErrorAction SilentlyContinue",
-    "if (!$kitsRoot -or !(Test-Path (Join-Path $kitsRoot 'Lib'))) { exit 1 }",
+    "if (!$kitsRoot -or !(Test-Path (Join-Path $kitsRoot 'Lib'))) { Write-Error 'Windows SDK libraries were not found'; exit 1 }",
     "$msvcToolset = Get-ChildItem (Join-Path $install 'VC\\Tools\\MSVC') -Directory | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1",
-    "if (!$msvcToolset) { exit 1 }",
-    `if (!(Test-Path (Join-Path $msvcToolset.FullName 'lib\\spectre\\${spectreArch}'))) { exit 1 }`,
+    "if (!$msvcToolset) { Write-Error 'MSVC toolset was not found'; exit 1 }",
+    `if (!(Test-Path (Join-Path $msvcToolset.FullName 'lib\\spectre\\${spectreArch}'))) { Write-Error 'Spectre-mitigated MSVC libraries were not found'; exit 1 }`,
   ].join("; ");
+}
+
+function encodePowerShellCommand(input: string): string {
+  const bytes = new Uint8Array(input.length * 2);
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    bytes[index * 2] = code & 0xff;
+    bytes[index * 2 + 1] = code >>> 8;
+  }
+  return Base64.encode(bytes);
+}
+
+function windowsPowerShellExecutable(): string {
+  const windowsRoot = process.env.SYSTEMROOT ?? process.env.windir ?? String.raw`C:\Windows`;
+  return `${windowsRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+
+export function ensureWindowsPowerShellOnPath(environment: NodeJS.ProcessEnv): void {
+  const pathEntry = Object.entries(environment).find(
+    ([key, value]) => key.toLowerCase() === "path" && value,
+  );
+  const windowsRoot =
+    Object.entries(environment).find(
+      ([key, value]) =>
+        (key.toLowerCase() === "systemroot" || key.toLowerCase() === "windir") && value,
+    )?.[1] ?? String.raw`C:\Windows`;
+  const powerShellDirectory = `${windowsRoot.replace(/[\\/]+$/, "")}\\System32\\WindowsPowerShell\\v1.0`;
+  const normalizedPowerShellDirectory = powerShellDirectory.toLowerCase();
+  const pathEntries = (pathEntry?.[1] ?? "").split(";").filter(Boolean);
+
+  if (
+    !pathEntries.some(
+      (entry) => entry.replace(/[\\/]+$/, "").toLowerCase() === normalizedPowerShellDirectory,
+    )
+  ) {
+    pathEntries.unshift(powerShellDirectory);
+  }
+
+  for (const key of Object.keys(environment)) {
+    if (key.toLowerCase() === "path") {
+      delete environment[key];
+    }
+  }
+  environment.PATH = pathEntries.join(";");
 }
 
 export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBuild")(
@@ -2066,12 +2114,12 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
         msvc: reuseResourceMonitor
           ? Effect.succeed(true)
           : desktopBuildProbeSucceeds(
-              ChildProcess.make("powershell.exe", [
+              ChildProcess.make(windowsPowerShellExecutable(), [
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
-                "-Command",
-                windowsVswherePrerequisiteScript(input.arch),
+                "-EncodedCommand",
+                encodePowerShellCommand(windowsVswherePrerequisiteScript(input.arch)),
               ]),
               "Visual Studio Build Tools",
             ),
@@ -3210,13 +3258,13 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   }
 
   yield* Effect.log("[desktop-artifact] Installing server sidecar runtime externals...");
-  const installCommand = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  const installCommand = yield* resolveSpawnCommand("corepack", ["pnpm", ...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: serverStageDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod (server sidecar)", verbose: input.verbose },
+    { label: "pnpm install --prod (server sidecar)", verbose: input.verbose },
   );
 
   yield* Effect.log("[desktop-artifact] Packing server.asar...");
@@ -3846,7 +3894,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
   const configuredMacPasskeySigning =
-    options.platform === "mac" && options.signed
+    options.platform === "mac" && options.signed && options.macPasskeys
       ? yield* Effect.try({
           try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
@@ -3959,13 +4007,15 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  const installCommand = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  // A pnpm exec parent disables pnpm's automatic version switching. Corepack
+  // still honors the staged packageManager instead of an older pnpm on PATH.
+  const installCommand = yield* resolveSpawnCommand("corepack", ["pnpm", ...STAGE_INSTALL_ARGS]);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod", verbose: options.verbose },
+    { label: "pnpm install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
   yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
@@ -4038,6 +4088,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   }
 
   if (hostPlatform === "win32") {
+    ensureWindowsPowerShellOnPath(buildEnv);
     const python = yield* resolvePythonForNodeGyp();
     if (python) {
       buildEnv.PYTHON = python;

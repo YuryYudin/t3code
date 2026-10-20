@@ -1,6 +1,11 @@
 import {
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
+  type ForkMaintenanceDispatchCommand,
+  type OrchestrationV2Command,
+  type OrchestrationV2InternalCommand,
+  type OrchestrationV2ServerCommand,
   type OrchestrationProjectShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -30,6 +35,7 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as Orchestrator from "./Orchestrator.ts";
 import { buildActiveShellSnapshot, loadShellSnapshotParts } from "./ShellStream.ts";
 import { boundedSnapshotResponseFields } from "./ThreadStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
@@ -46,6 +52,61 @@ function isThreadNotFound(error: unknown): boolean {
   );
 }
 
+/** Keep Jenkins' frozen V1 maintenance wire commands compatible with the V2 orchestrator. */
+function adaptForkMaintenanceCommand(
+  command: ForkMaintenanceDispatchCommand,
+): OrchestrationV2ServerCommand {
+  switch (command.type) {
+    case "thread.external-alert.upsert":
+      return command;
+    case "thread.create":
+      return {
+        ...command,
+        createdBy: "system",
+        creationSource: "server",
+      } satisfies Extract<OrchestrationV2Command, { readonly type: "thread.create" }> & {
+        readonly createdAt: string;
+      };
+    case "thread.session.stop":
+      return {
+        type: "thread.stop",
+        commandId: command.commandId,
+        threadId: command.threadId,
+        reason: "Superseded by a new fork maintenance repair request.",
+      } satisfies Extract<OrchestrationV2InternalCommand, { readonly type: "thread.stop" }>;
+    case "thread.meta.update":
+      return {
+        type: "thread.metadata.update",
+        commandId: command.commandId,
+        threadId: command.threadId,
+        ...(command.branch === undefined ? {} : { branch: command.branch }),
+        ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
+      } satisfies Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }>;
+    case "thread.turn.start":
+      return {
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "server",
+        commandId: command.commandId,
+        threadId: command.threadId,
+        messageId: command.message.messageId,
+        text: command.message.text,
+        attachments: command.message.attachments,
+        ...(command.message.context === undefined ? {} : { context: command.message.context }),
+        ...(command.modelSelection === undefined
+          ? {}
+          : { modelSelection: command.modelSelection }),
+        dispatchMode: { type: "start_immediately" },
+      } satisfies Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
+  }
+}
+
+/**
+ * Serves orchestration V2 snapshots over HTTP so clients can load the
+ * (potentially large) shell and thread projections off the socket; gzip
+ * compressible and cacheable — and then resume the WebSocket subscription via
+ * `afterSequence`.
+ */
 export const layer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "orchestration",
@@ -53,6 +114,7 @@ export const layer = HttpApiBuilder.group(
     const sql = yield* SqlClient.SqlClient;
     const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const projectStore = yield* ProjectStore.ProjectStoreV2;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
@@ -149,6 +211,17 @@ export const layer = HttpApiBuilder.group(
     );
 
     return handlers
+      .handle(
+        "dispatch",
+        Effect.fn("environment.orchestration.dispatch")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          return yield* orchestrator.dispatch(adaptForkMaintenanceCommand(args.payload)).pipe(
+            Effect.map(({ sequence }) => ({ sequence })),
+            Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")),
+          );
+        }),
+      )
       .handle(
         "shellSnapshot",
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {

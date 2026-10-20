@@ -488,6 +488,9 @@ function AdaptiveWorkspaceLayoutContent(
   const handleStartNewTask = () => {
     navigation.navigate("NewTaskSheet", { screen: "NewTask" });
   };
+  const handleStartNewProject = () => {
+    navigation.navigate("NewTaskSheet", { screen: "AddProject" });
+  };
 
   // Minted here (root stack navigation) so the sidebar pane stays free of
   // navigation hooks — on iOS it renders inside an independent nav tree.
@@ -816,6 +819,7 @@ function AdaptiveWorkspaceLayoutContent(
                           onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
                           onNewThreadInProject={handleNewThreadInProject}
                           onNewThreadOnBranch={handleNewThreadOnBranch}
+                          onStartNewProject={handleStartNewProject}
                           onOpenPendingTask={handleOpenPendingTask}
                           onSelectThread={handleSelectThread}
                           onOpenThreadPullRequests={handleOpenThreadPullRequests}

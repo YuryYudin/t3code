@@ -448,6 +448,50 @@ describe("t3 pair", () => {
 });
 
 describe("auth scope options", () => {
+  it.effect("issues a restricted session and normalizes duplicate scopes", () =>
+    Effect.gen(function* () {
+      const baseDir = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          NodeFS.mkdtempSync(
+            NodePath.join(NodeOS.tmpdir(), "t3-auth-restricted-session-test-"),
+          ),
+        ),
+        (path) => Effect.sync(() => NodeFS.rmSync(path, { recursive: true, force: true })),
+      );
+      const output = yield* captureStdout(
+        runCli([
+          "auth",
+          "session",
+          "issue",
+          "--base-dir",
+          baseDir,
+          "--json",
+          "--scope",
+          "orchestration:operate",
+          "--scope",
+          "orchestration:operate",
+        ]),
+      );
+      const issued = JSON.parse(output) as { readonly scopes: ReadonlyArray<string> };
+
+      assert.deepEqual(issued.scopes, ["orchestration:operate"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects unsupported session scopes before issuing a token", () =>
+    Effect.gen(function* () {
+      const error = yield* runCli([
+        "auth",
+        "session",
+        "issue",
+        "--scope",
+        "administrator:everything",
+      ]).pipe(Effect.provide(layerCliRuntime), Effect.flip);
+
+      assert.isTrue(CliError.isCliError(error));
+    }),
+  );
+
   it.effect.each([
     { group: "pairing", action: "create" },
     { group: "session", action: "issue" },

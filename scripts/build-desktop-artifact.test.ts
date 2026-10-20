@@ -9,6 +9,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Exit from "effect/Exit";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,9 +29,10 @@ import {
   parseWslRuntimeArchiveMembers,
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
-  createStagePatchedDependencies,
   readWorkspaceConfig,
+  createStagePatchedDependencies,
   createBuildConfig,
+  ensureWindowsPowerShellOnPath,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
@@ -546,7 +548,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.1.0"), "T3 Code (Beta)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
   });
 
@@ -563,6 +565,41 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     });
   });
+
+  it.effect("uses the fork app identity and update repository for stable artifacts", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.0.41-1",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+      );
+
+      assert.equal(config.appId, "com.tapnetix.t3code");
+      assert.equal(config.productName, "T3 Code");
+      assert.deepStrictEqual(config.publish, [
+        {
+          provider: "github",
+          owner: "YuryYudin",
+          repo: "t3code",
+          releaseType: "release",
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: { T3CODE_DESKTOP_UPDATE_REPOSITORY: "YuryYudin/t3code" },
+          }),
+        ),
+      ),
+    ),
+  );
 
   it("switches the bundled splash and favicon branding for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
@@ -979,7 +1016,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "**/*.map",
       ]);
       assert.deepStrictEqual(mac.dmg, {
-        title: "T3 Code (Beta) 1.2.3 Installer",
+        title: "T3 Code 1.2.3 Installer",
         background: "dmg/dmg-background-latest.png",
         window: { width: 640, height: 432 },
         contents: [
@@ -1359,13 +1396,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-windows-preflight-" });
         const pythonPath = path.join(tempDir, "python.exe");
         yield* fs.writeFileString(pythonPath, "python");
+        let powershellCommand = "";
+        let powershellArgs: ReadonlyArray<string> = [];
         const spawner = Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make((command) => {
-            const childProcess = command as unknown as { readonly command: string };
+            const childProcess = command as unknown as {
+              readonly command: string;
+              readonly args: ReadonlyArray<string>;
+            };
+            const isPowerShell = childProcess.command.toLowerCase().endsWith("\\powershell.exe");
+            if (isPowerShell) {
+              powershellCommand = childProcess.command;
+              powershellArgs = childProcess.args;
+            }
             const fails =
               childProcess.command === "rustc" ||
-              childProcess.command === "powershell.exe" ||
+              isPowerShell ||
               childProcess.command === pythonPath;
             return Effect.succeed(mockProcess(fails ? 1 : 0));
           }),
@@ -1389,6 +1436,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(error.missing, ["rust", "python", "msvc"]);
         assert.equal(error.rustTarget, "x86_64-pc-windows-msvc");
         assert.include(error.message, "Visual Studio Build Tools components");
+        assert.include(powershellCommand, "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+        assert.include(powershellArgs, "-EncodedCommand");
+        const encodedCommand = powershellArgs.at(-1)!;
+        const encodedBytes = yield* Effect.fromResult(Base64.decode(encodedCommand));
+        const powershell = new TextDecoder("utf-16le").decode(encodedBytes);
+        assert.include(powershell, "Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+        assert.include(powershell, "lib\\spectre\\x64");
       }),
     ),
   );
@@ -1407,7 +1461,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ChildProcessSpawner.make((command) => {
             const childProcess = command as unknown as { readonly command: string };
             commands.push(childProcess.command);
-            return Effect.succeed(mockProcess(childProcess.command === "powershell.exe" ? 1 : 0));
+            return Effect.succeed(
+              mockProcess(childProcess.command.toLowerCase().endsWith("\\powershell.exe") ? 1 : 0),
+            );
           }),
         );
 
@@ -1430,7 +1486,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
         );
 
-        assert.notInclude(commands, "powershell.exe");
+        assert.isFalse(commands.some((command) => command.endsWith("\\powershell.exe")));
       }),
     ),
   );
@@ -1679,6 +1735,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("rejects a Windows package missing its expected WSL runtime", () =>
     Effect.scoped(
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
         const error = yield* validateWindowsPackagedPayload({
           stageDistDir: fixture.stageDistDir,
@@ -1915,6 +1972,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
     return Effect.scoped(
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
         yield* validateWindowsPackagedPayload({
           stageDistDir: fixture.stageDistDir,
@@ -1924,7 +1982,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         });
 
         assert.isFalse(
-          commands.some((command) => command.options.env?.ELECTRON_RUN_AS_NODE === "1"),
+          commands.some(
+            (command) =>
+              command.command === path.join(fixture.packagedAppDir, fixture.appExecutableName) &&
+              command.options.env?.ELECTRON_RUN_AS_NODE === "1",
+          ),
         );
         assert.isTrue(
           commands.some(
@@ -2223,7 +2285,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "com.tapnetix.t3code",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -2246,7 +2308,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.com.tapnetix.t3code</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -2412,7 +2474,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
 
       const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.appId, "com.tapnetix.t3code");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
@@ -2420,6 +2482,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("signs macOS builds without a provisioning profile when passkeys are disabled", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+
+      const mac = config.mac as Record<string, unknown>;
+      assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
+      assert.notProperty(mac, "entitlements");
+      assert.notProperty(mac, "provisioningProfile");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
@@ -2643,6 +2724,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolvePackageManagerUserAgent("pnpm"), "pnpm");
   });
 
+  it("adds the canonical Windows PowerShell directory to the build PATH", () => {
+    const environment: NodeJS.ProcessEnv = {
+      SystemRoot: String.raw`D:\Windows`,
+      Path: String.raw`C:\Tools`,
+    };
+
+    ensureWindowsPowerShellOnPath(environment);
+
+    assert.equal(environment.PATH, String.raw`D:\Windows\System32\WindowsPowerShell\v1.0;C:\Tools`);
+    assert.notProperty(environment, "Path");
+  });
+
+  it("normalizes Windows PATH casing without duplicating PowerShell", () => {
+    const environment: NodeJS.ProcessEnv = {
+      WINDIR: "C:\\WINDOWS\\",
+      PATH: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Tools",
+      Path: String.raw`C:\Ignored`,
+    };
+
+    ensureWindowsPowerShellOnPath(environment);
+
+    assert.equal(environment.PATH, "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Tools");
+    assert.notProperty(environment, "Path");
+  });
+
   it.effect("normalizes mock update server ports from env-style strings", () =>
     Effect.gen(function* () {
       assert.equal(yield* resolveMockUpdateServerPort(undefined), undefined);
@@ -2718,6 +2824,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(resolved.platform, "win");
       assert.equal(resolved.target, "nsis");
       assert.equal(resolved.arch, "arm64");
+      assert.equal(resolved.macPasskeys, true);
     }),
   );
 
@@ -2770,6 +2877,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
                 T3CODE_DESKTOP_SKIP_BUILD: "true",
                 T3CODE_DESKTOP_KEEP_STAGE: "true",
                 T3CODE_DESKTOP_SIGNED: "true",
+                T3CODE_MACOS_PASSKEYS: "false",
                 T3CODE_DESKTOP_VERBOSE: "true",
                 T3CODE_DESKTOP_MOCK_UPDATES: "true",
               },
@@ -2781,6 +2889,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(resolved.skipBuild, false);
       assert.equal(resolved.keepStage, false);
       assert.equal(resolved.signed, false);
+      assert.equal(resolved.macPasskeys, false);
       assert.equal(resolved.verbose, false);
       assert.equal(resolved.mockUpdates, false);
     }),

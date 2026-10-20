@@ -19,6 +19,8 @@ import {
 } from "../threads/sidebar-native-header-items";
 import type { HomeHeaderProps } from "./HomeHeader.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -47,7 +49,7 @@ export function HomeHeader(props: HomeHeaderProps) {
   );
   const iconColor = useUniwindTheme()["--color-icon"];
   const hasCustomListOptions =
-    props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
+    props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const focusSearch = useCallback(() => {
     if (primaryColumn && !panes.primarySidebarVisible) {
       focusAfterReveal.current = true;
@@ -175,6 +177,8 @@ export function HomeHeader(props: HomeHeaderProps) {
         }}
       />
 
+      <ProjectCollectionScopeStrip {...props} />
+
       {sidebarHeader || usesNativeMailSearchToolbar ? null : (
         <Toolbar placement="bottom">
           <Toolbar.Menu
@@ -207,11 +211,31 @@ export function HomeHeader(props: HomeHeaderProps) {
               ))}
             </Toolbar.Menu>
 
+            {props.projectCollectionsAvailable ? (
+              <Toolbar.Menu title="Collections">
+                <Toolbar.Label>Collections</Toolbar.Label>
+                {props.projectCollectionScopeOptions.map((option) => (
+                  <Toolbar.MenuAction
+                    key={mobileProjectCollectionScopeKey(option.scope)}
+                    isOn={
+                      mobileProjectCollectionScopeKey(option.scope) ===
+                      mobileProjectCollectionScopeKey(props.projectCollectionScope)
+                    }
+                    onPress={() => props.onProjectCollectionScopeChange(option.scope)}
+                  >
+                    <Toolbar.Label>
+                      {option.label} ({option.count})
+                    </Toolbar.Label>
+                  </Toolbar.MenuAction>
+                ))}
+              </Toolbar.Menu>
+            ) : null}
+
             {props.projects.length > 0 ? (
               <Toolbar.Menu title="Project">
                 <Toolbar.Label>Project</Toolbar.Label>
                 <Toolbar.MenuAction
-                  isOn={props.selectedProjectKey === null}
+                  isOn={props.projectCollectionScope.kind === "all"}
                   onPress={() => props.onProjectChange(null)}
                   subtitle="Show threads from every project"
                 >

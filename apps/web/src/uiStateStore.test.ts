@@ -1,7 +1,16 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+  EnvironmentId,
+  ProjectCollectionId,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
+import { sanitizeProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { WINDOW_SCOPE_STORAGE_KEY } from "./windowScope";
 import {
+  applyInitialWindowScope,
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
@@ -12,17 +21,25 @@ import {
   reorderProjects,
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
+  setProjectCollectionScope,
+  setProjectCollectionsPreferredReferenceEnvironmentId,
   setProjectExpanded,
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
+  useUiStateStore,
+  foreignUiStateSync,
+  mergeForeignUiState,
   type UiState,
 } from "./uiStateStore";
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    projectCollectionScope: { kind: "all" },
+    projectCollectionsPreferredReferenceEnvironmentId: null,
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -156,6 +173,40 @@ describe("uiStateStore pure functions", () => {
     expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
     expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
   });
+
+  it("stores each collection scope discriminant and the preferred reference immutably", () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const referenceId = EnvironmentId.make("environment-a");
+    const collectionScope = { kind: "collection", collectionId } as const;
+    const projectScope = { kind: "project", projectKey: "repository:acme/work" } as const;
+
+    const withCollection = setProjectCollectionScope(makeUiState(), collectionScope);
+    expect(withCollection.projectCollectionScope).toEqual(collectionScope);
+    expect(setProjectCollectionScope(withCollection, collectionScope)).toBe(withCollection);
+    expect(
+      setProjectCollectionScope(withCollection, { kind: "unfiled" }).projectCollectionScope,
+    ).toEqual({ kind: "unfiled" });
+    expect(setProjectCollectionScope(withCollection, projectScope)).toMatchObject({
+      projectCollectionScope: projectScope,
+      sidebarProjectScopeKey: projectScope.projectKey,
+    });
+    expect(
+      setProjectCollectionScope(withCollection, { kind: "all" }).projectCollectionScope,
+    ).toEqual({ kind: "all" });
+
+    const withReference = setProjectCollectionsPreferredReferenceEnvironmentId(
+      withCollection,
+      referenceId,
+    );
+    expect(withReference.projectCollectionsPreferredReferenceEnvironmentId).toBe(referenceId);
+    expect(setProjectCollectionsPreferredReferenceEnvironmentId(withReference, referenceId)).toBe(
+      withReference,
+    );
+    expect(
+      setProjectCollectionsPreferredReferenceEnvironmentId(withReference, null)
+        .projectCollectionsPreferredReferenceEnvironmentId,
+    ).toBeNull();
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -202,6 +253,8 @@ describe("parsePersistedState", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "all" },
+      projectCollectionsPreferredReferenceEnvironmentId: null,
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -209,6 +262,50 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+    });
+  });
+
+  it("sanitizes malformed local collection state and composes with stale-scope fallback", () => {
+    const malformed = parsePersistedState({
+      projectCollectionScope: { kind: "collection", collectionId: "" },
+      projectCollectionsPreferredReferenceEnvironmentId: "  ",
+    } as PersistedUiState);
+    expect(malformed.projectCollectionScope).toEqual({ kind: "all" });
+    expect(malformed.projectCollectionsPreferredReferenceEnvironmentId).toBeNull();
+    expect(
+      parsePersistedState({
+        projectCollectionScope: { kind: "project", projectKey: " repository:acme/work " },
+      }).projectCollectionScope,
+    ).toEqual({ kind: "all" });
+
+    const stale = parsePersistedState({
+      projectCollectionScope: {
+        kind: "collection",
+        collectionId: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+      },
+    } as PersistedUiState);
+    expect(
+      sanitizeProjectCollectionScope(
+        DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        stale.projectCollectionScope,
+      ),
+    ).toEqual({ kind: "all" });
+  });
+
+  it("migrates the previous project-only scope into the discriminated scope", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "repository:acme/work" })
+        .projectCollectionScope,
+    ).toEqual({ kind: "project", projectKey: "repository:acme/work" });
+
+    expect(
+      parsePersistedState({
+        sidebarProjectScopeKey: "repository:acme/work",
+        projectCollectionScope: { kind: "unfiled" },
+      }),
+    ).toMatchObject({
+      sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "unfiled" },
     });
   });
 
@@ -324,6 +421,8 @@ describe("uiStateStore persistence", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "all" },
+      projectCollectionsPreferredReferenceEnvironmentId: null,
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -339,7 +438,7 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" }));
+    persistState(setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code"));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
@@ -348,6 +447,34 @@ describe("uiStateStore persistence", () => {
     expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
       "github.com/pingdotgg/t3code",
     );
+  });
+
+  it("round-trips collection scope and preferred reference across reloads", () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const referenceId = EnvironmentId.make("environment-a");
+    const scopes = [
+      { kind: "all" },
+      { kind: "collection", collectionId },
+      { kind: "unfiled" },
+      { kind: "project", projectKey: "repository:acme/work" },
+    ] as const;
+
+    for (const projectCollectionScope of scopes) {
+      persistState(
+        makeUiState({
+          projectCollectionScope,
+          projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+        }),
+      );
+
+      const persisted = JSON.parse(
+        localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+      ) as PersistedUiState;
+      expect(parsePersistedState(persisted)).toMatchObject({
+        projectCollectionScope,
+        projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+      });
+    }
   });
 
   it("drops the temporary expanded-only migration fallback when rewriting state", () => {
@@ -364,3 +491,163 @@ describe("uiStateStore persistence", () => {
     expect(persisted).not.toHaveProperty("threadPanelOpen");
   });
 });
+
+describe("uiStateStore per-window scope", () => {
+  const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hydrates from this window's scope first, then the launch param", () => {
+    const persisted = makeUiState({
+      projectCollectionScope: { kind: "project", projectKey: "repository:acme/work" },
+      sidebarProjectScopeKey: "repository:acme/work",
+    });
+    const launch = { kind: "collection", collectionId } as const;
+
+    expect(
+      applyInitialWindowScope(persisted, { launch, session: { kind: "unfiled" } }),
+    ).toMatchObject({ projectCollectionScope: { kind: "unfiled" }, sidebarProjectScopeKey: null });
+    expect(applyInitialWindowScope(persisted, { launch, session: null })).toMatchObject({
+      projectCollectionScope: launch,
+      sidebarProjectScopeKey: null,
+    });
+    expect(
+      applyInitialWindowScope(persisted, { launch: null, session: { kind: "unfiled" } })
+        .projectCollectionScope,
+    ).toEqual({ kind: "unfiled" });
+    expect(applyInitialWindowScope(persisted, { launch: null, session: null })).toBe(persisted);
+  });
+
+  it("records a scope change in sessionStorage and tells the desktop shell", () => {
+    const sessionStorageStub = createLocalStorageStub();
+    const setWindowScope = vi.fn(async () => {});
+    vi.stubGlobal("window", {
+      localStorage: createLocalStorageStub(),
+      sessionStorage: sessionStorageStub,
+      desktopBridge: { setWindowScope },
+    });
+
+    useUiStateStore.getState().setProjectCollectionScope({ kind: "collection", collectionId });
+
+    expect(sessionStorageStub.getItem(WINDOW_SCOPE_STORAGE_KEY)).toBe(`collection:${collectionId}`);
+    expect(setWindowScope).toHaveBeenCalledWith(`collection:${collectionId}`);
+    expect(useUiStateStore.getState().projectCollectionScope).toEqual({
+      kind: "collection",
+      collectionId,
+    });
+  });
+
+  it("does not throw on a desktop build or browser without the window bridge", () => {
+    const sessionStorageStub = createLocalStorageStub();
+    vi.stubGlobal("window", {
+      localStorage: createLocalStorageStub(),
+      sessionStorage: sessionStorageStub,
+      desktopBridge: {},
+    });
+
+    expect(() =>
+      useUiStateStore.getState().setProjectCollectionScope({ kind: "unfiled" }),
+    ).not.toThrow();
+    expect(sessionStorageStub.getItem(WINDOW_SCOPE_STORAGE_KEY)).toBe("unfiled");
+    expect(useUiStateStore.getState().projectCollectionScope).toEqual({ kind: "unfiled" });
+  });
+});
+
+describe("uiStateStore cross-window merging", () => {
+  function foreignWrite(persisted: PersistedUiState): string {
+    return JSON.stringify(persisted);
+  }
+
+  it("takes shared preferences from another window and keeps this window's scope", () => {
+    const applied: UiState[] = [];
+    const local = makeUiState({
+      projectCollectionScope: { kind: "unfiled" },
+      sidebarProjectScopeKey: null,
+      projectExpandedById: { local: true },
+    });
+    const handler = createForeignStateHandler<UiState>({
+      ...foreignUiStateSync,
+      snapshot: () => local,
+      apply: (merged) => applied.push(merged),
+    });
+
+    handler(
+      foreignWrite({
+        projectExpandedById: { foreign: false },
+        projectOrder: ["foreign"],
+        pullRequestMergeMethod: "squash",
+        projectCollectionScope: { kind: "project", projectKey: "other-window" },
+        sidebarProjectScopeKey: "other-window",
+      }),
+    );
+
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.projectExpandedById).toEqual({ foreign: false });
+    expect(applied[0]?.projectOrder).toEqual(["foreign"]);
+    expect(applied[0]?.pullRequestMergeMethod).toBe("squash");
+    expect(applied[0]?.projectCollectionScope).toEqual({ kind: "unfiled" });
+    expect(applied[0]?.sidebarProjectScopeKey).toBeNull();
+  });
+
+  it("keeps the later visit timestamp for each thread", () => {
+    const local = makeUiState({
+      threadLastVisitedAtById: {
+        "thread-a": "2026-02-25T12:00:00.000Z",
+        "thread-b": "2026-02-25T13:00:00.000Z",
+      },
+    });
+
+    const merged = mergeForeignUiState(
+      local,
+      parsePersistedState({
+        threadLastVisitedAtById: {
+          "thread-a": "2026-02-25T14:00:00.000Z",
+          "thread-b": "2026-02-25T11:00:00.000Z",
+          "thread-c": "2026-02-25T10:00:00.000Z",
+        },
+      }),
+    );
+
+    expect(merged.threadLastVisitedAtById).toEqual({
+      "thread-a": "2026-02-25T14:00:00.000Z",
+      "thread-b": "2026-02-25T13:00:00.000Z",
+      "thread-c": "2026-02-25T10:00:00.000Z",
+    });
+  });
+
+  it("does not touch the store when the foreign write carries nothing new", () => {
+    const applied: UiState[] = [];
+    const local = makeUiState({
+      projectExpandedById: { shared: true },
+      projectOrder: ["shared"],
+      threadLastVisitedAtById: { "thread-a": "2026-02-25T12:00:00.000Z" },
+      projectCollectionScope: { kind: "unfiled" },
+    });
+    const handler = createForeignStateHandler<UiState>({
+      ...foreignUiStateSync,
+      snapshot: () => local,
+      apply: (merged) => applied.push(merged),
+    });
+
+    expect(mergeForeignUiState(local, parsePersistedState(persistedSnapshot(local)))).toBe(local);
+    handler(foreignWrite(persistedSnapshot(local)));
+
+    expect(applied).toEqual([]);
+  });
+});
+
+function persistedSnapshot(state: UiState): PersistedUiState {
+  return {
+    projectExpandedById: state.projectExpandedById,
+    projectOrder: state.projectOrder,
+    threadLastVisitedAtById: state.threadLastVisitedAtById,
+    defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
+    sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+    projectCollectionScope: state.projectCollectionScope,
+    threadChangedFilesExpansionVersion: 2,
+    threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
+    pullRequestMergeMethod: state.pullRequestMergeMethod,
+  };
+}

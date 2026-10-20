@@ -74,6 +74,7 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
+  SquareArrowOutUpRightIcon,
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
@@ -184,6 +185,7 @@ import {
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
+  buildNewWindowActionItem,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -817,6 +819,8 @@ function OpenCommandPaletteDialog(props: {
       );
     }
   };
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectCollectionScope = useUiStateStore((store) => store.projectCollectionScope);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
@@ -2030,6 +2034,14 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  const newWindowActionItem = buildNewWindowActionItem({
+    scope: projectCollectionScope,
+    icon: <SquareArrowOutUpRightIcon className={ITEM_ICON_CLASS} />,
+  });
+  if (newWindowActionItem !== null) {
+    actionItems.push(newWindowActionItem);
+  }
 
   actionItems.push({
     kind: "action",

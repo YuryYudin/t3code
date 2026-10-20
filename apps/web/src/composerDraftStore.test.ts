@@ -93,8 +93,10 @@ import {
   composerFileNeedsReattach,
   partializeComposerDraftStoreState,
   useComposerDraftStore,
+  foreignComposerDraftStateSync,
   DraftId,
 } from "./composerDraftStore";
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference, threadContextRecord } from "./lib/composerContextRecords";
@@ -3839,5 +3841,165 @@ describe("composerDraftStore attachment references", () => {
     expect(merged.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.prompt).toBe(
       prompt,
     );
+  });
+});
+
+describe("composerDraftStore cross-window merging", () => {
+  it("acknowledges an echoed draft without another write and then accepts remote edits and removal", () => {
+    resetComposerDraftStore();
+    const ref = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("acknowledged-draft"));
+    useComposerDraftStore.getState().setPrompt(ref, "Before typing");
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+    useComposerDraftStore.getState().setPrompt(ref, "Newly typed text");
+    const current = useComposerDraftStore.getState();
+    const acknowledged = partializeComposerDraftStoreState(current);
+    handler(JSON.stringify({ version: 9, state: acknowledged }));
+    expect(useComposerDraftStore.getState()).toBe(current);
+    handler(
+      JSON.stringify({
+        version: 9,
+        state: {
+          ...acknowledged,
+          draftsByThreadKey: {
+            [scopedThreadKey(ref)]: { prompt: "Edited in the other window", attachments: [] },
+          },
+        },
+      }),
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ref)]?.prompt).toBe(
+      "Edited in the other window",
+    );
+    handler(JSON.stringify({ version: 9, state: { ...acknowledged, draftsByThreadKey: {} } }));
+    expect(
+      useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ref)],
+    ).toBeUndefined();
+  });
+
+  it("defends a cleared draft until another window acknowledges its removal", () => {
+    resetComposerDraftStore();
+    const ref = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("cleared-draft"));
+    const other = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("other-draft"));
+    useComposerDraftStore.getState().setPrompt(ref, "Already sent");
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+    useComposerDraftStore.getState().setPrompt(ref, "");
+    for (const prompt of ["Other edit", "Next other edit"]) {
+      handler(
+        JSON.stringify({
+          version: 9,
+          state: {
+            draftsByThreadKey: {
+              [scopedThreadKey(ref)]: { prompt: "Already sent", attachments: [] },
+              [scopedThreadKey(other)]: { prompt, attachments: [] },
+            },
+          },
+        }),
+      );
+      expect(
+        useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ref)],
+      ).toBeUndefined();
+    }
+    const acknowledged = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    handler(JSON.stringify({ version: 9, state: acknowledged }));
+    handler(
+      JSON.stringify({
+        version: 9,
+        state: {
+          ...acknowledged,
+          draftsByThreadKey: {
+            ...acknowledged.draftsByThreadKey,
+            [scopedThreadKey(ref)]: { prompt: "A new draft", attachments: [] },
+          },
+        },
+      }),
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ref)]?.prompt).toBe(
+      "A new draft",
+    );
+  });
+
+  it("preserves pending file bytes through serialized echoes and later stale writes", () => {
+    resetComposerDraftStore();
+    const ref = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("upload-draft"));
+    useComposerDraftStore.getState().setPrompt(ref, "Uploading a file");
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+    const file = makeFile("pending-upload");
+    useComposerDraftStore.getState().addFiles(ref, [file]);
+    const serialized = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    handler(JSON.stringify({ version: 9, state: serialized }));
+    handler(
+      JSON.stringify({
+        version: 9,
+        state: {
+          ...serialized,
+          draftsByThreadKey: { [scopedThreadKey(ref)]: { prompt: "Old text", attachments: [] } },
+        },
+      }),
+    );
+    const draft = useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ref)];
+    expect(draft?.files[0]?.file).toBe(file.file);
+    expect(draft?.prompt).toContain("Uploading a file");
+  });
+
+  it("keeps typed text through repeated stale writes from a different thread's window", () => {
+    resetComposerDraftStore();
+    const ownRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("typing-window"));
+    const otherRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("other-window"));
+    useComposerDraftStore.getState().setPrompt(ownRef, "A sentence");
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+    useComposerDraftStore.getState().setPrompt(ownRef, "A sentence with freshly typed words");
+    const foreignWrite = (prompt: string) =>
+      JSON.stringify({
+        version: 9,
+        state: {
+          draftsByThreadKey: {
+            [scopedThreadKey(ownRef)]: { prompt: "A sentence", attachments: [] },
+            [scopedThreadKey(otherRef)]: { prompt, attachments: [] },
+          },
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        },
+      });
+    handler(foreignWrite("Other thread's first edit"));
+    handler(foreignWrite("Other thread's next edit"));
+    expect(
+      useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(ownRef)]?.prompt,
+    ).toBe("A sentence with freshly typed words");
+    expect(
+      useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(otherRef)]?.prompt,
+    ).toBe("Other thread's next edit");
+  });
+
+  it("adopts another window's drafts while defending the one it is typing in", () => {
+    resetComposerDraftStore();
+    const ownThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-own"));
+    const foreignThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-foreign"));
+    const droppedThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-dropped"));
+    const store = () => useComposerDraftStore.getState();
+    store().setPrompt(ownThreadRef, "hydrated");
+    store().setPrompt(droppedThreadRef, "sent from the other window");
+
+    const handler = createForeignStateHandler(foreignComposerDraftStateSync);
+
+    // This window keeps typing, so it owns its draft from here on.
+    store().setPrompt(ownThreadRef, "still typing here");
+
+    handler(
+      JSON.stringify({
+        version: 9,
+        state: {
+          draftsByThreadKey: {
+            [scopedThreadKey(ownThreadRef)]: { prompt: "stale copy", attachments: [] },
+            [scopedThreadKey(foreignThreadRef)]: { prompt: "written next door", attachments: [] },
+          },
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        },
+      }),
+    );
+
+    const { draftsByThreadKey } = useComposerDraftStore.getState();
+    expect(draftsByThreadKey[scopedThreadKey(ownThreadRef)]?.prompt).toBe("still typing here");
+    expect(draftsByThreadKey[scopedThreadKey(foreignThreadRef)]?.prompt).toBe("written next door");
+    expect(draftsByThreadKey[scopedThreadKey(droppedThreadRef)]).toBeUndefined();
   });
 });

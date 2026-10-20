@@ -632,7 +632,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
       });
     }
     if (Object.keys(serverPatch).length > 0 && canWriteServerPatch) {
-      const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
+      const { sharedPatch, localPatch, dedicatedPatch } = splitSharedServerPatch(serverPatch);
       // Dropping the write silently leaves the control looking saved.
       const warnUnsaved = (description = PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE) =>
         toastManager.add({
@@ -640,6 +640,9 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           title: "Setting not saved",
           description,
         });
+      if (dedicatedPatch !== undefined) {
+        warnUnsaved("Manage project collections from the collection organizer.");
+      }
       if (Object.keys(localPatch).length > 0) {
         if (environmentId) {
           void persistServerSettings({
@@ -651,8 +654,9 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         }
       }
       if (Object.keys(sharedPatch).length > 0) {
-        const sourceSettings = environments.find((target) => target.environmentId === environmentId)
-          ?.serverConfig?.settings;
+        const sourceSettings = environments.find(
+          (target) => target.environmentId === environmentId,
+        )?.serverConfig?.settings;
         const targets = new Set(sharedSettingsSyncTargetIds);
         if (environmentId) {
           targets.add(environmentId);
@@ -714,7 +718,8 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
               .map(({ label }) => label);
             toastManager.add({
               type: "error",
-              title: saved.length > 0 ? "Setting saved on some environments" : "Setting not saved",
+              title:
+                saved.length > 0 ? "Setting saved on some environments" : "Setting not saved",
               description: [
                 ...failures,
                 ...(saved.length > 0 ? [`Saved on ${saved.join(", ")}.`] : []),
