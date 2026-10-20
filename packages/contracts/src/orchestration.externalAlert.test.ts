@@ -103,7 +103,9 @@ it.effect("decodes the frozen Jenkins repair lifecycle commands", () =>
       },
     ];
 
-    const decoded = yield* Effect.forEach(commands, decodeForkMaintenanceCommand);
+    const decoded = yield* Effect.forEach(commands, (command) =>
+      decodeForkMaintenanceCommand(command),
+    );
     assert.deepEqual(
       decoded.map(({ type }) => type),
       ["thread.create", "thread.session.stop", "thread.meta.update", "thread.turn.start"],
