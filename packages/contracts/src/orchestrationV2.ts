@@ -1198,6 +1198,21 @@ export const OrchestrationV2Notification = Schema.Struct({
   outcome: Schema.Literals(["completed", "failed", "cancelled", "updated", "unknown"]),
   summary: TrimmedNonEmptyString,
   detail: Schema.optional(Schema.String),
+  /** Durable ownership for passive CI/maintenance incident notifications. */
+  externalAlert: Schema.optional(
+    Schema.Struct({
+      incidentKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+      state: Schema.Literals(["failing", "recovered"]),
+      url: TrimmedNonEmptyString.check(
+        Schema.isMaxLength(2_048),
+        Schema.makeFilter((value) => {
+          if (!URL.canParse(value)) return "url must be absolute";
+          const protocol = new URL(value).protocol;
+          return protocol === "http:" || protocol === "https:" || "url must use http or https";
+        }),
+      ),
+    }),
+  ),
 });
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 
@@ -3178,7 +3193,80 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * `OrchestrationV2Command`, the `dispatchCommand` payload, so no client can
  * send them.
  */
+const ExternalAlertUrl = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
+    if (!URL.canParse(value)) return "url must be absolute";
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" || "url must use http or https";
+  }),
+);
+
+export const ThreadExternalAlertUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.external-alert.upsert"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  incidentKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  state: Schema.Literals(["failing", "recovered"]),
+  summary: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+  detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(16_000))),
+  url: ExternalAlertUrl,
+  createdAt: IsoDateTime,
+});
+export type ThreadExternalAlertUpsertCommand = typeof ThreadExternalAlertUpsertCommand.Type;
+
+/** Frozen Jenkins wire commands translated to V2 at the environment HTTP boundary. */
+export const ForkMaintenanceDispatchCommand = Schema.Union([
+  ThreadExternalAlertUpsertCommand,
+  Schema.Struct({
+    type: Schema.Literal("thread.create"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    projectId: ProjectId,
+    title: TrimmedNonEmptyString,
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    branch: Schema.NullOr(TrimmedNonEmptyString),
+    worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    createdAt: IsoDateTime,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.session.stop"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    createdAt: IsoDateTime,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.meta.update"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+    worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.turn.start"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    message: Schema.Struct({
+      messageId: MessageId,
+      role: Schema.Literal("user"),
+      text: Schema.String,
+      attachments: Schema.Array(ChatAttachment),
+      context: Schema.optional(OrchestrationMessageContext),
+    }),
+    modelSelection: Schema.optional(ModelSelection),
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    createdAt: IsoDateTime,
+  }),
+]);
+export type ForkMaintenanceDispatchCommand = typeof ForkMaintenanceDispatchCommand.Type;
+
 const OrchestrationV2InternalCommand = Schema.Union([
+  ThreadExternalAlertUpsertCommand,
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when
    * `wake` is set. Rejected once the watch started at `startedAt` has ended, and a wake is

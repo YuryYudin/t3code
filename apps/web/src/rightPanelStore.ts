@@ -16,6 +16,13 @@ import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contract
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import {
+  createForeignStateHandler,
+  mergeForeignEntries,
+  ownedEntryKeys,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
 import { useClosedViewStore } from "./closedViewStore";
 import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
@@ -1154,3 +1161,33 @@ export function selectSelectedRightPanelSurface(
   const state = selectThreadRightPanelState(byThreadKey, ref);
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null;
 }
+
+interface RightPanelPersistedState {
+  byThreadKey: Record<string, ThreadRightPanelState>;
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * fold a foreign window's write into this window without a DOM. The
+ * shared pull-request panel is session state this window never persists, so it
+ * is protected from a foreign snapshot that (correctly) omits it.
+ */
+export const foreignRightPanelStateSync: ForeignStateSync<RightPanelPersistedState> = {
+  snapshot: () => ({ byThreadKey: useRightPanelStore.getState().byThreadKey }),
+  parse: (raw) =>
+    migratePersistedRightPanelState(
+      raw === null ? null : (JSON.parse(raw) as { state?: unknown }).state,
+    ),
+  merge: ({ local, incoming, baseline }) => {
+    const owned = new Set(ownedEntryKeys(local.byThreadKey, baseline.byThreadKey));
+    for (const threadKey of Object.keys(local.byThreadKey)) {
+      if (isPullRequestsPanelKey(threadKey)) owned.add(threadKey);
+    }
+    return {
+      byThreadKey: mergeForeignEntries(local.byThreadKey, incoming.byThreadKey, owned),
+    };
+  },
+  apply: (merged) => useRightPanelStore.setState(merged),
+};
+
+subscribeStorageKey(RIGHT_PANEL_STORAGE_KEY, createForeignStateHandler(foreignRightPanelStateSync));
