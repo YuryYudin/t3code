@@ -308,6 +308,8 @@ const props = {
   selectedThreadKey: null,
   onOpenSettings: vi.fn(),
   onOpenEnvironmentSettings: vi.fn(),
+  onOpenPendingTask: runtime.openPendingTask,
+  onOpenThreadPullRequests: vi.fn(),
   onNewThreadOnBranch: vi.fn(),
   onNewThreadInProject: vi.fn(),
   onSearchQueryChange: vi.fn(),

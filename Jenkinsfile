@@ -376,7 +376,13 @@ def runQuality(String slug, String candidateRef) {
                 corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
                 corepack pnpm run test:fork-release-acceptance
                 corepack pnpm exec vp test run scripts/fork-integration.test.ts apps/desktop/src/window/DesktopWindow.test.ts apps/desktop/src/window/DesktopApplicationMenu.test.ts apps/desktop/src/ipc/methods/window.test.ts
-                corepack pnpm exec vp run --filter @t3tools/contracts --filter @t3tools/shared --filter @t3tools/client-runtime --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop typecheck
+                if [[ -f apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts ]]; then
+                    corepack pnpm exec vp test run apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts
+                fi
+                for project in packages/contracts packages/shared packages/client-runtime apps/server apps/web apps/mobile apps/desktop; do
+                    echo "Type check: $project"
+                    corepack pnpm --dir "$project" run typecheck
+                done
                 test -z "$(git status --porcelain)"
             '''
             } finally {

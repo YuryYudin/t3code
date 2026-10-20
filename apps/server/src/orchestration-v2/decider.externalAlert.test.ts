@@ -124,6 +124,22 @@ it.effect("adopts an empty passive incident thread created by a legacy server", 
   }),
 );
 
+it.effect(
+  "adopts a legacy incident thread containing notifications without ownership metadata",
+  () =>
+    Effect.gen(function* () {
+      const item = incidentItem();
+      const legacyItem = { ...item, externalAlert: undefined };
+      const plan = yield* planExternalAlertCommand({
+        command: command({ state: "recovered" }),
+        project: { defaultModelSelection: modelSelection },
+        thread: thread(),
+        turnItems: [legacyItem],
+      });
+      expect(plan).toEqual({ createThread: false, modelSelection, ordinal: 2 });
+    }),
+);
+
 it.effect.each([
   ["recovery before creation", command({ state: "recovered" }), null, [], modelSelection],
   ["missing default model", command(), null, [], null],

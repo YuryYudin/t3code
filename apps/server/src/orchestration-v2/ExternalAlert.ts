@@ -45,11 +45,12 @@ export const planExternalAlertCommand = Effect.fn("planExternalAlertCommand")(fu
         `Thread '${command.threadId}' does not belong to project '${command.projectId}'.`,
       );
     }
-    const firstIncident = turnItems.find(
+    const incidentItems = turnItems.filter(
       (item) => item.type === "notification" && item.externalAlert !== undefined,
     );
+    const firstIncident = incidentItems[0];
     const isLegacyIncidentThread =
-      turnItems.length === 0 && thread.id.startsWith("t3-fork-incident-");
+      incidentItems.length === 0 && thread.id.startsWith("t3-fork-incident-");
     if (
       !isLegacyIncidentThread &&
       (firstIncident?.type !== "notification" ||
