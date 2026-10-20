@@ -13,7 +13,10 @@ import { createNativeMailSearchToolbarItem } from "../layout/native-mail-search-
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 import { useDeviceType } from "../../native/native-layout-metrics";
 import { buildHomeListFilterMenu } from "./home-list-filter-menu";
-import { createSidebarHeaderItems } from "../threads/sidebar-native-header-items";
+import {
+  createSidebarFilterHeaderItem,
+  createSidebarHeaderItems,
+} from "../threads/sidebar-native-header-items";
 import type { HomeHeaderProps } from "./HomeHeader.types";
 import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
@@ -60,7 +63,19 @@ export function HomeHeader(props: HomeHeaderProps) {
   const filterMenu = buildHomeListFilterMenu(props);
 
   if (props.usesWorkspaceToolbar) {
-    return null;
+    return deviceType === "duo-unfolded" ? (
+      <NativeStackScreenOptions
+        optionsVersion={filterMenu.items}
+        options={{
+          nativeSidebarFilter: createSidebarFilterHeaderItem({
+            filterIcon: hasCustomListOptions
+              ? "line.3.horizontal.decrease.circle.fill"
+              : "line.3.horizontal.decrease.circle",
+            filterMenu,
+          }),
+        }}
+      />
+    ) : null;
   }
 
   return (
@@ -195,6 +210,26 @@ export function HomeHeader(props: HomeHeaderProps) {
                 </Toolbar.MenuAction>
               ))}
             </Toolbar.Menu>
+
+            {props.projectCollectionsAvailable ? (
+              <Toolbar.Menu title="Collections">
+                <Toolbar.Label>Collections</Toolbar.Label>
+                {props.projectCollectionScopeOptions.map((option) => (
+                  <Toolbar.MenuAction
+                    key={mobileProjectCollectionScopeKey(option.scope)}
+                    isOn={
+                      mobileProjectCollectionScopeKey(option.scope) ===
+                      mobileProjectCollectionScopeKey(props.projectCollectionScope)
+                    }
+                    onPress={() => props.onProjectCollectionScopeChange(option.scope)}
+                  >
+                    <Toolbar.Label>
+                      {option.label} ({option.count})
+                    </Toolbar.Label>
+                  </Toolbar.MenuAction>
+                ))}
+              </Toolbar.Menu>
+            ) : null}
 
             {props.projectCollectionsAvailable ? (
               <Toolbar.Menu title="Collections">

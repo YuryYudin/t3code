@@ -44,6 +44,7 @@ const layerElectronApp = (calls: ElectronAppCalls) =>
     name: Effect.succeed("T3 Code"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    requestSingleInstanceLock: Effect.succeed(true),
     quit: Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,
@@ -240,36 +241,41 @@ describe("DesktopAppIdentity", () => {
     { stage: "Latest", environment: {} },
     {
       stage: "Nightly",
+      displayName: "T3 Code (Nightly)",
       environment: { appVersion: "0.0.43-nightly.20260929.2428" },
     },
     {
       stage: "Dev",
+      displayName: "T3 Code (Dev)",
       environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
     },
-  ])("uses a valid native User-Agent product name for $stage", ({ stage, environment }) => {
-    const calls: ElectronAppCalls = {
-      setAboutPanelOptions: [],
-      setDockIcon: [],
-      setName: [],
-    };
+  ])(
+    "uses a valid native User-Agent product name for $stage",
+    ({ stage, displayName, environment }) => {
+      const calls: ElectronAppCalls = {
+        setAboutPanelOptions: [],
+        setDockIcon: [],
+        setName: [],
+      };
 
-    return withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        yield* identity.configure;
+      return withIdentity(
+        Effect.gen(function* () {
+          const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+          yield* identity.configure;
 
-        const runtimeName = calls.setName[0];
-        assert.isDefined(runtimeName);
-        assert.equal(runtimeName, `T3 Code ${stage}`);
-        assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
-        assert.equal(
-          calls.setAboutPanelOptions[0]?.applicationName,
-          stage === "Latest" ? "T3 Code" : `T3 Code (${stage})`,
-        );
-      }),
-      { calls, environment },
-    );
-  });
+          const runtimeName = calls.setName[0];
+          assert.isDefined(runtimeName);
+          assert.equal(runtimeName, `T3 Code ${stage}`);
+          assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
+          assert.equal(
+            calls.setAboutPanelOptions[0]?.applicationName,
+            stage === "Latest" ? "T3 Code" : `T3 Code (${stage})`,
+          );
+        }),
+        { calls, environment },
+      );
+    },
+  );
 
   it.effect("sets the dock icon only when running unpackaged", () => {
     const calls: ElectronAppCalls = {

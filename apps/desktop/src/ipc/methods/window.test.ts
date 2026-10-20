@@ -33,6 +33,7 @@ import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry
 import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import {
   getLocalEnvironmentBootstraps,
+  getRelayTelemetryEnabled,
   getWindowFullscreenState,
   openWindow,
   pasteAsText,
@@ -40,6 +41,7 @@ import {
   pickProjectFavicon,
   probeRemoteEditors,
   setWindowScope,
+  revealWindow,
 } from "./window.ts";
 
 // Fake app windows, keyed the way Electron keys them: a window id plus the
@@ -232,6 +234,25 @@ describe("getLocalEnvironmentBootstraps", () => {
   });
 });
 
+describe("getRelayTelemetryEnabled", () => {
+  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+    Effect.gen(function* () {
+      assert.isFalse(
+        yield* getRelayTelemetryEnabled.handler().pipe(
+          Effect.provideService(HostProcess.Environment, {
+            T3CODE_TELEMETRY_ENABLED: "false",
+          }),
+        ),
+      );
+      assert.isTrue(
+        yield* getRelayTelemetryEnabled
+          .handler()
+          .pipe(Effect.provideService(HostProcess.Environment, {})),
+      );
+    }),
+  );
+});
+
 describe("getWindowFullscreenState", () => {
   it.effect("reads the state of the window that asked, not the most recent one", () => {
     const fullscreen = makeAppWindow(1, { fullscreen: true });
@@ -298,6 +319,26 @@ describe("pasteAsText", () => {
       );
     },
   );
+});
+
+describe("revealWindow", () => {
+  it.effect("reveals the main window only when it asks", () => {
+    const window = { webContents: { id: 42 } } as unknown as Electron.BrowserWindow;
+    const reveal = vi.fn(() => Effect.void);
+    return Effect.gen(function* () {
+      yield* revealWindow.handler(undefined, { sender: { id: 99 } });
+      assert.equal(reveal.mock.calls.length, 0);
+      yield* revealWindow.handler(undefined, { sender: { id: 42 } });
+      assert.deepEqual(reveal.mock.calls, [[window]]);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronWindow.ElectronWindow)({
+          main: Effect.succeedSome(window),
+          reveal,
+        }),
+      ),
+    );
+  });
 });
 
 describe("pickProjectFavicon", () => {

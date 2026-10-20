@@ -41,6 +41,7 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import { subscribeOrchestrationV2Thread } from "../ws.ts";
 import * as OrchestrationHttp from "./http.ts";
+import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -230,6 +231,7 @@ const TestLayer = Layer.mergeAll(
   }),
   Layer.effectDiscard(seed),
   Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
+  Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectStore.ProjectStoreV2)({}),
   Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({}),
 ).pipe(Layer.provideMerge(store));

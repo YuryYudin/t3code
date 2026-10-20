@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   Integration,
+  STABLE_SOURCE_REPAIR_LIMIT,
   ZERO_SHA,
   dispatchRepair,
   integrationGit,
@@ -169,6 +170,31 @@ describe("persistent integration", () => {
     integrationGit(checkout, ["commit", "-m", "Corrupt vendored reference"]);
     next.save({ ...next.read(), head: integrationGit(checkout, ["rev-parse", "HEAD"]) });
     expect(() => next.assertCandidate()).toThrow(/upstream vendored references/);
+  });
+
+  it("preserves unchanged generated upstream sources while checking fork additions", () => {
+    const f = fixture();
+    const schema = "type Query {\n  field: String  \n}\n";
+    const target = f.commit("apps/server/schema/expo.graphql", schema);
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    next.prepare(f.repo);
+    next.request();
+    f.repair(next);
+    next.assertCandidate();
+    expect(
+      NodeFS.readFileSync(
+        NodePath.join(next.read().checkout, "apps/server/schema/expo.graphql"),
+        "utf8",
+      ),
+    ).toBe(schema);
+    next.request("a fork addition still needs checking");
+    expect(() => f.repair(next, "invalid fork addition \n")).toThrow(
+      /feature.txt.*trailing whitespace/s,
+    );
   });
 
   it("still rejects whitespace errors in repaired application code", () => {
@@ -361,6 +387,64 @@ describe("interrupted state transitions", () => {
 });
 
 describe("stable candidate repair", () => {
+  it("continues through independent replay conflicts and reserves quality repairs", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.source]);
+    f.commit("feature.txt", "second fork change\n");
+    const source = f.commit("feature.txt", "third fork change\n");
+    const stable = new Integration(
+      f.stateDir,
+      { ...f.inputs, source },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    stable.prepare(f.repo);
+    for (let index = 0; index < 3; index++) {
+      expect(stable.read().status).toBe("needs-repair");
+      const request = stable.request().request;
+      const resumed = new Integration(
+        f.stateDir,
+        { ...f.inputs, source },
+        NodePath.join(f.root, "workers"),
+        "stable",
+      );
+      expect(resumed.request().request.id).toBe(request.id);
+      f.repair(resumed, `upstream plus fork change ${index}\n`);
+    }
+    expect(stable.read().status).toBe("prepared");
+    for (let index = 0; index < 3; index++) {
+      stable.request("a focused compatibility test failed");
+      f.repair(stable, `tested upstream plus all fork changes ${index}\n`);
+    }
+    expect(() => stable.request("still failing")).toThrow(/exhausted 3 attempts.*quality/);
+    stable.assertCandidate();
+    stable.markQuality();
+    stable.markVerified("build/stable-v2");
+    expect(stable.read().status).toBe("verified");
+  });
+
+  it("bounds the total number of source repairs across distinct stable patches", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.source]);
+    let source = f.source;
+    for (let index = 0; index < STABLE_SOURCE_REPAIR_LIMIT; index++)
+      source = f.commit("feature.txt", `fork change ${index}\n`);
+    const stable = new Integration(
+      f.stateDir,
+      { ...f.inputs, source },
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    stable.prepare(f.repo);
+    for (let index = 0; index < STABLE_SOURCE_REPAIR_LIMIT; index++) {
+      stable.request();
+      f.repair(stable, `upstream and resolved change ${index}\n`);
+    }
+    expect(stable.read().status).toBe("needs-repair");
+    expect(() => stable.request()).toThrow(/exhausted 12 source repairs/);
+    expect(stable.read().requests).toHaveLength(STABLE_SOURCE_REPAIR_LIMIT);
+  });
+
   it("replays historical automation using the frozen source without repair attempts", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);

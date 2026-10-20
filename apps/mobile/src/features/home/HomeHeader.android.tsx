@@ -133,7 +133,6 @@ export function HomeHeader(props: HomeHeaderProps) {
         filterActions={menuActions}
         filterCustomized={hasCustomListOptions}
         onFilterAction={handleMenuAction}
-        onOpenSettings={props.onOpenSettings}
         onOpenEnvironments={props.onOpenEnvironments}
       />
       {/* Below the toolbar: with headerShown false, the toolbar is the only
