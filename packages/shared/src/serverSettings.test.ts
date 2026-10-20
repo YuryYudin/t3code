@@ -90,7 +90,7 @@ describe("serverSettings helpers", () => {
     });
   });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
-    const host = { id: "mini", label: "Mac mini", target: "mini" };
+    const host = { kind: "ssh" as const, id: "mini", label: "Mac mini", target: "mini" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { deviceHosts: [host] });
     expect(saved.deviceHosts).toEqual([host]);
     const replacement = { ...host, target: "other-mini" };
@@ -141,6 +141,25 @@ describe("serverSettings helpers", () => {
     expect(next.projectCollections).toBe(projectCollections);
     expect(next.projectCollections.collections).toHaveLength(1);
     expect(next.projectCollections.assignments).toHaveLength(1);
+  });
+
+  it("replaces EAS host lists the same way", () => {
+    const host = {
+      kind: "eas" as const,
+      id: "eas",
+      label: "EAS Simulator",
+      accessToken: "",
+      maxSessionMinutes: 30,
+      idleMinutes: 10,
+      maxConcurrentSessions: 2,
+    };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { easDeviceHosts: [host] });
+    expect(saved.easDeviceHosts).toEqual([host]);
+    const edited = applyServerSettingsPatch(saved, {
+      easDeviceHosts: [{ ...host, maxSessionMinutes: 60 }],
+    });
+    expect(edited.easDeviceHosts).toEqual([{ ...host, maxSessionMinutes: 60 }]);
+    expect(applyServerSettingsPatch(edited, { easDeviceHosts: [] }).easDeviceHosts).toEqual([]);
   });
 
   it("inherits actions, preserves existing actions, and supports empty overrides and reset", () => {
