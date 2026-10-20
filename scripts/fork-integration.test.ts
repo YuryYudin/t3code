@@ -172,6 +172,31 @@ describe("persistent integration", () => {
     expect(() => next.assertCandidate()).toThrow(/upstream vendored references/);
   });
 
+  it("preserves unchanged generated upstream sources while checking fork additions", () => {
+    const f = fixture();
+    const schema = "type Query {\n  field: String  \n}\n";
+    const target = f.commit("apps/server/schema/expo.graphql", schema);
+    const next = new Integration(
+      f.stateDir,
+      { ...f.inputs, target },
+      NodePath.join(f.root, "workers"),
+    );
+    next.prepare(f.repo);
+    next.request();
+    f.repair(next);
+    next.assertCandidate();
+    expect(
+      NodeFS.readFileSync(
+        NodePath.join(next.read().checkout, "apps/server/schema/expo.graphql"),
+        "utf8",
+      ),
+    ).toBe(schema);
+    next.request("a fork addition still needs checking");
+    expect(() => f.repair(next, "invalid fork addition \n")).toThrow(
+      /feature.txt.*trailing whitespace/s,
+    );
+  });
+
   it("still rejects whitespace errors in repaired application code", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
