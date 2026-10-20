@@ -7,6 +7,8 @@ import { assertFullSha, atomicWriteJson, readJsonFile } from "./fork-release.ts"
 
 export const ZERO_SHA = "0".repeat(40);
 export const REPAIR_LIMIT = 2;
+export const STABLE_SOURCE_REPAIR_LIMIT = 12;
+export const STABLE_QUALITY_REPAIR_LIMIT = 3;
 export const AUTOMATION_PATHS = [
   "Jenkinsfile",
   "scripts/diagnose-apple-notarization.ts",
@@ -32,6 +34,7 @@ export interface RepairRequest {
   readonly createdAt: string;
   readonly receiptSequence?: number;
   readonly completed?: boolean;
+  readonly stage?: string;
 }
 export interface IntegrationState {
   readonly schemaVersion: 1;
@@ -429,11 +432,35 @@ export class Integration {
     if (previous && !previous.completed) return { state, request: previous };
     // Both source and upstream merges can need repair before tests run. Keep
     // one extra request for quality feedback on the completed candidate.
-    const repairLimit =
+    let repairLimit =
       feedback.trim() && state.status === "prepared" ? REPAIR_LIMIT + 1 : REPAIR_LIMIT;
-    if (state.requests.length >= repairLimit)
+    const stage =
+      state.kind === "stable"
+        ? state.replay?.pending
+          ? `replay:${state.replay.pending}`
+          : "quality"
+        : undefined;
+    let used = state.requests.length;
+    if (stage !== undefined) {
+      // Advancing to another patch is progress, not a retry of the same failure.
+      // Legacy requests count against the current stage rather than resetting
+      // an exhausted journal when the controller loads this version.
+      used = state.requests.filter(
+        (request) => request.stage === undefined || request.stage === stage,
+      ).length;
+      repairLimit = stage === "quality" ? STABLE_QUALITY_REPAIR_LIMIT : REPAIR_LIMIT;
+      if (
+        stage !== "quality" &&
+        state.requests.filter((request) => request.stage !== "quality").length >=
+          STABLE_SOURCE_REPAIR_LIMIT
+      )
+        throw new Error(
+          `Automatic stable replay exhausted ${STABLE_SOURCE_REPAIR_LIMIT} source repairs for input ${state.id}; unchanged retries will reuse this incident.`,
+        );
+    }
+    if (used >= repairLimit)
       throw new Error(
-        `Automatic repair exhausted ${repairLimit} attempts for input ${state.id}; unchanged retries will reuse this incident.`,
+        `Automatic repair exhausted ${repairLimit} attempts for input ${state.id}${stage ? ` at ${stage}` : ""}; unchanged retries will reuse this incident.`,
       );
     if (!["needs-repair", "prepared"].includes(state.status))
       throw new Error("Candidate does not need repair.");
@@ -465,7 +492,13 @@ export class Integration {
       `Before returning the receipt, run node scripts/fork-integration.ts share --checkout ${state.checkout} --uid ${process.getuid?.()} from this checkout. It grants Jenkins access only to files you own here, excluding dependencies and symlink targets.`,
       `Stage all intended tracked repairs, ensure no unresolved paths or unstaged edits remain, then write ${NodePath.join(state.checkout, ".fork-repair-complete.json")} atomically with exactly {"requestId":${JSON.stringify(id)},"status":"completed"}. Create the receipt with mode 0644 so Jenkins can read it. This receipt is the last filesystem operation; finish the turn immediately afterward. If unable to resolve, write the same receipt with status "failed" and a concise detail. Never fabricate success.`,
     ].join("\n\n");
-    const request = { id, attempt, message, createdAt: new Date().toISOString() };
+    const request = {
+      id,
+      attempt,
+      message,
+      createdAt: new Date().toISOString(),
+      ...(stage === undefined ? {} : { stage }),
+    };
     state = this.save({ ...state, requests: [...state.requests, request] });
     NodeFS.rmSync(NodePath.join(state.checkout, ".fork-repair-complete.json"), { force: true });
     atomicWriteJson(NodePath.join(state.checkout, ".fork-repair-request.json"), request);

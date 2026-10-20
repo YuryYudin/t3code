@@ -46,6 +46,7 @@ import * as ThreadManagementService from "../src/orchestration-v2/ThreadManageme
 import * as ProjectStore from "../src/orchestration-v2/ProjectStore.ts";
 import * as ProjectService from "../src/project/ProjectService.ts";
 import * as ProjectEnrichmentService from "../src/project/ProjectEnrichmentService.ts";
+import * as Orchestrator from "../src/orchestration-v2/Orchestrator.ts";
 import * as OrchestrationHttp from "../src/orchestration-v2/http.ts";
 import * as ServerHttp from "../src/http.ts";
 import { subscribeOrchestrationV2Thread, subscribeOrchestrationV2Shell } from "../src/ws.ts";
@@ -118,6 +119,7 @@ const layerServices = layerManagement.pipe(
   Layer.provideMerge(ProjectStore.layer),
   Layer.provideMerge(Layer.mock(ProjectService.ProjectService)({})),
   Layer.provideMerge(layerEnrichment),
+  Layer.provideMerge(Layer.mock(Orchestrator.OrchestratorV2)({})),
   Layer.provideMerge(layerPersistence),
 );
 class TransferApi extends HttpApi.make("environment").add(

@@ -18,6 +18,8 @@ import type { HomeHeaderProps } from "./HomeHeader.types";
 import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -214,6 +216,26 @@ export function HomeHeader(props: HomeHeaderProps) {
                   </Toolbar.MenuAction>
                 ))}
               </Toolbar.Menu>
+            ) : null}
+
+            {props.projectCollectionsAvailable ? (
+              <NativeHeaderToolbar.Menu title="Collections">
+                <NativeHeaderToolbar.Label>Collections</NativeHeaderToolbar.Label>
+                {props.projectCollectionScopeOptions.map((option) => (
+                  <NativeHeaderToolbar.MenuAction
+                    key={mobileProjectCollectionScopeKey(option.scope)}
+                    isOn={
+                      mobileProjectCollectionScopeKey(option.scope) ===
+                      mobileProjectCollectionScopeKey(props.projectCollectionScope)
+                    }
+                    onPress={() => props.onProjectCollectionScopeChange(option.scope)}
+                  >
+                    <NativeHeaderToolbar.Label>
+                      {option.label} ({option.count})
+                    </NativeHeaderToolbar.Label>
+                  </NativeHeaderToolbar.MenuAction>
+                ))}
+              </NativeHeaderToolbar.Menu>
             ) : null}
 
             {props.projects.length > 0 ? (

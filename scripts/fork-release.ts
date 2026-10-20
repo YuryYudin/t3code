@@ -860,7 +860,14 @@ function releaseDraftCommand(args: ParsedArguments): void {
       "--title",
       `T3 Code ${version}`,
       "--notes",
-      `Fork release based on upstream stable with Project Collections.`,
+      [
+        `Based on [official upstream v${version.replace(/-\d+$/, "")}](https://github.com/pingdotgg/t3code/releases/tag/v${version.replace(/-\d+$/, "")}). Includes Project Collections, multiple desktop windows, saved-connection synchronization, and the typed-draft preservation fix.`,
+        ...(version.startsWith("0.1.0-")
+          ? [
+              "**Upgrading from 0.0.x:** Update desktop/mobile clients and remote servers together; V1 clients cannot connect to V2 servers. Back up your data before upgrading. V1 history is copied once into a separate V2 database; later V2 activity does not flow back to V1. Embedded browser sign-ins may need to be repeated. See the upstream release notes linked above.",
+            ]
+          : []),
+      ].join("\n\n"),
     ]);
   }
   const assets = evidence.names.map((name) => NodePath.join(assetDirectory, name));
