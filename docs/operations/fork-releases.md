@@ -100,6 +100,8 @@ The worker returns a request-specific completion file; command acceptance alone 
 
 Quality tests use the upstream Vite test runner; do not restore a standalone Vitest or coverage dependency from older fork history alongside it. Package type checks run sequentially to bound memory use. Whitespace checks compare fork changes against the frozen upstream target, preserving unchanged generated upstream sources.
 
+Quality tests use the upstream Vite test runner; do not restore a standalone Vitest or coverage dependency from older fork history alongside it. Package type checks run sequentially to bound memory use. Whitespace checks compare fork changes against the frozen upstream target, preserving unchanged generated upstream sources.
+
 Fast quality checks run before packaging. Mobile dependency or native changes additionally compile an Android development APK on `ggnode2`, using its provisioned Java and Android SDK. No emulator is launched or app installed. The current macOS worker has Xcode 15.4 and no CocoaPods, so it cannot compile current upstream iOS native clients; desktop macOS packaging and mobile TypeScript/tests remain required. Provision a compatible iOS worker before adding an iOS native compile gate.
 
 The macOS stage signs `com.tapnetix.t3code` with the existing Developer ID certificate and notarizes it with the existing App Store Connect API key. Fork builds explicitly disable Clerk passkeys, so they do not request Associated Domains and do not need an App ID or provisioning profile. The regular Electron hardened-runtime entitlements continue to come from the signing tool's defaults.
