@@ -2253,6 +2253,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
+    // Thread ids stay reserved across history imports and maintenance retries,
+    // including deleted threads and their provider history links.
+    const existing = yield* projectionStore.getThread(command.threadId).pipe(
+      Effect.catchTag("ProjectionStoreThreadNotFoundError", () => Effect.succeed(null)),
+      mapDispatchError(command),
+    );
+    if (existing !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread '${command.threadId}' already exists.`,
+      });
+    }
+
     const now =
       command.createdAt === undefined
         ? yield* DateTime.now
