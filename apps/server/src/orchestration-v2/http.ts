@@ -4,7 +4,6 @@ import {
   EnvironmentHttpApi,
   type ForkMaintenanceDispatchCommand,
   type OrchestrationV2Command,
-  type OrchestrationV2InternalCommand,
   type OrchestrationV2ServerCommand,
   type OrchestrationProjectShell,
 } from "@t3tools/contracts";
@@ -73,7 +72,7 @@ function adaptForkMaintenanceCommand(
         commandId: command.commandId,
         threadId: command.threadId,
         reason: "Superseded by a new fork maintenance repair request.",
-      } satisfies Extract<OrchestrationV2InternalCommand, { readonly type: "thread.stop" }>;
+      } satisfies Extract<OrchestrationV2Command, { readonly type: "thread.stop" }>;
     case "thread.meta.update":
       return {
         type: "thread.metadata.update",
