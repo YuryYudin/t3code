@@ -8,6 +8,9 @@ Use **Build with Parameters** for these manual actions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
 - `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
+
+For an explicitly requested release base, set `EXPECTED_UPSTREAM_VERSION` to its official version, such as `0.1.2`. If another stable release appears before a retry resolves its plan, Jenkins stops before candidate preparation instead of silently changing the requested base. Scheduled builds leave this empty and continue following the latest official stable release.
+
 - `sync-upstream` immediately merges current upstream `main` into the persistent integration branch, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
 
 `apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.

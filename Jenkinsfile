@@ -723,6 +723,7 @@ pipeline {
         choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check', 'sync-upstream'], description: 'Scheduled tracking, read-only validation, a stable release, an Apple check, or integration-only synchronization.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
         string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for out-of-cycle or sync-upstream; leave empty to use main.')
+        string(name: 'EXPECTED_UPSTREAM_VERSION', defaultValue: '', description: 'For out-of-cycle releases, require this official stable version (for example 0.1.2); stop if latest has changed.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
     }
 
@@ -748,6 +749,9 @@ pipeline {
                     }
                     if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
                         error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
+                    }
+                    if (params.EXPECTED_UPSTREAM_VERSION && (params.ACTION != 'out-of-cycle' || !(params.EXPECTED_UPSTREAM_VERSION ==~ /[0-9]+\.[0-9]+\.[0-9]+/))) {
+                        error('EXPECTED_UPSTREAM_VERSION requires out-of-cycle and an exact upstream version.')
                     }
                     withWorkflowLock {
                     Map nightly
@@ -775,6 +779,9 @@ pipeline {
                                 def stableMode = params.ACTION == 'out-of-cycle' ? 'out-of-cycle-release' : 'automatic-stable-release'
                                 sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
                                 stable = readResolvedPlan('.fork-release-stable.json')
+                                if (params.EXPECTED_UPSTREAM_VERSION && stable.target.version != params.EXPECTED_UPSTREAM_VERSION) {
+                                    error("Expected upstream ${params.EXPECTED_UPSTREAM_VERSION}, but latest is ${stable.target.version}; refusing to change the release base.")
+                                }
                             }
                         }
                     }
