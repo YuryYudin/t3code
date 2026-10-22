@@ -70,6 +70,12 @@ def integrationArgs(Map resolved) {
     return "--kind ${kind} --source ${resolved.candidateSourceSha} --target ${resolved.target.commit} --observed ${observed}"
 }
 
+def isUserAbort(Throwable failure) {
+    // isActualInterruption() is not sandbox-approved here. Suppress only the explicit
+    // operator-stop cause; timeouts and unknown interruptions still report failures.
+    return failure instanceof org.jenkinsci.plugins.workflow.steps.FlowInterruptedException && failure.message?.startsWith('Aborted by ')
+}
+
 def requestIntegrationRepair(Map resolved, String feedback = '') {
     node('built-in') {
         stage('Automatic integration repair') {
@@ -615,6 +621,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 }
                 qualityPassed = true
             } catch (qualityError) {
+                if (isUserAbort(qualityError)) throw qualityError
                 if (!managed) throw qualityError
                 requestIntegrationRepair(resolved, "quality-feedback-${slug}")
                 ensureIntegrationBundle(resolved, slug, candidateRef)
@@ -690,6 +697,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
             if (incremental) queueIntegrationFollowup(resolved)
         }
     } catch (error) {
+        if (isUserAbort(error)) throw error
         if (!params.DRY_RUN && params.ACTION != 'validate-only') {
             reportIncident(resolved, failureClass, "${slug} failed at ${failureClass}: ${error.message}")
         }
