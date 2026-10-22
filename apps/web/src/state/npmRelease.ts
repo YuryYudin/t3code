@@ -1,59 +1,62 @@
-import { type ServerConfig, ServerNpmReleaseError } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
+import {
+  cliReleaseDatabaseMigration,
+  cliReleaseIndexPageUrl,
+  cliReleaseMigrationsUrl,
+  newestCliReleaseVersion,
+} from "@t3tools/shared/cliRelease";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { Atom } from "effect/reactivity";
 
-import { environmentSummaries } from "./presentation";
-import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
-import { serverEnvironment } from "./server";
-
-const isServerNpmReleaseError = Schema.is(ServerNpmReleaseError);
-
-function unsupportedLookup(config: ServerConfig | null): ServerNpmReleaseError | null {
-  if (config === null) {
-    return new ServerNpmReleaseError({ reason: "Connect to this server to check releases." });
-  }
-  return config.environment.capabilities.npmReleaseLookup === true
-    ? null
-    : new ServerNpmReleaseError({
-        reason: "This server does not support registry lookups. Update it before switching tracks.",
-      });
+export interface NpmRelease {
+  readonly version: string;
+  /** Absent on releases published before server manifests carried it. */
+  readonly databaseMigration: number | undefined;
 }
 
-export function npmReleaseFailureMessage(cause: Cause.Cause<unknown>): string {
-  const error = Option.getOrUndefined(Cause.findErrorOption(cause));
-  return isServerNpmReleaseError(error)
-    ? error.message
-    : "Could not check this environment's npm registry. Check the connection and registry settings.";
-}
+const isReleaseIndex = Schema.is(
+  Schema.Array(
+    Schema.Struct({
+      tag_name: Schema.String,
+      draft: Schema.optionalKey(Schema.Boolean),
+      prerelease: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+);
 
+/** `spec` is the desktop channel name. Null when the fork has no published release on that track. */
 export const npmReleaseAtom = Atom.family((spec: string) =>
-  Atom.make((get) => {
-    const primary = get(primaryEnvironmentIdAtom);
-    // With the desktop's local server turned off there is no primary, so a connected server answers.
-    const candidates =
-      primary === null ? get(environmentSummaries.connectedEnvironmentIdsAtom) : [primary];
-    const environmentId =
-      candidates.find(
-        (id) => unsupportedLookup(get(serverEnvironment.configValueAtom(id))) === null,
-      ) ?? candidates[0];
-    if (environmentId === undefined) {
-      return Effect.fail(
-        new ServerNpmReleaseError({ reason: "Connect to a server to check releases." }),
+  Atom.make(
+    Effect.gen(function* () {
+      const channel =
+        spec === "nightly" ? "nightly" : spec === "latest" ? "stable" : null;
+      if (channel === null) return null;
+      let version: string | undefined;
+      for (let page = 1; page <= 10; page += 1) {
+        const response = yield* HttpClient.get(cliReleaseIndexPageUrl(page));
+        const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
+          Effect.flatMap((ok) => ok.json),
+        );
+        if (!isReleaseIndex(body)) return null;
+        version = newestCliReleaseVersion(body, channel);
+        if (version !== undefined || body.length < 100) break;
+      }
+      if (version === undefined) return null;
+      const manifestResponse = yield* HttpClient.get(
+        cliReleaseMigrationsUrl(version),
       );
-    }
-    const unsupported = unsupportedLookup(get(serverEnvironment.configValueAtom(environmentId)));
-    if (unsupported !== null) return Effect.fail(unsupported);
-    return get
-      .result(serverEnvironment.npmRelease({ environmentId, input: { spec } }))
-      .pipe(
-        Effect.map((release) =>
-          release === null
-            ? null
-            : { version: release.version, databaseMigration: release.databaseMigration },
-        ),
-      );
-  }).pipe(Atom.withLabel(`npm-release:${spec}`)),
+      const migrationSource = yield* HttpClientResponse.filterStatusOk(
+        manifestResponse,
+      ).pipe(Effect.flatMap((ok) => ok.text));
+      return {
+        version,
+        databaseMigration: cliReleaseDatabaseMigration(migrationSource),
+      } satisfies NpmRelease;
+    }).pipe(
+      // Tracing headers would make the browser send CORS preflights that public release hosts reject.
+      Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+      Effect.provide(FetchHttpClient.layer),
+    ),
+  ).pipe(Atom.withRefresh("5 minutes"), Atom.withLabel(`npm-release:${spec}`)),
 );

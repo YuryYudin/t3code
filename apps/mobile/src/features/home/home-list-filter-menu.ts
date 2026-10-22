@@ -1,9 +1,12 @@
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import type { WorkspaceEnvironment } from "../../state/workspaceModel";
+import type { MobileProjectCollectionsModel } from "./mobileProjectCollections";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
@@ -33,8 +36,14 @@ export function buildHomeListFilterMenuItems(props: {
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly projectCollectionScope: ProjectCollectionScope;
+  readonly projectCollectionScopeOptions: MobileProjectCollectionsModel["scopeOptions"];
+  readonly projectCollectionsAvailable: boolean;
+  readonly canManageProjectCollections: boolean;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onProjectCollectionScopeChange: (scope: ProjectCollectionScope) => void;
+  readonly onManageProjectCollections: () => void;
 }): AppBarMenuItem[] {
   const items: AppBarMenuItem[] = [
     {
@@ -58,6 +67,21 @@ export function buildHomeListFilterMenuItems(props: {
     },
   ];
 
+  if (props.projectCollectionsAvailable) {
+    items.push({
+      id: "collections",
+      title: "Collections",
+      items: props.projectCollectionScopeOptions.map((option) => ({
+        id: `collection:${mobileProjectCollectionScopeKey(option.scope)}`,
+        title: `${option.label} (${option.count})`,
+        selected:
+          mobileProjectCollectionScopeKey(option.scope) ===
+          mobileProjectCollectionScopeKey(props.projectCollectionScope),
+        onPress: () => props.onProjectCollectionScopeChange(option.scope),
+      })),
+    });
+  }
+
   if (props.projects.length > 0) {
     items.push({
       id: "project",
@@ -67,7 +91,7 @@ export function buildHomeListFilterMenuItems(props: {
           id: "project:all",
           title: "All projects",
           subtitle: "Show threads from every project",
-          selected: props.selectedProjectKey === null,
+          selected: props.projectCollectionScope.kind === "all",
           onPress: () => props.onProjectChange(null),
         },
         ...props.projects.map((project) => ({
@@ -77,6 +101,14 @@ export function buildHomeListFilterMenuItems(props: {
           onPress: () => props.onProjectChange(project.key),
         })),
       ],
+    });
+  }
+
+  if (props.canManageProjectCollections) {
+    items.push({
+      id: "manage-collections",
+      title: "Manage collections",
+      onPress: props.onManageProjectCollections,
     });
   }
 

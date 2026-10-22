@@ -1,168 +1,76 @@
-import * as NodeAssert from "node:assert/strict";
+import { AtomRegistry } from "effect/reactivity";
+import * as AsyncResult from "effect/reactivity/AsyncResult";
+import { afterAll, afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { EnvironmentId, ServerConfig, ServerNpmReleaseError } from "@t3tools/contracts";
-import { expect, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
-import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
-import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
-import { vi } from "vite-plus/test";
+import { npmReleaseAtom } from "./npmRelease";
 
-import { npmReleaseAtom, npmReleaseFailureMessage } from "./npmRelease";
-import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
-import { serverEnvironment } from "./server";
+const version = "0.1.2-3";
+const fetchMock = vi.fn<typeof fetch>();
+vi.stubGlobal("fetch", fetchMock);
 
-vi.mock("./server", () => ({
-  serverEnvironment: { npmRelease: vi.fn(), configValueAtom: vi.fn() },
-}));
-vi.mock("./presentation", () => ({
-  environmentSummaries: { connectedEnvironmentIdsAtom: Atom.make(["first", "second"]) },
-}));
-vi.mock("./primaryEnvironment", () => ({
-  primaryEnvironmentIdAtom: Atom.make<EnvironmentId | null>(null),
-}));
-
-const version = "0.0.46-nightly.20261012.3021";
-const first = EnvironmentId.make("first");
-const second = EnvironmentId.make("second");
-const decodeServerConfig = Schema.decodeUnknownSync(ServerConfig);
-
-const configFor = (environmentId: EnvironmentId | null, supported = true) =>
-  decodeServerConfig({
-    environment: {
-      environmentId,
-      label: environmentId,
-      platform: { os: "linux", arch: "x64" },
-      serverVersion: version,
-      capabilities: {
-        repositoryIdentity: true,
-        ...(supported ? { npmReleaseLookup: true } : {}),
-      },
-    },
-    auth: {
-      policy: "loopback-browser",
-      bootstrapMethods: [],
-      sessionMethods: [],
-      sessionCookieName: "test",
-    },
-    cwd: "/test",
-    keybindingsConfigPath: "/test/keybindings.json",
-    keybindings: [],
-    issues: [],
-    providers: [],
-    availableEditors: [],
-    observability: {
-      logsDirectoryPath: "/test/logs",
-      localTracingEnabled: false,
-      otlpTracesEnabled: false,
-      otlpMetricsEnabled: false,
-    },
-    settings: {},
-  });
-
-function setup(supported = true) {
-  vi.mocked(serverEnvironment.configValueAtom)
-    .mockReset()
-    .mockImplementation((environmentId) => Atom.make(configFor(environmentId, supported)));
-  return vi.mocked(serverEnvironment.npmRelease).mockReset();
+async function settledRelease() {
+  const atom = npmReleaseAtom("latest");
+  const registry = AtomRegistry.make();
+  const unmount = registry.mount(atom);
+  try {
+    await vi.waitFor(() => {
+      const result = registry.get(atom);
+      expect(AsyncResult.isInitial(result) || result.waiting).toBe(false);
+    });
+    return registry.get(atom);
+  } finally {
+    unmount();
+    registry.dispose();
+  }
 }
 
-it.effect(
-  "resolves track metadata through the primary environment and follows primary changes",
-  () =>
-    Effect.gen(function* () {
-      const query = setup();
-      query.mockImplementation(({ environmentId }) =>
-        Atom.make(
-          AsyncResult.success({ version, databaseMigration: environmentId === first ? 42 : 43 }),
-        ),
-      );
-      const registry = AtomRegistry.make();
-      const release = npmReleaseAtom("nightly");
-      NodeAssert.ok(
-        Atom.isWritable<EnvironmentId | null, EnvironmentId | null>(primaryEnvironmentIdAtom),
-        "Expected the mocked primary environment atom to be writable.",
-      );
-      registry.set(primaryEnvironmentIdAtom, first);
-      const unmount = registry.mount(release);
-      try {
-        expect(
-          yield* AtomRegistry.getResult(registry, release, { suspendOnWaiting: true }),
-        ).toEqual({
-          version,
-          databaseMigration: 42,
-        });
-        registry.set(primaryEnvironmentIdAtom, second);
-        expect(
-          yield* AtomRegistry.getResult(registry, release, { suspendOnWaiting: true }),
-        ).toEqual({
-          version,
-          databaseMigration: 43,
-        });
-      } finally {
-        unmount();
-        registry.dispose();
-      }
-    }),
-);
+describe("npmReleaseAtom", () => {
+  afterEach(() => {
+    fetchMock.mockReset();
+  });
 
-it.effect("resolves track metadata through a supporting server when there is no primary", () =>
-  Effect.gen(function* () {
-    const query = setup();
-    vi.mocked(serverEnvironment.configValueAtom).mockImplementation((environmentId) =>
-      Atom.make(
-        environmentId === first ? configFor(environmentId, false) : configFor(environmentId),
-      ),
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the fork release and its migration metadata without tracing headers", async () => {
+    fetchMock
+      .mockImplementationOnce(async () =>
+        Response.json([{ tag_name: `v${version}`, draft: false, prerelease: false }]),
+      )
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            '[71, "Earlier", Migration0071],\n[72, "Latest", Migration0072],',
+          ),
+      );
+
+    const result = await settledRelease();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requests = fetchMock.mock.calls.map(
+      (call) => new Request(call[0] ?? "", call[1]),
     );
-    query.mockReturnValue(Atom.make(AsyncResult.success({ version })));
-    const registry = AtomRegistry.make();
-    const release = npmReleaseAtom("nightly");
-    const unmount = registry.mount(release);
-    try {
-      expect(yield* AtomRegistry.getResult(registry, release, { suspendOnWaiting: true })).toEqual({
-        version,
-        databaseMigration: undefined,
-      });
-      expect(query).toHaveBeenCalledWith({ environmentId: second, input: { spec: "nightly" } });
-    } finally {
-      unmount();
-      registry.dispose();
-    }
-  }),
-);
-
-it.effect("does not call an unsupported RPC or fetch public npm for an older primary server", () =>
-  Effect.gen(function* () {
-    const query = setup(false);
-    using fetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("Unexpected browser fetch"));
-    const registry = AtomRegistry.make();
-    NodeAssert.ok(
-      Atom.isWritable<EnvironmentId | null, EnvironmentId | null>(primaryEnvironmentIdAtom),
-      "Expected the mocked primary environment atom to be writable.",
+    expect(requests[0]?.url).toBe(
+      "https://api.github.com/repos/YuryYudin/t3code/releases?per_page=100&page=1",
     );
-    registry.set(primaryEnvironmentIdAtom, first);
-    const release = npmReleaseAtom("latest");
-    const unmount = registry.mount(release);
-    try {
-      const error = yield* AtomRegistry.getResult(registry, release).pipe(Effect.flip);
-      expect(npmReleaseFailureMessage(Cause.fail(error))).toContain(
-        "Update it before switching tracks",
-      );
-      expect(query).not.toHaveBeenCalled();
-      expect(fetch).not.toHaveBeenCalled();
-    } finally {
-      unmount();
-      registry.dispose();
-    }
-  }),
-);
+    expect(requests[1]?.url).toBe(
+      `https://raw.githubusercontent.com/YuryYudin/t3code/v${version}/apps/server/src/persistence/Migrations.ts`,
+    );
+    expect(
+      requests.every((request) => request.headers.get("traceparent") === null),
+    ).toBe(true);
+    expect(AsyncResult.getOrElse(result, () => null)).toEqual({
+      version,
+      databaseMigration: 72,
+    });
+  });
 
-it("only displays the safe release error, not arbitrary transport diagnostics", () => {
-  const error = new ServerNpmReleaseError({ reason: "Install npm on the server's PATH." });
-  expect(npmReleaseFailureMessage(Cause.fail(error))).toBe(error.message);
-  expect(
-    npmReleaseFailureMessage(Cause.fail(new Error("sensitive transport details"))),
-  ).not.toContain("sensitive");
+  it("leaves a failed release check unknown", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const result = await settledRelease();
+
+    expect(AsyncResult.isFailure(result)).toBe(true);
+  });
 });

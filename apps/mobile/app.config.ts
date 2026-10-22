@@ -2,6 +2,7 @@ import type { ExpoConfig } from "expo/config";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { resolveForkDistribution } from "./forkDistribution.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -11,6 +12,11 @@ Object.assign(process.env, repoEnv);
 process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const forkDistribution = resolveForkDistribution(
+  repoEnv.T3CODE_MOBILE_DISTRIBUTION,
+  APP_VARIANT,
+  repoEnv.T3CODE_MOBILE_FORK_VERSION,
+);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
@@ -117,7 +123,15 @@ function resolveAppVariant(value: string | undefined): AppVariant {
   }
 }
 
-const variant = VARIANT_CONFIG[APP_VARIANT];
+const variant = forkDistribution
+  ? {
+      ...VARIANT_CONFIG[APP_VARIANT],
+      appName: forkDistribution.appName,
+      scheme: forkDistribution.scheme,
+      androidPackage: forkDistribution.androidPackage,
+      iosBundleIdentifier: forkDistribution.iosBundleIdentifier,
+    }
+  : VARIANT_CONFIG[APP_VARIANT];
 // Copied thread links open the app. app.t3.codes/.well-known lists every variant's identifiers.
 const HOSTED_APP_HOST = "app.t3.codes";
 const iosBundleIdentifier = isIosPersonalTeamBuild
@@ -246,7 +260,8 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
+    // Fork binaries never take upstream OTAs; see forkDistribution.ts.
+    enabled: forkDistribution ? false : repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
     url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
@@ -460,7 +475,9 @@ const config: ExpoConfig = {
     // MainActivity mods run in reverse order; extend the tablet-orientation override.
     "./plugins/withAndroidWindowDisplayMetrics.cjs",
     "./plugins/withAndroidTabletOrientation.cjs",
+    "./plugins/withAndroidPinnedFbjni.cjs",
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
+    ...(forkDistribution ? [forkDistribution.signingPlugin] : []),
   ],
   extra: {
     appVariant: APP_VARIANT,
@@ -485,16 +502,26 @@ const config: ExpoConfig = {
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-      observe: { endpointUrl: observeEndpointUrl },
-    },
+    ...(forkDistribution
+      ? {}
+      : {
+          eas: {
+            projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+            observe: { endpointUrl: observeEndpointUrl },
+          },
+        }),
   },
-  owner: "pingdotgg",
+  ...(forkDistribution ? {} : { owner: "pingdotgg" }),
   experiments: {
     // Metro only runs babel-plugin-react-compiler when this is set; see src/reactCompilerCoverage.test.ts.
     reactCompiler: true,
   },
 };
+
+// Applied after the literal so upstream version bumps don't conflict with the fork.
+if (forkDistribution?.androidVersionName !== undefined) {
+  config.version = forkDistribution.androidVersionName;
+  config.android = { ...config.android, versionCode: forkDistribution.androidVersionCode };
+}
 
 export default config;

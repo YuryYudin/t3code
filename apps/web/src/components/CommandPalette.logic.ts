@@ -34,6 +34,8 @@ import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { type ReactNode } from "react";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import { canOpenWindowForScope, openWindowForScope, type WindowScopeBridge } from "../windowScope";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 
 export const RECENT_THREAD_LIMIT = 12;
 const NO_THREAD_KEYS: ReadonlySet<string> = new Set();
@@ -810,6 +812,30 @@ export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): str
     case "submenu-browse":
       return "Enter path (e.g. ~/projects/my-app)";
   }
+}
+
+/**
+ * Desktop-only "New window" command. Opens another window pinned to the scope
+ * this window is showing; null on surfaces whose shell cannot open windows.
+ */
+export function buildNewWindowActionItem(input: {
+  readonly scope: ProjectCollectionScope;
+  readonly icon: ReactNode;
+  readonly bridge?: WindowScopeBridge;
+}): CommandPaletteActionItem | null {
+  if (!canOpenWindowForScope(input.bridge)) {
+    return null;
+  }
+  return {
+    kind: "action",
+    value: "action:new-window",
+    searchTerms: ["new window", "open window", "window", "desktop"],
+    title: "New window",
+    icon: input.icon,
+    run: async () => {
+      openWindowForScope(input.scope, input.bridge);
+    },
+  };
 }
 
 export function getEnvironmentBrowsePlatform(os: string | null | undefined): string {

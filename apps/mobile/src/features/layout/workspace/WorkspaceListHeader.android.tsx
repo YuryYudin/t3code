@@ -3,6 +3,7 @@ import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { BackHandler, Keyboard } from "react-native";
 
 import { AppBar } from "../../../components/ui/AppBar";
+import { ProjectCollectionScopeStrip } from "../../home/ProjectCollectionScopeStrip";
 import { useWorkspaceConnectionState } from "../../../state/workspace";
 import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardCommands";
 import { WorkspaceBrandTitle } from "./WorkspaceBrandTitle";
@@ -57,34 +58,37 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
   }, [closeSearch, searching, listFocused, navigation, isTabActive]);
 
   return (
-    <AppBar
-      title="T3 Code"
-      titleContent={
-        <WorkspaceBrandTitle
-          accessibilityLabel={props.accessibilityLabel}
-          onOpenEnvironments={props.onOpenEnvironments}
-        />
-      }
-      search={{
-        value: search.value,
-        onChangeText: onSearchQueryChange,
-        placeholder: search.placeholder,
-        accessibilityLabel: search.accessibilityLabel,
-        active: searching,
-        onOpen: openSearch,
-        onClose: closeSearch,
-      }}
-      menus={
-        connectionState.hasConnections
-          ? [
-              {
-                title: "Filter threads",
-                icon: workspaceListFilterIcon(props.filter.customized),
-                items: props.filter.items,
-              },
-            ]
-          : undefined
-      }
-    />
+    <>
+      <AppBar
+        title="T3 Code"
+        titleContent={
+          <WorkspaceBrandTitle
+            accessibilityLabel={props.accessibilityLabel}
+            onOpenEnvironments={props.onOpenEnvironments}
+          />
+        }
+        search={{
+          value: search.value,
+          onChangeText: onSearchQueryChange,
+          placeholder: search.placeholder,
+          accessibilityLabel: search.accessibilityLabel,
+          active: searching,
+          onOpen: openSearch,
+          onClose: closeSearch,
+        }}
+        menus={
+          connectionState.hasConnections
+            ? [
+                {
+                  title: "Filter threads",
+                  icon: workspaceListFilterIcon(props.filter.customized),
+                  items: props.filter.items,
+                },
+              ]
+            : undefined
+        }
+      />
+      {props.collectionStrip ? <ProjectCollectionScopeStrip {...props.collectionStrip} /> : null}
+    </>
   );
 }

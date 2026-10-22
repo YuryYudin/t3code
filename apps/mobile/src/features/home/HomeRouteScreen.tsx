@@ -1,15 +1,19 @@
+import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
 import { uuidv4 } from "../../lib/uuid";
 import { ThreadUndoNotice } from "./ThreadUndoNotice";
-import { use } from "react";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
-import { useMemo, useState } from "react";
-import { Platform } from "react-native";
+import { DEFAULT_PROJECT_COLLECTIONS_DOCUMENT } from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import { AsyncResult } from "effect/reactivity";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { Modal, Platform } from "react-native";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 
 import { useProjects } from "../../state/entities";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { steadyNavigationThreadShellsAtom } from "../../state/threads";
 import { useLaunchingThreads, usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
@@ -27,10 +31,11 @@ import {
   useHomeRouteVisible,
 } from "./home-route-visibility";
 import {
-  buildHomeProjectScopes,
-  resolveHomeProjectFilterScope,
-  sortHomeProjectScopes,
-} from "./homeThreadList";
+  buildMobileProjectCollectionsModel,
+  mobileProjectCollectionScopeKey,
+} from "./mobileProjectCollections";
+import { ProjectCollectionsSheet } from "../projects/ProjectCollectionsSheet";
+import { useProjectCollections } from "../projects/useProjectCollections";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
@@ -43,6 +48,28 @@ import { buildHomeListFilterMenuItems, homeListFilterEnvironments } from "./home
 
 export function HomeRouteScreen() {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
+  const { layout } = useAdaptiveWorkspaceLayout();
+  return layout.usesSplitView && nativePrimaryColumn === null ? (
+    <SplitHomeRouteScreen />
+  ) : (
+    <CompactHomeRouteScreen />
+  );
+}
+
+function SplitHomeRouteScreen() {
+  const { startNewTask } = useAdaptiveWorkspaceLayout();
+  const { state: catalogState } = useWorkspaceState();
+  const navigation = useNavigation();
+  return (
+    <WorkspaceListEmptyDetail
+      hasConnections={catalogState.hasConnections}
+      onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
+      onStartNewTask={startNewTask}
+    />
+  );
+}
+
+function CompactHomeRouteScreen() {
   const { layout, setPrimarySidebarSearchQuery, startNewTask } = useAdaptiveWorkspaceLayout();
   const { primarySidebarSearchQuery } = useWorkspacePaneState();
   const selectDetail = useSelectWorkspaceDetail();
@@ -70,24 +97,41 @@ export function HomeRouteScreen() {
   // Split layouts keep the query; only the stacked layout opens the thread over the list.
   // Android's search field keeps its own open state, which a cleared query would leave open.
   const clearsSearchOnOpen = Platform.OS !== "android" && !layout.usesSplitView;
-  const selectThreadRoute = (params: ReactNavigation.RootParamList["Thread"]) => {
-    if (searchQuery !== "" && clearsSearchOnOpen && workspace)
-      runWhenHomeCovered(() => workspace.cancelSearch("threads"));
-    selectDetail({ name: "Thread", params });
-  };
-  const handleSelectThread = (thread: EnvironmentThreadShell) =>
-    selectThreadRoute({ environmentId: String(thread.environmentId), threadId: String(thread.id) });
-  const handleNewThreadOnBranch = (thread: EnvironmentThreadShell) => {
-    selectThreadRoute({
-      draft: {
-        requestId: uuidv4(),
+  const selectThreadRoute = useCallback(
+    (params: ReactNavigation.RootParamList["Thread"]) => {
+      if (searchQuery !== "" && clearsSearchOnOpen && workspace)
+        runWhenHomeCovered(() => workspace.cancelSearch("threads"));
+      selectDetail({ name: "Thread", params });
+    },
+    [clearsSearchOnOpen, searchQuery, selectDetail, workspace],
+  );
+  const handleSelectThread = useCallback(
+    (thread: EnvironmentThreadShell) =>
+      selectThreadRoute({
         environmentId: String(thread.environmentId),
-        projectId: String(thread.projectId),
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-      },
-    });
-  };
+        threadId: String(thread.id),
+      }),
+    [selectThreadRoute],
+  );
+  const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
+  const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const projectCollections = useProjectCollections();
+  const handleNewThreadOnBranch = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      selectThreadRoute({
+        draft: {
+          requestId: uuidv4(),
+          environmentId: String(thread.environmentId),
+          projectId: String(thread.projectId),
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+        },
+      });
+    },
+    [selectThreadRoute],
+  );
 
   const {
     archiveThread,
@@ -106,7 +150,10 @@ export function HomeRouteScreen() {
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } =
     usePendingTaskListActions(selectThreadRoute);
-  const environments = homeListFilterEnvironments(workspaceEnvironments);
+  const environments = useMemo(
+    () => homeListFilterEnvironments(workspaceEnvironments),
+    [workspaceEnvironments],
+  );
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
@@ -114,46 +161,108 @@ export function HomeRouteScreen() {
   const {
     options: listOptions,
     setSelectedEnvironmentId,
-    setSelectedProjectKey,
+    setSelectedProjectKey: setHomeSelectedProjectKey,
   } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
-  const projectScopes = useMemo(
+  const storedProjectCollectionScope = AsyncResult.isSuccess(preferencesResult)
+    ? (preferencesResult.value.projectCollectionScope ?? ({ kind: "all" } as const))
+    : ({ kind: "all" } as const);
+  const requestedProjectCollectionScope = scopeOverride ?? storedProjectCollectionScope;
+  const resolvedProjectCollectionScope = useMemo<ProjectCollectionScope>(() => {
+    if (requestedProjectCollectionScope.kind !== "project") {
+      return requestedProjectCollectionScope;
+    }
+    return {
+      kind: "project",
+      projectKey:
+        resolveScratchProjectScopeKey(requestedProjectCollectionScope.projectKey, projects, {
+          sidebarProjectGroupingMode: listOptions.projectGroupingMode,
+          sidebarProjectGroupingOverrides: {},
+        }) ?? requestedProjectCollectionScope.projectKey,
+    };
+  }, [listOptions.projectGroupingMode, projects, requestedProjectCollectionScope]);
+  const projectCollectionModel = useMemo(
     () =>
-      buildHomeProjectScopes({
+      buildMobileProjectCollectionsModel({
         projects,
+        threads,
+        pendingTasks,
         environmentId: selectedEnvironmentId,
         projectGroupingMode: listOptions.projectGroupingMode,
+        projectSortOrder: listOptions.projectSortOrder,
+        document: projectCollections.document ?? DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        scope: resolvedProjectCollectionScope,
       }),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
-  );
-  const projectFilterOptions = useMemo(
-    () =>
-      pickableProjectGroups(
-        sortHomeProjectScopes({
-          scopes: projectScopes,
-          threads,
-          pendingTasks: [],
-          projectSortOrder: "updated_at",
-        }),
-      ).map((scope) => ({
-        key: scope.key,
-        label: scope.title,
-      })),
-    [projectScopes, threads],
+    [
+      listOptions.projectGroupingMode,
+      listOptions.projectSortOrder,
+      pendingTasks,
+      projectCollections.document,
+      projects,
+      resolvedProjectCollectionScope,
+      selectedEnvironmentId,
+      threads,
+    ],
   );
   const selectedProjectKey =
-    resolveHomeProjectFilterScope(projectScopes, projects, listOptions)?.key ?? null;
-
-  if (layout.usesSplitView && !nativePrimaryColumn) {
-    return (
-      <WorkspaceListEmptyDetail
-        hasConnections={catalogState.hasConnections}
-        onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
-        onStartNewTask={startNewTask}
-      />
-    );
-  }
-
+    projectCollectionModel.activeScope.kind === "project"
+      ? projectCollectionModel.activeScope.projectKey
+      : null;
+  const projectFilterOptions = useMemo(
+    () =>
+      projectCollectionModel.projectChoices.map((project) => ({
+        key: project.projectKey,
+        label: project.label,
+      })),
+    [projectCollectionModel.projectChoices],
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reconciles the persisted collection scope with the new-task project filter
+  useEffect(() => {
+    const activeProjectKey =
+      projectCollectionModel.activeScope.kind === "project"
+        ? projectCollectionModel.activeScope.projectKey
+        : null;
+    if (
+      AsyncResult.isSuccess(preferencesResult) &&
+      listOptions.selectedProjectKey !== activeProjectKey
+    ) {
+      setHomeSelectedProjectKey(activeProjectKey);
+    }
+    if (projectCollections.document === null) return;
+    if (
+      mobileProjectCollectionScopeKey(requestedProjectCollectionScope) !==
+      mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
+    ) {
+      setScopeOverride(projectCollectionModel.activeScope);
+      if (AsyncResult.isSuccess(preferencesResult)) {
+        savePreferences({ projectCollectionScope: projectCollectionModel.activeScope });
+      }
+    }
+  }, [
+    preferencesResult,
+    listOptions.selectedProjectKey,
+    projectCollectionModel.activeScope,
+    projectCollections.document,
+    savePreferences,
+    setHomeSelectedProjectKey,
+    requestedProjectCollectionScope,
+  ]);
+  const setProjectCollectionScope = useCallback(
+    (scope: ProjectCollectionScope) => {
+      setScopeOverride(scope);
+      setHomeSelectedProjectKey(scope.kind === "project" ? scope.projectKey : null);
+      savePreferences({ projectCollectionScope: scope });
+    },
+    [savePreferences, setHomeSelectedProjectKey],
+  );
+  const setSelectedProjectKey = useCallback(
+    (projectKey: string | null) => {
+      setProjectCollectionScope(
+        projectKey === null ? { kind: "all" } : { kind: "project", projectKey },
+      );
+    },
+    [setProjectCollectionScope],
+  );
   return (
     <AndroidHomeFabLayout onStartNewTask={startNewTask}>
       <>
@@ -167,15 +276,31 @@ export function HomeRouteScreen() {
             accessibilityLabel: "Search threads",
           }}
           filter={{
-            customized: selectedEnvironmentId !== null || selectedProjectKey !== null,
+            customized:
+              selectedEnvironmentId !== null || projectCollectionModel.activeScope.kind !== "all",
             items: buildHomeListFilterMenuItems({
               environments,
               projects: projectFilterOptions,
               selectedEnvironmentId,
               selectedProjectKey,
+              projectCollectionScope: projectCollectionModel.activeScope,
+              projectCollectionScopeOptions: projectCollectionModel.scopeOptions,
+              projectCollectionsAvailable: projectCollections.document !== null,
+              canManageProjectCollections: projectCollections.document !== null,
               onEnvironmentChange: setSelectedEnvironmentId,
               onProjectChange: setSelectedProjectKey,
+              onProjectCollectionScopeChange: setProjectCollectionScope,
+              onManageProjectCollections: () => setProjectCollectionsOpen(true),
             }),
+          }}
+          collectionStrip={{
+            projectCollectionScope: projectCollectionModel.activeScope,
+            projectCollectionScopeOptions: projectCollectionModel.scopeOptions,
+            projectCollectionsAvailable: projectCollections.document !== null,
+            canManageProjectCollections: projectCollections.document !== null,
+            onProjectCollectionScopeChange: setProjectCollectionScope,
+            onManageProjectCollections: () => setProjectCollectionsOpen(true),
+            onStartNewProject: () => navigation.navigate("AddProject"),
           }}
         />
 
@@ -214,17 +339,29 @@ export function HomeRouteScreen() {
             });
           }}
           onStartNewTask={startNewTask}
-          pendingTasks={pendingTasks}
+          pendingTasks={projectCollectionModel.visiblePendingTasks}
           projectGroupingMode={listOptions.projectGroupingMode}
-          projects={projects}
+          projects={projectCollectionModel.visibleProjects}
           projectSortOrder={listOptions.projectSortOrder}
           savedConnectionsById={savedConnectionsById}
           searchQuery={searchQuery}
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
-          threads={threads}
+          threads={projectCollectionModel.visibleThreads}
           visible={visible}
         />
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setProjectCollectionsOpen(false)}
+          presentationStyle="pageSheet"
+          visible={projectCollectionsOpen && projectCollections.document !== null}
+        >
+          <ProjectCollectionsSheet
+            onClose={() => setProjectCollectionsOpen(false)}
+            projects={projectCollectionModel.projects}
+            sync={projectCollections}
+          />
+        </Modal>
         <ThreadUndoNotice visible={visible} />
       </>
     </AndroidHomeFabLayout>
