@@ -23,6 +23,8 @@
       // electron-builder loads the macOS signer by path.
       "entry": [
         "diagnose-apple-notarization.ts",
+        // These fixture scripts are injected into a browser page by path.
+        "fixtures/issue-16534/*.js",
         "fork-integration.ts",
         "knip-schemas.ts",
         "mobile-native-client.ts",
