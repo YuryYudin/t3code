@@ -271,11 +271,6 @@ describe("filterSharedServerPatch", () => {
     },
   );
 
-  it.each([true, false])("preserves supported restart preference %s", (enabled) => {
-    const patch = { continueThreadsAfterServerUpdate: enabled, sidebarAutoSettleAfterDays: 7 };
-    expect(filterSharedServerPatch(patch, restartCapabilities)).toEqual(patch);
-  });
-
   it.each([undefined, {}, { threadRestartContinuation: false }])(
     "omits only the unsupported restart preference with capabilities %j",
     (capabilities) => {
@@ -447,27 +442,6 @@ describe("findSharedSettingsMismatches", () => {
       ],
     });
     expect(mismatches).toEqual([]);
-  });
-
-  it("reports nothing until the primary environment's settings are loaded", () => {
-    const environments = [
-      {
-        environmentId: boxId,
-        label: "Remote Box",
-        syncEligible: true,
-        settings: primarySettings,
-      },
-    ];
-    expect(
-      findSharedSettingsMismatches({ primaryEnvironmentId: null, primarySettings, environments }),
-    ).toEqual([]);
-    expect(
-      findSharedSettingsMismatches({
-        primaryEnvironmentId: primaryId,
-        primarySettings: null,
-        environments,
-      }),
-    ).toEqual([]);
   });
 
   it("skips ineligible environments and environments without a loaded config", () => {

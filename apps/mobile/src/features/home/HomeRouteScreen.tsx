@@ -1,3 +1,6 @@
+import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
+import { uuidv4 } from "../../lib/uuid";
+import { ThreadUndoNotice } from "./ThreadUndoNotice";
 import { Toolbar } from "../../components/ui/Toolbar";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import * as Arr from "effect/Array";
@@ -29,7 +32,7 @@ import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
-import { useHomeThreadSelection } from "./home-thread-navigation";
+import { useHomeThreadRouteSelection, useHomeThreadSelection } from "./home-thread-navigation";
 import {
   buildMobileProjectCollectionsModel,
   mobileProjectCollectionScopeKey,
@@ -52,7 +55,7 @@ export function HomeRouteScreen() {
 }
 
 function SplitHomeRouteScreen() {
-  const { panes } = useAdaptiveWorkspaceLayout();
+  const { panes, startNewTask } = useAdaptiveWorkspaceLayout();
   const { state: catalogState } = useWorkspaceState();
   const navigation = useNavigation();
 
@@ -78,7 +81,7 @@ function SplitHomeRouteScreen() {
           <Toolbar.Button
             accessibilityLabel="New task"
             icon="square.and.pencil"
-            onPress={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+            onPress={startNewTask}
           />
         </Toolbar>
       ) : null}
@@ -94,9 +97,7 @@ function SplitHomeRouteScreen() {
             : undefined
         }
         onStartNewTask={
-          Platform.OS === "android" && panes.primarySidebarVisible
-            ? undefined
-            : () => navigation.navigate("NewTaskSheet", { screen: "NewTask" })
+          Platform.OS === "android" && panes.primarySidebarVisible ? undefined : startNewTask
         }
       />
     </>
@@ -112,7 +113,8 @@ function CompactHomeRouteScreen({
   const columnMetrics = useNativeColumnLayoutMetrics();
   const deviceType = useDeviceType();
   const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
-  const { primarySidebarSearchQuery, setPrimarySidebarSearchQuery } = useAdaptiveWorkspaceLayout();
+  const { primarySidebarSearchQuery, setPrimarySidebarSearchQuery, startNewTask } =
+    useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   // Streaming turns rewrite thread shells many times a second. While a Thread
   // covers Home, rebuilding this list is invisible work.
@@ -141,11 +143,12 @@ function CompactHomeRouteScreen({
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const projectCollections = useProjectCollections();
+  const selectThreadRoute = useHomeThreadRouteSelection();
   const handleNewThreadOnBranch = useCallback(
     (thread: EnvironmentThreadShell) => {
-      navigation.navigate("NewTaskSheet", {
-        screen: "NewTaskDraft",
-        params: {
+      selectThreadRoute({
+        draft: {
+          requestId: uuidv4(),
           environmentId: String(thread.environmentId),
           projectId: String(thread.projectId),
           branch: thread.branch,
@@ -153,7 +156,7 @@ function CompactHomeRouteScreen({
         },
       });
     },
-    [navigation],
+    [selectThreadRoute],
   );
 
   useEffect(() => {
@@ -203,6 +206,20 @@ function CompactHomeRouteScreen({
   const storedProjectCollectionScope = AsyncResult.isSuccess(preferencesResult)
     ? (preferencesResult.value.projectCollectionScope ?? ({ kind: "all" } as const))
     : ({ kind: "all" } as const);
+  const requestedProjectCollectionScope = scopeOverride ?? storedProjectCollectionScope;
+  const resolvedProjectCollectionScope = useMemo<ProjectCollectionScope>(() => {
+    if (requestedProjectCollectionScope.kind !== "project") {
+      return requestedProjectCollectionScope;
+    }
+    return {
+      kind: "project",
+      projectKey:
+        resolveScratchProjectScopeKey(requestedProjectCollectionScope.projectKey, projects, {
+          sidebarProjectGroupingMode: listOptions.projectGroupingMode,
+          sidebarProjectGroupingOverrides: {},
+        }) ?? requestedProjectCollectionScope.projectKey,
+    };
+  }, [listOptions.projectGroupingMode, projects, requestedProjectCollectionScope]);
   const projectCollectionModel = useMemo(
     () =>
       buildMobileProjectCollectionsModel({
@@ -213,7 +230,7 @@ function CompactHomeRouteScreen({
         projectGroupingMode: listOptions.projectGroupingMode,
         projectSortOrder: listOptions.projectSortOrder,
         document: projectCollections.document ?? DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
-        scope: scopeOverride ?? storedProjectCollectionScope,
+        scope: resolvedProjectCollectionScope,
       }),
     [
       listOptions.projectGroupingMode,
@@ -221,9 +238,8 @@ function CompactHomeRouteScreen({
       pendingTasks,
       projectCollections.document,
       projects,
-      scopeOverride,
+      resolvedProjectCollectionScope,
       selectedEnvironmentId,
-      storedProjectCollectionScope,
       threads,
     ],
   );
@@ -241,9 +257,8 @@ function CompactHomeRouteScreen({
   );
   useEffect(() => {
     if (projectCollections.document === null) return;
-    const requested = scopeOverride ?? storedProjectCollectionScope;
     if (
-      mobileProjectCollectionScopeKey(requested) !==
+      mobileProjectCollectionScopeKey(requestedProjectCollectionScope) !==
       mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
     ) {
       setScopeOverride(projectCollectionModel.activeScope);
@@ -256,8 +271,7 @@ function CompactHomeRouteScreen({
     projectCollectionModel.activeScope,
     projectCollections.document,
     savePreferences,
-    scopeOverride,
-    storedProjectCollectionScope,
+    requestedProjectCollectionScope,
   ]);
   const setProjectCollectionScope = useCallback(
     (scope: ProjectCollectionScope) => {
@@ -277,7 +291,7 @@ function CompactHomeRouteScreen({
   return (
     <AndroidHomeFabLayout
       disabled={workspace !== null && Platform.OS !== "android"}
-      onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+      onStartNewTask={startNewTask}
     >
       <>
         {/* Restore the header after leaving split view; screen options are
@@ -300,7 +314,6 @@ function CompactHomeRouteScreen({
           />
         )}
         <HomeHeader
-          usesWorkspaceToolbar={workspace !== null}
           environments={environments}
           projects={projectFilterOptions}
           searchQuery={searchQuery}
@@ -327,8 +340,8 @@ function CompactHomeRouteScreen({
             })
           }
           onSearchQueryChange={setSearchQuery}
-          onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
-          onStartNewProject={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
+          onStartNewTask={startNewTask}
+          onStartNewProject={() => navigation.navigate("AddProject")}
         />
 
         <HomeScreen
@@ -366,16 +379,16 @@ function CompactHomeRouteScreen({
           onDeletePendingTask={confirmDeletePendingTask}
           onNewThreadOnBranch={handleNewThreadOnBranch}
           onNewThreadInProject={(project) => {
-            navigation.navigate("NewTaskSheet", {
-              screen: "NewTaskDraft",
-              params: {
+            selectThreadRoute({
+              draft: {
+                requestId: uuidv4(),
                 environmentId: String(project.environmentId),
                 projectId: String(project.id),
                 title: project.title,
               },
             });
           }}
-          onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
+          onStartNewTask={startNewTask}
           pendingTasks={projectCollectionModel.visiblePendingTasks}
           projectGroupingMode={listOptions.projectGroupingMode}
           projects={projectCollectionModel.visibleProjects}
@@ -398,6 +411,7 @@ function CompactHomeRouteScreen({
             sync={projectCollections}
           />
         </Modal>
+        <ThreadUndoNotice visible={visible} />
       </>
     </AndroidHomeFabLayout>
   );

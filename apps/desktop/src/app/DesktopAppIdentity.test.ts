@@ -238,7 +238,7 @@ describe("DesktopAppIdentity", () => {
   });
 
   it.effect.each([
-    { stage: "Latest", environment: {} },
+    { stage: "Latest", displayName: "T3 Code", environment: {} },
     {
       stage: "Nightly",
       displayName: "T3 Code (Nightly)",
@@ -267,10 +267,7 @@ describe("DesktopAppIdentity", () => {
           assert.isDefined(runtimeName);
           assert.equal(runtimeName, `T3 Code ${stage}`);
           assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
-          assert.equal(
-            calls.setAboutPanelOptions[0]?.applicationName,
-            stage === "Latest" ? "T3 Code" : `T3 Code (${stage})`,
-          );
+          assert.equal(calls.setAboutPanelOptions[0]?.applicationName, displayName);
         }),
         { calls, environment },
       );

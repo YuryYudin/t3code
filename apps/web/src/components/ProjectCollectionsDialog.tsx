@@ -18,9 +18,9 @@ import {
 } from "@t3tools/contracts";
 import { DynamicIcon } from "lucide-react/dynamic";
 import { GripVerticalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 
-import { useProjectCollections, type ProjectCollectionsView } from "~/hooks/useProjectCollections";
+import type { ProjectCollectionsView } from "~/hooks/useProjectCollections";
 import { cn, randomUUID } from "~/lib/utils";
 import { projectIconColorClassName } from "~/projectIconOptions";
 import { ProjectCollectionMoveMenu } from "./ProjectCollectionMoveMenu";
@@ -155,13 +155,6 @@ function createRandomProjectCollectionId() {
   return ProjectCollectionId.make(randomUUID());
 }
 
-export function ProjectCollectionsDialog<TProject extends EnvironmentProject>(
-  props: ProjectCollectionsDialogProps<TProject>,
-) {
-  const view = useProjectCollections();
-  return <ProjectCollectionsDialogView {...props} view={view} />;
-}
-
 export function ProjectCollectionsDialogView<TProject extends EnvironmentProject>({
   open,
   onOpenChange,
@@ -222,17 +215,10 @@ export function ProjectCollectionsDialogView<TProject extends EnvironmentProject
   }, [onCollectionCreated, pendingAction, view.confirmedDocument, view.phase]);
 
   const document = view.document;
-  const assignmentByProjectKey = useMemo(
-    () =>
-      new Map<string, ProjectCollectionId>(
-        document?.assignments.map((assignment) => [assignment.projectKey, assignment.collectionId]),
-      ),
-    [document],
+  const assignmentByProjectKey = new Map<string, ProjectCollectionId>(
+    document?.assignments.map((assignment) => [assignment.projectKey, assignment.collectionId]),
   );
-  const projectsByKey = useMemo(
-    () => new Map(projects.map((project) => [projectKey(project), project])),
-    [projects],
-  );
+  const projectsByKey = new Map(projects.map((project) => [projectKey(project), project]));
   const isUnsettled = phaseIsUnsettled(view.phase);
   const mutationDisabled = !view.canMutate || pendingAction !== null;
 

@@ -21,6 +21,7 @@ import {
   readJsonFile,
   recoveryCommandId,
   requiredReleaseAssets,
+  resolveCliNodeVersion,
   targetIdentity,
   validateBootstrap,
   verifyBootstrapPatch,
@@ -29,6 +30,25 @@ import {
 import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 
 const fullSha = "0123456789abcdef0123456789abcdef01234567";
+
+describe("CLI Node version", () => {
+  it("uses the stable source's executable version instead of its general engine range", () => {
+    expect(resolveCliNodeVersion('const SEA_NODE_VERSION = "26.8.2";', "^24.13.1")).toBe("26.8.2");
+  });
+
+  it("uses the manifest pin after upstream centralizes the executable version", () => {
+    expect(
+      resolveCliNodeVersion("const cliNodeVersion = rootPackageJson.engines.node;", "26.12.1"),
+    ).toBe("26.12.1");
+  });
+
+  it.each([undefined, "^26.12.1", "latest", "26.12.1; echo unsafe"])(
+    "rejects a missing or non-exact executable version: %s",
+    (engine) => {
+      expect(() => resolveCliNodeVersion("", engine)).toThrow(/exact Node version/);
+    },
+  );
+});
 
 describe("fork release versions", () => {
   it("keeps the exact upstream stable version before the fork revision", () => {
@@ -435,7 +455,8 @@ describe("Jenkins release pipeline", () => {
       "corepack pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64",
     );
     expect(pipeline).toContain("VP_SELF_SETUP_NO_MODIFY_PATH=1");
-    expect(pipeline).toContain("VP_NODE_VERSION=26.8.2");
+    expect(pipeline).toContain("node scripts/fork-release.ts cli-node-version");
+    expect(pipeline).toContain('VP_NODE_VERSION="$cli_node_version"');
     expect(pipeline).toContain("node scripts/update-release-package-versions.ts ${version}");
     expect(pipeline).toContain("env exec node apps/server/scripts/cli.ts build-exe --verbose");
     expect(pipeline).toContain(

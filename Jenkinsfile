@@ -341,11 +341,22 @@ def buildLinux(String slug, String candidateRef, String version) {
                     command -v convert
                 '''
                 sh "corepack pnpm exec node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version ${version} --output-dir artifacts/linux-x64 --verbose"
+                retry(3) {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        sh '''#!/usr/bin/env bash
+                            set -euo pipefail
+                            vp_home="$PWD/.vite-plus-ci"
+                            curl --silent --show-error --fail-with-body --location https://vite.plus | VP_VERSION=0.3.2 VP_HOME="$vp_home" VP_SELF_SETUP_NO_MODIFY_PATH=1 bash
+                            cli_node_version=$(node scripts/fork-release.ts cli-node-version)
+                            PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" "$vp_home/bin/vp" env on
+                            PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION="$cli_node_version" "$vp_home/bin/vp" env exec node --version
+                        '''
+                    }
+                }
                 sh '''
                     vp_home="$PWD/.vite-plus-ci"
-                    curl --silent --show-error --fail-with-body --location https://vite.plus | VP_VERSION=0.3.2 VP_HOME="$vp_home" VP_SELF_SETUP_NO_MODIFY_PATH=1 bash
-                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" "$vp_home/bin/vp" env on
-                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION=26.8.2 "$vp_home/bin/vp" env exec node apps/server/scripts/cli.ts build-exe --verbose
+                    cli_node_version=$(node scripts/fork-release.ts cli-node-version)
+                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION="$cli_node_version" "$vp_home/bin/vp" env exec node apps/server/scripts/cli.ts build-exe --verbose
                 '''
                 sh """
                     mkdir -p artifacts/cli-resource-monitor/linux-x64 artifacts/wsl-runtime
@@ -381,7 +392,7 @@ def runQuality(String slug, String candidateRef) {
                 fi
                 for project in packages/contracts packages/shared packages/client-runtime apps/server apps/web apps/mobile apps/desktop; do
                     echo "Type check: $project"
-                    corepack pnpm --dir "$project" run typecheck
+                    corepack pnpm exec vp run --filter "./$project" typecheck
                 done
                 test -z "$(git status --porcelain)"
             '''

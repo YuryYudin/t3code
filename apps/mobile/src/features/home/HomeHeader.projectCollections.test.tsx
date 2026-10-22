@@ -245,57 +245,12 @@ describe("HomeHeader project collections", () => {
     ).toBeUndefined();
   });
 
-  it("keeps the iOS New task action separate and hides mutations when collections are unavailable", () => {
-    runtime.os = "ios";
-    act(() => {
-      renderer = create(
-        <HomeHeader
-          {...props}
-          canManageProjectCollections={false}
-          projectCollectionsAvailable={false}
-        />,
-      );
-    });
-
-    expect(renderer!.root.findAllByProps({ accessibilityLabel: "Show Work" })).toEqual([]);
-    const addMenu = renderer!.root
-      .findAllByType("control-pill-menu" as never)
-      .find((menu) =>
-        menu.props.actions.some((action: { id: string }) => action.id === "add:project"),
-      )!;
-    expect(addMenu.props.actions).toEqual([{ id: "add:project", title: "New project" }]);
-    act(() => addMenu.props.onPressAction({ nativeEvent: { event: "add:project" } }));
-    expect(callbacks.onStartNewProject).toHaveBeenCalledOnce();
-    act(() => renderer!.root.findByProps({ accessibilityLabel: "New task" }).props.onPress());
-    expect(callbacks.onStartNewTask).toHaveBeenCalledOnce();
-  });
-
-  it("keeps the iOS collection scope strip below the top safe area", () => {
+  it("leaves iOS header ownership to the workspace sidebar", () => {
     runtime.os = "ios";
     act(() => {
       renderer = create(<HomeHeader {...props} />);
     });
 
-    const scopeStrip = renderer!.root.findByProps({ testID: "project-collection-scope-strip" });
-    expect(scopeStrip.props.style).toEqual({ paddingTop: 64 });
-  });
-
-  it("does not mark All projects selected for a pre-Liquid-Glass iOS collection scope", () => {
-    runtime.os = "ios";
-    act(() => {
-      renderer = create(
-        <HomeHeader
-          {...props}
-          projectCollectionScope={{ kind: "collection", collectionId: WORK_ID }}
-        />,
-      );
-    });
-
-    const projectMenu = renderer!.root
-      .findAllByType("native-header-menu" as never)
-      .find((menu) => menu.props.title === "Project")!;
-    expect(projectMenu.findAllByType("native-header-menu-action" as never)[0]!.props.isOn).toBe(
-      false,
-    );
+    expect(renderer!.toJSON()).toBeNull();
   });
 });

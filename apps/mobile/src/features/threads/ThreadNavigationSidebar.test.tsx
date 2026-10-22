@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const runtime = vi.hoisted(() => ({
+  os: "android",
   projectCollections: null as ProjectCollectionsView | null,
   projects: [] as ReadonlyArray<Record<string, unknown>>,
   threads: [] as ReadonlyArray<EnvironmentThreadShell>,
@@ -36,9 +37,14 @@ const atoms = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  ActivityIndicator: "native-activity-indicator",
   Modal: ({ children, visible }: { readonly children?: unknown; readonly visible: boolean }) =>
     visible ? children : null,
-  Platform: { OS: "android" },
+  Platform: {
+    get OS() {
+      return runtime.os;
+    },
+  },
   Pressable: "native-pressable",
   StyleSheet: { hairlineWidth: 1, create: (styles: unknown) => styles },
   TextInput: "native-text-input",
@@ -53,12 +59,14 @@ vi.mock("react-native-gesture-handler", () => ({
   GestureDetector: ({ children }: { readonly children?: ReactNode }) => children,
   useNativeGesture: () => ({}),
 }));
-vi.mock("@legendapp/list/react-native", async () => {
+vi.mock("@legendapp/list/reanimated", async () => {
   const React = await import("react");
   return {
-    LegendList: (props: Record<string, unknown>) => React.createElement("legend-list", props),
+    AnimatedLegendList: (props: Record<string, unknown>) =>
+      React.createElement("legend-list", props),
   };
 });
+vi.mock("./threadListAnimations", () => ({ THREAD_SIDEBAR_ROW_LAYOUT: undefined }));
 vi.mock("@effect/atom-react", () => ({
   useAtomSet: () => runtime.savePreferences,
   useAtomValue: (atom: symbol) =>
@@ -182,6 +190,15 @@ vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
+vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: false }));
+vi.mock("../../native/native-layout-metrics", () => ({
+  useNativeLayoutMetrics: () => null,
+  useNativeColumnLayoutMetrics: () => null,
+}));
+vi.mock("../../components/ui/useToolbarLayout", () => ({
+  useToolbarLayout: () => ({ height: 48, paddingTop: 0, paddingBottom: 0 }),
+}));
+vi.mock("../home/ThreadUndoNotice", () => ({ ThreadUndoNotice: "thread-undo-notice" }));
 vi.mock("../home/WorkspaceConnectionTitle", () => ({
   WorkspaceConnectionTitle: "workspace-connection-title",
   getConnectionAwareBrandHeaderOptions: () => ({}),
@@ -343,6 +360,7 @@ function visibleThreadTitles(): string[] {
 beforeEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
+  runtime.os = "android";
   runtime.savePreferences.mockReset();
   runtime.projectCollectionScope = { kind: "all" };
   runtime.selectedEnvironmentId = null;
@@ -356,6 +374,45 @@ beforeEach(() => {
 });
 
 describe("ThreadNavigationSidebar project collections", () => {
+  it("exposes collection scopes from the native iOS workspace header", () => {
+    runtime.os = "ios";
+    act(() => {
+      renderer = create(<ThreadNavigationSidebar {...props} />);
+    });
+
+    type NativeMenuItem = {
+      readonly label: string;
+      readonly items?: ReadonlyArray<NativeMenuItem>;
+      readonly onPress?: () => void;
+    };
+    const headerItems = renderer!.root
+      .findByType("stack-options" as never)
+      .props.options.unstable_headerRightItems() as ReadonlyArray<{
+      readonly accessibilityLabel: string;
+      readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
+    }>;
+    const filterItems = headerItems.find((item) => item.accessibilityLabel === "Filter threads")!
+      .menu!.items;
+    const findItem = (
+      items: ReadonlyArray<NativeMenuItem>,
+      label: string,
+    ): NativeMenuItem | undefined => {
+      for (const item of items) {
+        if (item.label === label) return item;
+        const nested = item.items === undefined ? undefined : findItem(item.items, label);
+        if (nested !== undefined) return nested;
+      }
+      return undefined;
+    };
+    const work = findItem(filterItems, "Work (1)");
+
+    expect(work).toBeDefined();
+    act(() => work!.onPress?.());
+    expect(runtime.savePreferences).toHaveBeenCalledWith({
+      projectCollectionScope: { kind: "collection", collectionId: WORK_ID },
+    });
+  });
+
   it("persists collection scope, filters the flat tablet list, and composes the organizer", () => {
     act(() => {
       renderer = create(<ThreadNavigationSidebar {...props} />);

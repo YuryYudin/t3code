@@ -252,7 +252,7 @@ function buildConnectingSplashDataUrl(shouldUseDarkColors: boolean): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-export function isSameOriginRendererNavigation(input: {
+function isSameOriginRendererNavigation(input: {
   readonly applicationUrl: string;
   readonly navigationUrl: string;
 }): boolean {
@@ -263,7 +263,7 @@ export function isSameOriginRendererNavigation(input: {
   }
 }
 
-export function isRetryableDevelopmentRendererLoadFailure(input: {
+function isRetryableDevelopmentRendererLoadFailure(input: {
   readonly applicationUrl: string;
   readonly errorCode: number;
   readonly isMainFrame: boolean;
@@ -534,31 +534,30 @@ export const make = Effect.gen(function* () {
     const fallbackWindowMaximized = initialMaximized;
     // Writes this window's own restore record. `measured` is null for a
     // scope-only change, which must leave the saved bounds alone.
-    const persistRecord = (
+    const persistRecord = Effect.fn("desktop.window.persistRecord")(function* (
       measured: {
         readonly bounds: DesktopAppSettings.DesktopWindowBounds;
         readonly maximized: boolean;
       } | null,
-    ) =>
-      Effect.gen(function* () {
-        const index = restoreIndexOf(window.id);
-        if (index < 0) return;
-        const existing = (yield* desktopSettings.get).windows[index];
-        yield* desktopSettings
-          .setWindowRecord(index, {
-            bounds: measured?.bounds ?? existing?.bounds ?? null,
-            maximized: measured?.maximized ?? existing?.maximized ?? false,
-            scope: windowScope,
-          })
-          .pipe(
-            Effect.asVoid,
-            Effect.catch((error) =>
-              logWindowWarning("failed to persist window bounds", {
-                message: error.message,
-              }),
-            ),
-          );
-      });
+    ) {
+      const index = restoreIndexOf(window.id);
+      if (index < 0) return;
+      const existing = (yield* desktopSettings.get).windows[index];
+      yield* desktopSettings
+        .setWindowRecord(index, {
+          bounds: measured?.bounds ?? existing?.bounds ?? null,
+          maximized: measured?.maximized ?? existing?.maximized ?? false,
+          scope: windowScope,
+        })
+        .pipe(
+          Effect.asVoid,
+          Effect.catch((error) =>
+            logWindowWarning("failed to persist window bounds", {
+              message: error.message,
+            }),
+          ),
+        );
+    });
     const measureBounds = () => {
       const bounds = readPersistableBounds();
       return bounds === null ? null : { bounds, maximized: window.isMaximized() };
@@ -1030,12 +1029,13 @@ export const make = Effect.gen(function* () {
     return Option.some(window);
   });
 
-  const promoteToMain = (window: Electron.BrowserWindow) =>
-    Effect.gen(function* () {
-      mainWindowId = window.id;
-      yield* electronWindow.setMain(window);
-      yield* logWindowInfo("main window created");
-    });
+  const promoteToMain = Effect.fn("desktop.window.promoteToMain")(function* (
+    window: Electron.BrowserWindow,
+  ) {
+    mainWindowId = window.id;
+    yield* electronWindow.setMain(window);
+    yield* logWindowInfo("main window created");
+  });
 
   const createMain = Effect.gen(function* () {
     const window = yield* createWindow({});

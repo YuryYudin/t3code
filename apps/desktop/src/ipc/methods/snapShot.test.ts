@@ -13,12 +13,12 @@ import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry
 import {
   checkSnapShotShortcut,
   requestSnapShotPermissions,
-  setupSnapShot,
-  previewSnapShotConfig,
-  applySnapShotConfig,
   setSnapShotAnimationDestination,
   setSnapShotShortcutSuppressed,
   snapShotScreenFrame,
+  setupSnapShot,
+  previewSnapShotConfig,
+  applySnapShotConfig,
   snapShotRelativeFrame,
 } from "./snapShot.ts";
 
