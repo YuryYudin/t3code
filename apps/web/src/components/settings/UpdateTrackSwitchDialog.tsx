@@ -39,7 +39,7 @@ export function UpdateTrackSwitchDialog({
   readonly channel: DesktopUpdateChannel;
   readonly onClose: () => void;
 }) {
-  // npm dist-tags match the desktop channel names.
+  // The fork release index maps the desktop channel names to its published tracks.
   const release = useAtomValue(npmReleaseAtom(channel));
   if (AsyncResult.isSuccess(release) && release.value !== null) {
     return <SwitchPlan release={{ channel, ...release.value }} onClose={onClose} />;
@@ -52,7 +52,7 @@ export function UpdateTrackSwitchDialog({
           <AlertDialogTitle>Switch to {label}</AlertDialogTitle>
           <AlertDialogDescription>
             {AsyncResult.isFailure(release) || AsyncResult.isSuccess(release)
-              ? `Could not find the latest ${label} release on npm. Try again later.`
+              ? `Could not find the latest ${label} fork release. Try again later.`
               : "Checking releases…"}
           </AlertDialogDescription>
         </AlertDialogHeader>

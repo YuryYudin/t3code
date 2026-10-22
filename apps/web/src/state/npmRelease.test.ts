@@ -2,16 +2,14 @@ import { AtomRegistry } from "effect/reactivity";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { afterAll, afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { npmReleasePublishedAtom } from "./npmRelease";
+import { npmReleaseAtom } from "./npmRelease";
 
-const version = "0.0.46-nightly.20261012.3021";
-
-// FetchHttpClient reads globalThis.fetch once and keeps it, so every test shares this mock.
+const version = "0.1.2-3";
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
-async function settledCheck() {
-  const atom = npmReleasePublishedAtom(version);
+async function settledRelease() {
+  const atom = npmReleaseAtom("latest");
   const registry = AtomRegistry.make();
   const unmount = registry.mount(atom);
   try {
@@ -26,7 +24,7 @@ async function settledCheck() {
   }
 }
 
-describe("npmReleasePublishedAtom", () => {
+describe("npmReleaseAtom", () => {
   afterEach(() => {
     fetchMock.mockReset();
   });
@@ -35,26 +33,44 @@ describe("npmReleasePublishedAtom", () => {
     vi.unstubAllGlobals();
   });
 
-  it("checks npm without tracing headers, so the browser skips the preflight npm rejects", async () => {
-    fetchMock.mockImplementation(async () => Response.json({ version }));
+  it("reads the fork release and its migration metadata without tracing headers", async () => {
+    fetchMock
+      .mockImplementationOnce(async () =>
+        Response.json([{ tag_name: `v${version}`, draft: false, prerelease: false }]),
+      )
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            '[71, "Earlier", Migration0071],\n[72, "Latest", Migration0072],',
+          ),
+      );
 
-    const result = await settledCheck();
+    const result = await settledRelease();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = new Request(fetchMock.mock.calls[0]?.[0] ?? "", fetchMock.mock.calls[0]?.[1]);
-    expect(request.url).toBe(`https://registry.npmjs.org/t3/${version}`);
-    expect(request.headers.get("traceparent")).toBeNull();
-    expect(request.headers.get("b3")).toBeNull();
-    expect(AsyncResult.getOrElse(result, () => false)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requests = fetchMock.mock.calls.map(
+      (call) => new Request(call[0] ?? "", call[1]),
+    );
+    expect(requests[0]?.url).toBe(
+      "https://api.github.com/repos/YuryYudin/t3code/releases?per_page=100&page=1",
+    );
+    expect(requests[1]?.url).toBe(
+      `https://raw.githubusercontent.com/YuryYudin/t3code/v${version}/apps/server/src/persistence/Migrations.ts`,
+    );
+    expect(
+      requests.every((request) => request.headers.get("traceparent") === null),
+    ).toBe(true);
+    expect(AsyncResult.getOrElse(result, () => null)).toEqual({
+      version,
+      databaseMigration: 72,
+    });
   });
 
-  // regression: #18709 update-everything skipped npm-installed servers
-  it("leaves a failed first check unknown, which callers read as unpublished", async () => {
+  it("leaves a failed release check unknown", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
-    const result = await settledCheck();
+    const result = await settledRelease();
 
     expect(AsyncResult.isFailure(result)).toBe(true);
-    expect(AsyncResult.getOrElse(result, () => false)).toBe(false);
   });
 });

@@ -105,6 +105,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Honors `workspaceSnapshotsOnDemand`; older servers send every snapshot and drop them in the stream. */
   providerWorkspaceSnapshotsOnDemand: Schema.optionalKey(Schema.Boolean),
   usagePriceOverrides: Schema.optionalKey(Schema.Boolean),
+  /** Server persists complete project-collection documents. Absent on older
+      servers, so clients treat collection settings as read-only. */
+  projectCollections: Schema.optionalKey(Schema.Boolean),
+  /** Server persists model mappings and folds mapped usage into the target model. */
   usageModelAliases: Schema.optionalKey(Schema.Boolean),
   threadPinning: Schema.optionalKey(Schema.Boolean),
   threadPinReorder: Schema.optionalKey(Schema.Boolean),

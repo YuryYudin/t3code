@@ -1,10 +1,12 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { createForeignStateHandler } from "./lib/crossWindowStorage";
 import { useClosedViewStore } from "./closedViewStore";
 import { reopenClosedView } from "./reopenClosedView";
 import {
+  foreignRightPanelStateSync,
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
@@ -1219,5 +1221,45 @@ describe("rightPanelStore", () => {
     store.reconcileBrowserSurfaces(refA, ["tab-a", "tab-b"]);
     expect(surfaceIds()).toEqual(["browser:tab-a", "terminal:term-1", "diff", "browser:tab-b"]);
     expect(store.getUserActionRevision(refA)).toBe(revision);
+  });
+});
+
+describe("rightPanelStore cross-window merging", () => {
+  it("adopts another window's threads while defending the one it edited", () => {
+    const refC = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-C"));
+    useRightPanelStore.setState({
+      byThreadKey: {
+        [scopedThreadKey(refA)]: { isOpen: false, surfaces: [], activeSurfaceId: null },
+        [scopedThreadKey(refC)]: { isOpen: true, surfaces: [], activeSurfaceId: null },
+      },
+      userActionRevisionByThreadKey: {},
+    });
+    const handler = createForeignStateHandler(foreignRightPanelStateSync);
+
+    // This window opens thread A's panel, so it owns that key from here on.
+    useRightPanelStore.getState().show(refA);
+
+    handler(
+      JSON.stringify({
+        version: 13,
+        state: {
+          byThreadKey: {
+            [scopedThreadKey(refA)]: { isOpen: false, surfaces: [], activeSurfaceId: null },
+            [scopedThreadKey(refB)]: {
+              isOpen: true,
+              surfaces: [{ id: "files", kind: "files" }],
+              activeSurfaceId: "files",
+            },
+          },
+        },
+      }),
+    );
+
+    const { byThreadKey } = useRightPanelStore.getState();
+    expect(byThreadKey[scopedThreadKey(refA)]?.isOpen).toBe(true);
+    expect(byThreadKey[scopedThreadKey(refB)]?.surfaces.map((surface) => surface.kind)).toEqual([
+      "files",
+    ]);
+    expect(byThreadKey[scopedThreadKey(refC)]).toBeUndefined();
   });
 });

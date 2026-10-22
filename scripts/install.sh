@@ -2,7 +2,7 @@
 # Installs the T3 Code CLI from a GitHub Release archive. Needs only sh, tar,
 # sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
 #
-#   curl -fsSL https://t3.codes/install.sh | sh
+#   Download install.sh from the YuryYudin/t3code GitHub release, then run sh install.sh.
 #
 # Environment:
 #   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
@@ -17,7 +17,7 @@
 # instead of fetching the release again.
 set -eu
 
-repo="pingdotgg/t3code"
+repo="YuryYudin/t3code"
 base_url="${T3CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
 t3_home="${T3CODE_HOME:-$HOME/.t3}"
 bin_dir="${T3CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
@@ -146,13 +146,13 @@ channel="${T3CODE_CHANNEL:-stable}"
 version="${T3CODE_VERSION:-}"
 if [ -z "$version" ]; then
   case "$channel" in
-    stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
+    stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-[0-9][0-9]*\)' ;;
     nightly | preview) tag_pattern="v\([0-9][^\"]*-${channel}\.[0-9]*\.[0-9]*\)" ;;
     *) fail "T3CODE_CHANNEL must be stable, nightly, or preview" ;;
   esac
   tmp_index="$(mktemp)"
   if [ "$channel" = stable ]; then
-    # release.yml marks only plain stable releases latest. This is a github.com
+    # release.yml marks only stable releases latest. This is a github.com
     # page, so it is not cut off by a page of newer nightlies or the API quota.
     fetch "https://github.com/${repo}/releases/latest" "$tmp_index" application/json
     version="$(sed -n "s/.*\"tag_name\": *\"${tag_pattern}\".*/\1/p" "$tmp_index" | head -n 1)"

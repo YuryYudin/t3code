@@ -719,6 +719,9 @@ importers:
       expo-widgets:
         specifier: 58.0.20
         version: 58.0.20(patch_hash=8bf49067f93742855e15f29559ac75c8b50230b47069060993c9ea01dac11171)(@babel/core@7.29.7(supports-color@8.1.1))(expo@58.0.14)(react-dom@19.3.0(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)(supports-color@8.1.1))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)
+      lucide-react-native:
+        specifier: 0.564.0
+        version: 0.564.0(react-native-svg@15.16.0(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)
       react:
         specifier: 'catalog:'
         version: 19.3.0
@@ -807,12 +810,18 @@ importers:
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20
+      '@types/react-test-renderer':
+        specifier: 19.1.0
+        version: 19.1.0
       babel-preset-expo:
         specifier: ~58.0.17
         version: 58.0.17(@babel/core@7.29.7(supports-color@8.1.1))(@babel/runtime@7.29.7)(expo-widgets@58.0.20)(expo@58.0.14)(react-refresh@0.14.2)(supports-color@8.1.1)
       jsdom:
         specifier: ^30.0.1
         version: 30.1.0(@noble/hashes@1.8.0)
+      react-test-renderer:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -1229,6 +1238,9 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.3.0(@types/react@19.3.0)
+      '@types/react-test-renderer':
+        specifier: 19.1.0
+        version: 19.1.0
       '@types/sql.js':
         specifier: 1.4.11
         version: 1.4.11
@@ -1253,6 +1265,9 @@ importers:
       playwright:
         specifier: 1.60.0
         version: 1.60.0
+      react-test-renderer:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -9751,6 +9766,13 @@ packages:
   lru_map@0.4.1:
     resolution: {integrity: sha512-I+lBvqMMFfqaV8CJCISjI3wbjmwVu/VyOoU7+qtu9d7ioW5klMgsTTiUOUp+DJvfTTzKXoPbyC6YfgkNcyPSOg==}
 
+  lucide-react-native@0.564.0:
+    resolution: {integrity: sha512-ntpd82JDEusaCkfikkIX2m8KskNSd7mnaVr3ADhAdyncu+Zlo1my2JDWm1E7S3bezgehEl2mz5LYs1eplVUd1g==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-native: '*'
+      react-native-svg: ^12.0.0 || ^13.0.0 || ^14.0.0 || ^15.0.0
+
   lucide-react@0.564.0:
     resolution: {integrity: sha512-JJ8GVTQqFwuliifD48U6+h7DXEHdkhJ/E87kksGByII3qHxtPciVb8T8woQONHBQgHVOl7rSMrrip3SeVNy7Fg==}
     peerDependencies:
@@ -10812,6 +10834,9 @@ packages:
   react-is@19.2.7:
     resolution: {integrity: sha512-kZFnouyVv7eP/Phmrlo9FK+zcAdriZJvzxXHF1Sl1P377WSGe2G/JxVolhTrB/jeV47lKImhNUsijjHAAbcl/A==}
 
+  react-is@19.3.1:
+    resolution: {integrity: sha512-RRieF6IyxQBkcK6pP8xOHprLTPW6QjRkbGdImtqNme+/hYVwCZkLQLdlZGOhUqXwkS9IEynaGvPJtv6XB/cz0Q==}
+
   react-markdown@10.1.0:
     resolution: {integrity: sha512-qKxVopLT/TyA6BX3Ue5NwabOsAzm0Q7kAPwq6L+wWDwisYs7R8vZ0nRXqq6rkueboxpkjvLGU9fWifiX/ZZFxQ==}
     peerDependencies:
@@ -10934,6 +10959,11 @@ packages:
   react-refresh@0.14.2:
     resolution: {integrity: sha512-jCvmsr+1IUSMUyzOkRcvnVbX3ZYC6g9TDrDbFuFmRDq7PD4yaGbLKNQL6k2jnArV8hjYxh7hVhAZB6s9HDGpZA==}
     engines: {node: '>=0.10.0'}
+
+  react-test-renderer@19.3.0:
+    resolution: {integrity: sha512-AUxgv+hRbqjRgx4xVwiWL6cvDDKPAva1VWLXQIMoevqQn9us//C5TX9LEnBGH47D0zvJpjwjxb1umzgOMvE8Wg==}
+    peerDependencies:
+      react: ^19.3.0
 
   react@19.3.0:
     resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
@@ -19561,6 +19591,12 @@ snapshots:
 
   lru_map@0.4.1: {}
 
+  lucide-react-native@0.564.0(react-native-svg@15.16.0(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+      react-native: 0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6)
+      react-native-svg: 15.16.0(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)
+
   lucide-react@0.564.0(react@19.3.0):
     dependencies:
       react: 19.3.0
@@ -21060,6 +21096,8 @@ snapshots:
 
   react-is@19.2.7: {}
 
+  react-is@19.3.1: {}
+
   react-markdown@10.1.0(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1):
     dependencies:
       '@types/hast': 3.0.5
@@ -21236,6 +21274,12 @@ snapshots:
       - utf-8-validate
 
   react-refresh@0.14.2: {}
+
+  react-test-renderer@19.3.0(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+      react-is: 19.3.1
+      scheduler: 0.28.0
 
   react@19.3.0: {}
 
