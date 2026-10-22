@@ -8,7 +8,7 @@ import type { ProjectCollectionsDocument } from "@t3tools/contracts/settings";
 import { CheckIcon, FolderMinusIcon, MoveRightIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { cn } from "~/lib/utils";
+import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,7 +32,7 @@ export interface ProjectCollectionMoveMenuProps<TProject extends EnvironmentProj
   readonly impact: ProjectCollectionMoveImpact;
   readonly onPlan: (plan: ProjectCollectionMovePlan) => void;
   readonly trigger?: ReactNode;
-  readonly triggerClassName?: string;
+  readonly triggerSize?: "compact" | "icon-xs";
   readonly disabled?: boolean;
 }
 
@@ -44,7 +44,7 @@ export function ProjectCollectionMoveMenu<TProject extends EnvironmentProject>({
   impact,
   onPlan,
   trigger,
-  triggerClassName,
+  triggerSize = "compact",
   disabled = false,
 }: ProjectCollectionMoveMenuProps<TProject>) {
   const [feedback, setFeedback] = useState("");
@@ -72,10 +72,7 @@ export function ProjectCollectionMoveMenu<TProject extends EnvironmentProject>({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={`Move ${projectLabel} to a collection`}
-          className={cn(
-            "inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64",
-            triggerClassName,
-          )}
+          render={<Button variant="ghost" size={triggerSize} />}
           disabled={disabled}
           onClick={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}

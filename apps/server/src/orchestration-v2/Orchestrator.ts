@@ -2527,11 +2527,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) {
     const project = yield* projects.get(command.projectId).pipe(mapDispatchError(command));
-    const existing = yield* projectionStore.getThreadRecords(command.threadId, ["turnItems"]).pipe(
-      Effect.map(Option.some),
-      Effect.catchTag("ProjectionStoreThreadNotFoundError", () => Effect.succeedNone),
-      mapDispatchError(command),
-    );
+    const existing = yield* projectionStore
+      .getThreadRecords(command.threadId, ["turnItems"])
+      .pipe(
+        Effect.map(Option.some),
+        Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeedNone }),
+        mapDispatchError(command),
+      );
     const plan = yield* planExternalAlertCommand({
       command,
       project: Option.getOrNull(project),

@@ -44,7 +44,7 @@ export function SidebarAddMenu({
           render={
             <SidebarMenuButton
               size="icon"
-              className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+              className="relative shrink-0"
               onClick={onNewProject}
               type="button"
               aria-label="New project"
@@ -71,7 +71,7 @@ export function SidebarAddMenu({
               render={
                 <SidebarMenuButton
                   size="icon"
-                  className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                  className="relative shrink-0"
                   type="button"
                   aria-label="Add project or collection"
                 />

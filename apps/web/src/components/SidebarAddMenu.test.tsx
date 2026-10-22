@@ -1,4 +1,5 @@
-import { act, Children, isValidElement, type ReactElement, type ReactNode } from "react";
+import { act } from "../../test/rendererAct";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -67,7 +68,6 @@ beforeEach(() => {
     document,
     removeEventListener() {},
   });
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 });
 
 afterEach(() => {

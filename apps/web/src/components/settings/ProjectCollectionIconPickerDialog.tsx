@@ -129,7 +129,7 @@ export function ProjectCollectionIconPickerDialog({
           <DialogTitle>Choose collection icon</DialogTitle>
           <DialogDescription>Pick an icon and color, or use an emoji.</DialogDescription>
         </DialogHeader>
-        <DialogPanel className="flex min-h-0 flex-col gap-4">
+        <DialogPanel className="flex min-h-0 flex-col">
           <ToggleGroup
             aria-label="Icon type"
             variant="segmented"
@@ -155,7 +155,7 @@ export function ProjectCollectionIconPickerDialog({
                       aria-label={option.label}
                       aria-pressed={color === option.value}
                       className={cn(
-                        "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         color === option.value && "border-foreground/64",
                       )}
                       onClick={() => setColor(option.value)}
@@ -181,7 +181,7 @@ export function ProjectCollectionIconPickerDialog({
                       data-icon-name={name}
                       tabIndex={iconName === name ? 0 : -1}
                       className={cn(
-                        "flex aspect-square items-center justify-center rounded-md border border-transparent outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex aspect-square items-center justify-center rounded-md border border-transparent outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         iconName === name && "border-border bg-accent",
                         projectIconColorClassName(color),
                       )}
@@ -216,7 +216,7 @@ export function ProjectCollectionIconPickerDialog({
                       aria-checked={emoji === option.emoji}
                       tabIndex={emoji === option.emoji || (!hasPresetEmoji && index === 0) ? 0 : -1}
                       className={cn(
-                        "flex aspect-square items-center justify-center rounded-md border border-transparent text-xl outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex aspect-square items-center justify-center rounded-md border border-transparent text-xl outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         emoji === option.emoji && "border-border bg-accent",
                       )}
                       onClick={() => setEmoji(option.emoji)}

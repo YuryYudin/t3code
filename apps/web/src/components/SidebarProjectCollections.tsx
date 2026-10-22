@@ -15,7 +15,7 @@ import {
   SettingsIcon,
   SquareArrowOutUpRightIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 
 import type { ProjectCollectionsView } from "~/hooks/useProjectCollections";
 import { cn } from "~/lib/utils";
@@ -192,40 +192,34 @@ export function SidebarProjectCollections<
   const filter = useComboboxFilter();
   // Desktop-only: older shells (and the browser) have no window management.
   const canOpenNewWindow = canOpenWindowForScope();
-  const items = useMemo<ReadonlyArray<ScopeItem<TProject>>>(
-    () => [
-      ...model.scopeOptions.map((option) => ({
-        value: sidebarProjectCollectionScopeValue(option.scope),
-        scope: option.scope,
-        label: option.label,
-        count: option.count,
-        collection: option.collection,
-        project: null,
-      })),
-      ...model.projects.map((project) => ({
-        value: sidebarProjectCollectionScopeValue({
-          kind: "project",
-          projectKey: project.projectKey,
-        }),
-        scope: { kind: "project" as const, projectKey: project.projectKey },
-        label: project.label,
-        count: null,
-        collection: null,
-        project,
-      })),
-    ],
-    [model.projects, model.scopeOptions],
-  );
+  const items = ((): ReadonlyArray<ScopeItem<TProject>> => [
+    ...model.scopeOptions.map((option) => ({
+      value: sidebarProjectCollectionScopeValue(option.scope),
+      scope: option.scope,
+      label: option.label,
+      count: option.count,
+      collection: option.collection,
+      project: null,
+    })),
+    ...model.projects.map((project) => ({
+      value: sidebarProjectCollectionScopeValue({
+        kind: "project",
+        projectKey: project.projectKey,
+      }),
+      scope: { kind: "project" as const, projectKey: project.projectKey },
+      label: project.label,
+      count: null,
+      collection: null,
+      project,
+    })),
+  ])();
   const selected =
     items.find((item) => item.value === sidebarProjectCollectionScopeValue(model.scope)) ??
     items[0]!;
-  const filteredItems = useMemo(
-    () =>
-      query.trim().length === 0
-        ? items
-        : items.filter((item) => filter.contains(item, query, (candidate) => candidate.label)),
-    [filter, items, query],
-  );
+  const filteredItems = (() =>
+    query.trim().length === 0
+      ? items
+      : items.filter((item) => filter.contains(item, query, (candidate) => candidate.label)))();
   const canMove = view.document !== null && view.canMutate && pendingMove === null;
 
   useEffect(() => {
@@ -324,7 +318,7 @@ export function SidebarProjectCollections<
             render={
               <SidebarMenuButton
                 aria-label="Filter threads by collection or project"
-                className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                className="min-w-0 flex-1"
               />
             }
           >
@@ -368,7 +362,7 @@ export function SidebarProjectCollections<
                             ? undefined
                             : (event) => dropProject(event, destination)
                         }
-                        className="h-8 min-h-8 py-0 font-medium"
+                        className="h-8 min-h-8"
                       >
                         <ScopeIcon item={item} />
                         <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
@@ -377,7 +371,7 @@ export function SidebarProjectCollections<
                             size="icon-xs"
                             variant="ghost-muted"
                             aria-label={`Open ${item.label} in a new window`}
-                            className="size-6 p-0"
+
                             onClick={(event) => {
                               event.stopPropagation();
                               openWindowForScope(item.scope);
@@ -413,7 +407,7 @@ export function SidebarProjectCollections<
                           hideIndicator
                           value={item}
                           aria-current={item.value === selected.value ? "true" : undefined}
-                          className="h-8 min-h-8 py-0 font-medium"
+                          className="h-8 min-h-8"
                         >
                           <span
                             draggable={canMove}
@@ -444,14 +438,14 @@ export function SidebarProjectCollections<
                               onPlan={applyMovePlan}
                               disabled={!canMove}
                               trigger={<MoreHorizontalIcon aria-hidden className="size-3.5" />}
-                              triggerClassName="size-6 p-0"
+                              triggerSize="icon-xs"
                             />
                           ) : (
                             <Button
                               size="icon-xs"
                               variant="ghost-muted"
                               aria-label={`Move ${item.project.label} to a collection`}
-                              className="size-6 p-0"
+
                               disabled
                             >
                               <MoreHorizontalIcon aria-hidden className="size-3.5" />

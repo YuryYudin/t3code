@@ -1,3 +1,4 @@
+import { act } from "../../test/rendererAct";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import {
@@ -7,16 +8,9 @@ import {
   ProjectId,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
-import {
-  act,
-  Children,
-  cloneElement,
-  isValidElement,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("lucide-react/dynamic", () => ({
   DynamicIcon: ({ name }: { readonly name: string }) => <svg data-icon={name} />,
@@ -246,7 +240,6 @@ function submitForm() {
   act(() => renderer!.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }));
 }
 
-beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;

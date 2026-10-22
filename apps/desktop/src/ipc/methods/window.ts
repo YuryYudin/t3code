@@ -66,18 +66,17 @@ const ContextMenuInput = Schema.Struct({
  * recently focused) app window for callers that reach these methods without an
  * event, so dialogs and menus still attach to something the user can see.
  */
-const resolveCallingWindow = (
+const resolveCallingWindow = Effect.fn("DesktopWindow.resolveCallingWindow")(function* (
   event?: DesktopIpc.DesktopIpcInvokeEvent | DesktopIpc.DesktopIpcSyncEvent,
-) =>
-  Effect.gen(function* () {
-    const appWindows = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
-    const sender =
-      event === undefined
-        ? Option.none<DesktopAppWindowRegistry.DesktopAppWindowRecord>()
-        : yield* appWindows.findBySender(event.sender.id);
-    const record = Option.isSome(sender) ? sender : yield* appWindows.focusedOrRecent;
-    return Option.map(record, (value) => value.window);
-  });
+) {
+  const appWindows = yield* DesktopAppWindowRegistry.DesktopAppWindowRegistry;
+  const sender =
+    event === undefined
+      ? Option.none<DesktopAppWindowRegistry.DesktopAppWindowRecord>()
+      : yield* appWindows.findBySender(event.sender.id);
+  const record = Option.isSome(sender) ? sender : yield* appWindows.focusedOrRecent;
+  return Option.map(record, (value) => value.window);
+});
 
 function toWebSocketBaseUrl(httpBaseUrl: URL): string {
   const url = new URL(httpBaseUrl.href);

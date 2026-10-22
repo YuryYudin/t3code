@@ -15,12 +15,13 @@ import {
   type ProjectCollectionMutationResult,
 } from "@t3tools/client-runtime/state/project-collections";
 import type { EnvironmentId, ProjectCollectionsDocument } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { serverEnvironment } from "~/state/server";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useUiStateStore } from "~/uiStateStore";
+import { useStableCallback } from "./useStableCallback";
 
 export interface ProjectCollectionsView {
   readonly document: ProjectCollectionsDocument | null;
@@ -65,10 +66,7 @@ export function useProjectCollections(): ProjectCollectionsView {
     label: "project collections update",
     reportFailure: false,
   });
-  const environments = useMemo(
-    () => asSyncEnvironments(presentedEnvironments),
-    [presentedEnvironments],
-  );
+  const environments = asSyncEnvironments(presentedEnvironments);
   const environmentsRef = useRef(environments);
   const [syncState, setSyncState] = useState(() =>
     createProjectCollectionsSyncState({
@@ -81,51 +79,45 @@ export function useProjectCollections(): ProjectCollectionsView {
   const mountedRef = useRef(true);
   const writeGenerationByEnvironmentRef = useRef(new Map<EnvironmentId, number>());
 
-  const persistReferenceSelection = useCallback(
-    (state: ProjectCollectionsSyncState) => {
-      if (state.preferredReferenceEnvironmentId !== preferredReferenceEnvironmentId) {
-        setPreferredReferenceEnvironmentId(state.preferredReferenceEnvironmentId);
-      }
-    },
-    [preferredReferenceEnvironmentId, setPreferredReferenceEnvironmentId],
-  );
+  const persistReferenceSelection = useStableCallback((state: ProjectCollectionsSyncState) => {
+    if (state.preferredReferenceEnvironmentId !== preferredReferenceEnvironmentId) {
+      setPreferredReferenceEnvironmentId(state.preferredReferenceEnvironmentId);
+    }
+  });
 
-  const runTransition = useCallback(
-    (initialTransition: ProjectCollectionsSyncTransition) => {
-      const process = (transition: ProjectCollectionsSyncTransition) => {
-        syncStateRef.current = transition.state;
-        if (mountedRef.current) {
-          setSyncState(transition.state);
-          persistReferenceSelection(transition.state);
-        }
-        for (const write of transition.writes) {
-          const generation =
-            (writeGenerationByEnvironmentRef.current.get(write.environmentId) ?? 0) + 1;
-          writeGenerationByEnvironmentRef.current.set(write.environmentId, generation);
-          void persistSettings({
-            environmentId: write.environmentId,
-            input: { patch: { projectCollections: write.document } },
-          }).then((result) => {
-            if (writeGenerationByEnvironmentRef.current.get(write.environmentId) !== generation) {
-              return;
-            }
-            process(
-              reduceProjectCollectionsWriteResult(
-                syncStateRef.current,
-                {
-                  environmentId: write.environmentId,
-                  outcome: result._tag === "Success" ? "acknowledged" : "rejected",
-                },
-                environmentsRef.current,
-              ),
-            );
-          });
-        }
-      };
-      process(initialTransition);
-    },
-    [persistReferenceSelection, persistSettings],
-  );
+  const runTransition = (initialTransition: ProjectCollectionsSyncTransition) => {
+    const process = (transition: ProjectCollectionsSyncTransition) => {
+      syncStateRef.current = transition.state;
+      if (mountedRef.current) {
+        setSyncState(transition.state);
+        persistReferenceSelection(transition.state);
+      }
+      for (const write of transition.writes) {
+        const generation =
+          (writeGenerationByEnvironmentRef.current.get(write.environmentId) ?? 0) + 1;
+        writeGenerationByEnvironmentRef.current.set(write.environmentId, generation);
+        void persistSettings({
+          environmentId: write.environmentId,
+          input: { patch: { projectCollections: write.document } },
+        }).then((result) => {
+          if (writeGenerationByEnvironmentRef.current.get(write.environmentId) !== generation) {
+            return;
+          }
+          process(
+            reduceProjectCollectionsWriteResult(
+              syncStateRef.current,
+              {
+                environmentId: write.environmentId,
+                outcome: result._tag === "Success" ? "acknowledged" : "rejected",
+              },
+              environmentsRef.current,
+            ),
+          );
+        });
+      }
+    };
+    process(initialTransition);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -135,6 +127,7 @@ export function useProjectCollections(): ProjectCollectionsView {
   }, []);
 
   useEffect(() => {
+    const environments = asSyncEnvironments(presentedEnvironments);
     environmentsRef.current = environments;
     const current = syncStateRef.current;
     const refreshed =
@@ -149,61 +142,51 @@ export function useProjectCollections(): ProjectCollectionsView {
     setSyncState(refreshed);
     persistReferenceSelection(refreshed);
   }, [
-    environments,
+    presentedEnvironments,
     preferredReferenceEnvironmentId,
     primaryEnvironmentId,
     persistReferenceSelection,
   ]);
 
-  const save = useCallback(
-    (document: ProjectCollectionsDocument) => {
-      const result = validateProjectCollectionsDocument(document);
-      if (!result.ok) return result;
-      runTransition(
-        beginProjectCollectionsMutation(
-          syncStateRef.current,
-          result.value,
-          environmentsRef.current,
-        ),
-      );
-      return result;
-    },
-    [runTransition],
-  );
+  const save = (document: ProjectCollectionsDocument) => {
+    const result = validateProjectCollectionsDocument(document);
+    if (!result.ok) return result;
+    runTransition(
+      beginProjectCollectionsMutation(syncStateRef.current, result.value, environmentsRef.current),
+    );
+    return result;
+  };
 
-  const retry = useCallback(() => {
+  const retry = () => {
     runTransition(planProjectCollectionsSyncRetry(syncStateRef.current, environmentsRef.current));
-  }, [runTransition]);
+  };
 
-  const useThisLayoutEverywhere = useCallback(() => {
+  const applyLayoutEverywhere = () => {
     runTransition(
       planProjectCollectionsReconciliation(syncStateRef.current, environmentsRef.current),
     );
-  }, [runTransition]);
+  };
 
-  return useMemo(
-    () => ({
-      document: syncState.displayedDocument,
-      confirmedDocument: syncState.confirmedDocument,
-      optimisticDocument: syncState.optimisticDocument,
-      rejectedCandidate: syncState.rejectedCandidate,
-      phase: syncState.phase,
-      status: summarizeProjectCollectionsSyncState(syncState),
-      referenceEnvironmentId: syncState.referenceEnvironmentId,
-      referenceLabel:
-        presentedEnvironments.find(
-          (environment) => environment.environmentId === syncState.referenceEnvironmentId,
-        )?.label ?? null,
-      eligibleEnvironmentIds: syncState.eligibleEnvironmentIds,
-      mismatchEnvironmentIds: syncState.mismatchEnvironmentIds,
-      canMutate:
-        syncState.referenceEnvironmentId !== null &&
-        syncState.confirmedDocument !== null &&
-        syncState.pendingEnvironmentIds.length === 0,
-      save,
-      retry,
-      useThisLayoutEverywhere,
-    }),
-    [presentedEnvironments, retry, save, syncState, useThisLayoutEverywhere],
-  );
+  return {
+    document: syncState.displayedDocument,
+    confirmedDocument: syncState.confirmedDocument,
+    optimisticDocument: syncState.optimisticDocument,
+    rejectedCandidate: syncState.rejectedCandidate,
+    phase: syncState.phase,
+    status: summarizeProjectCollectionsSyncState(syncState),
+    referenceEnvironmentId: syncState.referenceEnvironmentId,
+    referenceLabel:
+      presentedEnvironments.find(
+        (environment) => environment.environmentId === syncState.referenceEnvironmentId,
+      )?.label ?? null,
+    eligibleEnvironmentIds: syncState.eligibleEnvironmentIds,
+    mismatchEnvironmentIds: syncState.mismatchEnvironmentIds,
+    canMutate:
+      syncState.referenceEnvironmentId !== null &&
+      syncState.confirmedDocument !== null &&
+      syncState.pendingEnvironmentIds.length === 0,
+    save,
+    retry,
+    useThisLayoutEverywhere: applyLayoutEverywhere,
+  };
 }

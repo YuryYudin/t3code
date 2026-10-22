@@ -324,9 +324,11 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
       groupScratchProjects: input.groupScratchProjects ?? false,
     });
     const bucketKind =
-      groupingMode !== "separate" && identitySource.repositoryIdentity?.canonicalKey
-        ? "repository"
-        : "physical";
+      input.groupScratchProjects && identitySource.isScratch
+        ? "scratch"
+        : groupingMode !== "separate" && identitySource.repositoryIdentity?.canonicalKey
+          ? "repository"
+          : "physical";
     const bucketKey = JSON.stringify([bucketKind, logicalKey]);
     bucketKeyByPhysicalKey.set(physicalProjectKey, bucketKey);
     const member = { physicalProjectKey, project: winner };

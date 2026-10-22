@@ -236,22 +236,22 @@ export const make = Effect.gen(function* () {
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
   });
-  const loadCredentialSnapshot = Effect.fn("EnvironmentRegistry.loadCredentialSnapshot")(
-    function* (targets: ReadonlyArray<ConnectionTarget>) {
-      return new Map(
-        yield* Effect.forEach(
-          targets.filter(
-            (target) =>
-              target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget",
-          ),
-          Effect.fn(function* (target) {
-            return [target.connectionId, yield* credentials.get(target.connectionId)] as const;
-          }),
-          { concurrency: "unbounded" },
+  const loadCredentialSnapshot = Effect.fn("EnvironmentRegistry.loadCredentialSnapshot")(function* (
+    targets: ReadonlyArray<ConnectionTarget>,
+  ) {
+    return new Map(
+      yield* Effect.forEach(
+        targets.filter(
+          (target) =>
+            target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget",
         ),
-      ) satisfies CredentialSnapshot;
-    },
-  );
+        Effect.fn(function* (target) {
+          return [target.connectionId, yield* credentials.get(target.connectionId)] as const;
+        }),
+        { concurrency: "unbounded" },
+      ),
+    ) satisfies CredentialSnapshot;
+  });
   const loadPersistedEntry = Effect.fn("EnvironmentRegistry.loadPersistedEntry")(function* (input: {
     readonly environmentId: EnvironmentId;
     readonly targets: ReadonlyArray<ConnectionTarget>;
@@ -578,21 +578,19 @@ export const make = Effect.gen(function* () {
   const persistedRoutes = (entry: ConnectionCatalogEntry) =>
     connectionRoutes(entry).map((route) => route.target as PersistedConnectionTarget);
 
-  const rememberPersistedEntry = Effect.fn("EnvironmentRegistry.rememberPersistedEntry")(
-    function* (entry: ConnectionCatalogEntry) {
-      const environmentId = entry.target.environmentId;
-      yield* Ref.update(persistedEnvironmentIds, (current) =>
-        new Set(current).add(environmentId),
-      );
-      if (storage.changes === undefined) return;
-      const snapshot = yield* loadCredentialSnapshot(
-        connectionRoutes(entry).map((route) => route.target),
-      ).pipe(Effect.orElseSucceed(() => new Map()));
-      yield* Ref.update(persistedCredentialSnapshots, (current) =>
-        new Map(current).set(environmentId, snapshot),
-      );
-    },
-  );
+  const rememberPersistedEntry = Effect.fn("EnvironmentRegistry.rememberPersistedEntry")(function* (
+    entry: ConnectionCatalogEntry,
+  ) {
+    const environmentId = entry.target.environmentId;
+    yield* Ref.update(persistedEnvironmentIds, (current) => new Set(current).add(environmentId));
+    if (storage.changes === undefined) return;
+    const snapshot = yield* loadCredentialSnapshot(
+      connectionRoutes(entry).map((route) => route.target),
+    ).pipe(Effect.orElseSucceed(() => new Map()));
+    yield* Ref.update(persistedCredentialSnapshots, (current) =>
+      new Map(current).set(environmentId, snapshot),
+    );
+  });
 
   const forgetPersistedEntry = (environmentId: EnvironmentId) =>
     Effect.all(
@@ -1260,9 +1258,9 @@ export const make = Effect.gen(function* () {
                   ? { ...entry, ...unsupportedState(previous) }
                   : entry;
               const credentialSnapshot = yield* loadCredentialSnapshot(targets);
-              const previousCredentialSnapshot = (
-                yield* Ref.get(persistedCredentialSnapshots)
-              ).get(environmentId);
+              const previousCredentialSnapshot = (yield* Ref.get(persistedCredentialSnapshots)).get(
+                environmentId,
+              );
               if (
                 previous !== undefined &&
                 Equal.equals(previous, next) &&

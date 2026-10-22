@@ -4,10 +4,7 @@ import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 
 import { ProjectId } from "./baseSchemas.ts";
-import {
-  OrchestrationV2Command,
-  ThreadExternalAlertUpsertCommand,
-} from "./orchestrationV2.ts";
+import { OrchestrationV2Command, ThreadExternalAlertUpsertCommand } from "./orchestrationV2.ts";
 
 const decodeExternalAlert = Schema.decodeUnknownEffect(ThreadExternalAlertUpsertCommand);
 const decodeClientCommand = Schema.decodeUnknownEffect(OrchestrationV2Command);
