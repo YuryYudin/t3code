@@ -1,3 +1,4 @@
+import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { computeThreadMoveAvailability } from "./threadOrder";
@@ -751,6 +752,10 @@ function ThreadNavigationSidebarPane(
             showPendingDivider={item.showPendingDivider}
             onSelectPendingTask={props.onOpenPendingTask}
             onDeletePendingTask={confirmDeletePendingTask}
+            fullSwipeWidth={props.width - 20}
+            onSwipeableClose={handleSwipeableClose}
+            onSwipeableWillOpen={handleSwipeableWillOpen}
+            simultaneousSwipeGesture={sidebarScrollGesture}
           />
         );
       }
@@ -765,6 +770,7 @@ function ThreadNavigationSidebarPane(
             hasQueuedMessages={item.hasQueuedMessages}
             snoozed={item.item.snoozed}
             pinned={item.item.pinned}
+            wokeAt={item.item.wokeAt}
             snoozePresetMinute={item.snoozePresetMinute ?? ""}
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
@@ -1004,6 +1010,7 @@ function ThreadNavigationSidebarPane(
               />
             </GestureDetector>
           </SwipeableScrollGateProvider>
+          <ThreadUndoNotice visible={props.visible} />
         </View>
         {collectionsModal}
       </>
@@ -1140,6 +1147,7 @@ function ThreadNavigationSidebarPane(
         </View>
       )}
       {collectionsModal}
+      <ThreadUndoNotice visible={props.visible} />
     </View>
   );
 }

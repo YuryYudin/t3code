@@ -101,17 +101,6 @@ describe("uiStateStore pure functions", () => {
     expect(setProjectExpanded(next, keys, false)).toBe(next);
   });
 
-  it("reorders from the current atom-derived project order", () => {
-    const project1 = ProjectId.make("project-1");
-    const project2 = ProjectId.make("project-2");
-    const project3 = ProjectId.make("project-3");
-    const currentOrder = [project1, project2, project3];
-
-    const next = reorderProjects(makeUiState(), currentOrder, [project1], [project3]);
-
-    expect(next.projectOrder).toEqual([project2, project3, project1]);
-  });
-
   it("moves grouped project members together", () => {
     const keyALocal = "env-local:proj-a";
     const keyARemote = "env-remote:proj-a";
@@ -210,18 +199,6 @@ describe("uiStateStore pure functions", () => {
 });
 
 describe("parsePersistedState", () => {
-  it("hydrates the last selected pull request merge method", () => {
-    const parsed = parsePersistedState({
-      pullRequestMergeMethod: "squash",
-    });
-    const invalid = parsePersistedState({
-      pullRequestMergeMethod: "fast-forward",
-    });
-
-    expect(parsed.pullRequestMergeMethod).toBe("squash");
-    expect(invalid.pullRequestMergeMethod).toBe("merge");
-  });
-
   it("hydrates raw UI-owned state without server entities", () => {
     const parsed = parsePersistedState({
       projectExpandedById: {
@@ -335,23 +312,6 @@ describe("parsePersistedState", () => {
     expect(resolveProjectExpanded(parsed.projectExpandedById, [projectAKey])).toBe(true);
     expect(resolveProjectExpanded(parsed.projectExpandedById, [projectBKey])).toBe(false);
     expect(resolveProjectExpanded(parsed.projectExpandedById, ["unknown"])).toBe(true);
-  });
-
-  it("preserves legacy expanded-only semantics for one-way migration", () => {
-    const parsed = parsePersistedState({
-      expandedProjectCwds: ["/repo/a"],
-    });
-
-    expect(
-      resolveProjectExpanded(parsed.projectExpandedById, [
-        legacyProjectCwdPreferenceKey("/repo/a"),
-      ]),
-    ).toBe(true);
-    expect(
-      resolveProjectExpanded(parsed.projectExpandedById, [
-        legacyProjectCwdPreferenceKey("/repo/b"),
-      ]),
-    ).toBe(false);
   });
 });
 

@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const runtime = vi.hoisted(() => ({
+  os: "android",
   projectCollections: null as ProjectCollectionsView | null,
   projects: [] as ReadonlyArray<Record<string, unknown>>,
   threads: [] as ReadonlyArray<EnvironmentThreadShell>,
@@ -38,7 +39,11 @@ const atoms = vi.hoisted(() => ({
 vi.mock("react-native", () => ({
   Modal: ({ children, visible }: { readonly children?: unknown; readonly visible: boolean }) =>
     visible ? children : null,
-  Platform: { OS: "android" },
+  Platform: {
+    get OS() {
+      return runtime.os;
+    },
+  },
   Pressable: "native-pressable",
   StyleSheet: { hairlineWidth: 1, create: (styles: unknown) => styles },
   TextInput: "native-text-input",
@@ -343,6 +348,7 @@ function visibleThreadTitles(): string[] {
 beforeEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
+  runtime.os = "android";
   runtime.savePreferences.mockReset();
   runtime.projectCollectionScope = { kind: "all" };
   runtime.selectedEnvironmentId = null;
@@ -356,6 +362,46 @@ beforeEach(() => {
 });
 
 describe("ThreadNavigationSidebar project collections", () => {
+  it("exposes collection scopes from the native iOS workspace header", () => {
+    runtime.os = "ios";
+    act(() => {
+      renderer = create(<ThreadNavigationSidebar {...props} />);
+    });
+
+    type NativeMenuItem = {
+      readonly label: string;
+      readonly items?: ReadonlyArray<NativeMenuItem>;
+      readonly onPress?: () => void;
+    };
+    const headerItems = renderer!.root
+      .findByType("stack-options" as never)
+      .props.options.unstable_headerRightItems() as ReadonlyArray<{
+      readonly accessibilityLabel: string;
+      readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
+    }>;
+    const filterItems = headerItems.find(
+      (item) => item.accessibilityLabel === "Filter threads",
+    )!.menu!.items;
+    const findItem = (
+      items: ReadonlyArray<NativeMenuItem>,
+      label: string,
+    ): NativeMenuItem | undefined => {
+      for (const item of items) {
+        if (item.label === label) return item;
+        const nested = item.items === undefined ? undefined : findItem(item.items, label);
+        if (nested !== undefined) return nested;
+      }
+      return undefined;
+    };
+    const work = findItem(filterItems, "Work (1)");
+
+    expect(work).toBeDefined();
+    act(() => work!.onPress?.());
+    expect(runtime.savePreferences).toHaveBeenCalledWith({
+      projectCollectionScope: { kind: "collection", collectionId: WORK_ID },
+    });
+  });
+
   it("persists collection scope, filters the flat tablet list, and composes the organizer", () => {
     act(() => {
       renderer = create(<ThreadNavigationSidebar {...props} />);

@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -11,14 +10,9 @@ import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
 import * as DesktopAppWindowRegistry from "../../window/DesktopAppWindowRegistry.ts";
 import {
-  checkSnapShotShortcut,
-  requestSnapShotPermissions,
   setupSnapShot,
   previewSnapShotConfig,
   applySnapShotConfig,
-  setSnapShotAnimationDestination,
-  setSnapShotShortcutSuppressed,
-  snapShotScreenFrame,
   snapShotRelativeFrame,
 } from "./snapShot.ts";
 
