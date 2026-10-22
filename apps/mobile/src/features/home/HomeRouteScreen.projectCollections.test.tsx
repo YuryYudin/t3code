@@ -48,6 +48,11 @@ vi.mock("../../state/preferences", () => ({
 vi.mock("../../native/StackHeader", () => ({
   NativeStackScreenOptions: "native-stack-screen-options",
 }));
+vi.mock("../../native/native-layout-metrics", () => ({
+  useDeviceType: () => "phone",
+  useNativeColumnLayoutMetrics: () => null,
+}));
+vi.mock("./ThreadUndoNotice", () => ({ ThreadUndoNotice: "thread-undo-notice" }));
 vi.mock("../../components/ui/Toolbar", async () => {
   const React = await import("react");
   const toolbar = (props: Record<string, unknown>) =>

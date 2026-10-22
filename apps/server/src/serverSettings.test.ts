@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
   ServerSettings,
+  ServerSettingsPatch,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -32,6 +33,7 @@ import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
 
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 
 const layerServerSettings = () =>

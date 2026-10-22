@@ -237,7 +237,7 @@ describe("DesktopAppIdentity", () => {
   });
 
   it.effect.each([
-    { stage: "Latest", environment: {} },
+    { stage: "Latest", displayName: "T3 Code", environment: {} },
     {
       stage: "Nightly",
       displayName: "T3 Code (Nightly)",

@@ -13,6 +13,8 @@ import {
   filterSharedServerPatch,
   findSharedSettingsMismatches,
   pickSharedServerSettings,
+  splitSharedServerPatch,
+  supportsSharedSettingsSync,
 } from "./sharedSettings.ts";
 
 const primaryId = EnvironmentId.make("env-primary");

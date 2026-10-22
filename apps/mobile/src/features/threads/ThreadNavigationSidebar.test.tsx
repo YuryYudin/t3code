@@ -37,6 +37,7 @@ const atoms = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  ActivityIndicator: "native-activity-indicator",
   Modal: ({ children, visible }: { readonly children?: unknown; readonly visible: boolean }) =>
     visible ? children : null,
   Platform: {
@@ -187,6 +188,15 @@ vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
+vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: false }));
+vi.mock("../../native/native-layout-metrics", () => ({
+  useNativeLayoutMetrics: () => null,
+  useNativeColumnLayoutMetrics: () => null,
+}));
+vi.mock("../../components/ui/useToolbarLayout", () => ({
+  useToolbarLayout: () => ({ height: 48, paddingTop: 0, paddingBottom: 0 }),
+}));
+vi.mock("../home/ThreadUndoNotice", () => ({ ThreadUndoNotice: "thread-undo-notice" }));
 vi.mock("../home/WorkspaceConnectionTitle", () => ({
   WorkspaceConnectionTitle: "workspace-connection-title",
   getConnectionAwareBrandHeaderOptions: () => ({}),
