@@ -163,6 +163,7 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
           new Request(`http://localhost/api/orchestration/threads/${threadId}/transcript`, {
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
           }),
+          services,
         ),
       );
 

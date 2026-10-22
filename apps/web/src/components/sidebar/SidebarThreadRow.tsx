@@ -54,6 +54,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 
@@ -100,6 +101,7 @@ import { resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
+import { SidebarProjectCollectionDragHandle } from "../SidebarProjectCollections";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "../chat/providerIconUtils";
@@ -556,6 +558,7 @@ type SidebarThreadRowProps = {
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
+  projectCollectionDrag: ComponentProps<typeof SidebarProjectCollectionDragHandle> | null;
 };
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -1102,6 +1105,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               />
             }
           >
+            {props.projectCollectionDrag ? (
+              <SidebarProjectCollectionDragHandle {...props.projectCollectionDrag} />
+            ) : null}
             {accessibleTitle}
             <span
               className={cn(
@@ -1264,6 +1270,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {accessibleTitle}
           <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
+              {props.projectCollectionDrag ? (
+                <SidebarProjectCollectionDragHandle {...props.projectCollectionDrag} />
+              ) : null}
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />

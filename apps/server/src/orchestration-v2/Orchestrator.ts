@@ -61,7 +61,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
-  type TurnItemId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
@@ -104,6 +104,7 @@ import {
   isUndeliveredMailboxSteer,
 } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
+import { planExternalAlertCommand } from "./ExternalAlert.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -441,6 +442,7 @@ const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLin
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "thread.create":
+    case "thread.external-alert.upsert":
     case "thread.archive":
     case "thread.unarchive":
     case "thread.delete":
@@ -2515,6 +2517,86 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         },
       });
     }
+  });
+
+  const dispatchExternalAlert = Effect.fn("orchestrationV2.dispatch.externalAlert")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "thread.external-alert.upsert" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const project = yield* projects.get(command.projectId).pipe(mapDispatchError(command));
+    const existing = yield* projectionStore
+      .getThreadRecords(command.threadId, ["turnItems"])
+      .pipe(
+        Effect.map(Option.some),
+        Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeedNone }),
+        mapDispatchError(command),
+      );
+    const plan = yield* planExternalAlertCommand({
+      command,
+      project: Option.getOrNull(project),
+      thread: Option.isSome(existing) ? existing.value.thread : null,
+      turnItems: Option.isSome(existing) ? existing.value.turnItems : [],
+    }).pipe(mapDispatchError(command));
+
+    if (plan.createThread) {
+      yield* dispatchThreadCreate(
+        {
+          type: "thread.create",
+          commandId: command.commandId,
+          createdBy: "system",
+          creationSource: "server",
+          threadId: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          modelSelection: plan.modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        },
+        events,
+      );
+    }
+
+    const occurredAt = DateTime.makeUnsafe(command.createdAt);
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      providerInstanceId: plan.modelSelection.instanceId,
+      occurredAt,
+      payload: {
+        id: TurnItemId.make(`turn-item:external-alert:${command.commandId}`),
+        threadId: command.threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: plan.ordinal,
+        status: "completed",
+        title: command.title,
+        startedAt: occurredAt,
+        completedAt: occurredAt,
+        updatedAt: occurredAt,
+        type: "notification",
+        source: { kind: "monitor" },
+        outcome: command.state === "failing" ? "failed" : "completed",
+        summary: command.summary,
+        ...(command.detail === undefined ? {} : { detail: command.detail }),
+        externalAlert: {
+          incidentKey: command.incidentKey,
+          state: command.state,
+          url: command.url,
+        },
+      },
+    });
   });
 
   const dispatchThreadVisit = Effect.fn("orchestrationV2.dispatch.threadVisit")(function* (
@@ -11256,6 +11338,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     switch (command.type) {
       case "thread.create":
         yield* dispatchThreadCreate(command, events);
+        break;
+      case "thread.external-alert.upsert":
+        yield* dispatchExternalAlert(command, events);
         break;
       case "thread.visit":
         yield* dispatchThreadVisit(command, events);

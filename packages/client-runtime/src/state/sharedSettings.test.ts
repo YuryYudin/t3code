@@ -1,8 +1,11 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  ProjectId,
+  ProjectCollectionId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
@@ -10,14 +13,184 @@ import {
   filterSharedServerPatch,
   findSharedSettingsMismatches,
   pickSharedServerSettings,
+  splitSharedServerPatch,
+  supportsSharedSettingsSync,
 } from "./sharedSettings.ts";
 
 const primaryId = EnvironmentId.make("env-primary");
 const laptopId = EnvironmentId.make("env-laptop");
 const boxId = EnvironmentId.make("env-box");
 const restartCapabilities = { threadRestartContinuation: true };
+const workCollections: ProjectCollectionsDocument = {
+  schemaVersion: 1,
+  collections: [
+    {
+      id: ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb"),
+      name: "Work",
+      visual: { kind: "lucide", name: "briefcase", color: "blue" },
+    },
+  ],
+  assignments: [],
+};
+
+describe("supportsSharedSettingsSync", () => {
+  it("accepts only connected servers that advertise the shared-settings capability", () => {
+    expect(
+      supportsSharedSettingsSync({
+        connection: { phase: "connected" },
+        serverConfig: { environment: { capabilities: { threadAutoSettlement: true } } },
+      }),
+    ).toBe(true);
+    expect(
+      supportsSharedSettingsSync({
+        connection: { phase: "connected" },
+        serverConfig: { environment: { capabilities: {} } },
+      }),
+    ).toBe(false);
+    expect(
+      supportsSharedSettingsSync({
+        connection: { phase: "reconnecting" },
+        serverConfig: { environment: { capabilities: { threadAutoSettlement: true } } },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("splitSharedServerPatch", () => {
+  it("keeps project overrides local: project ids belong to one environment", () => {
+    const patch = {
+      projectSettingsOverrides: { [ProjectId.make("project")]: { defaultAutoPull: true } },
+      sidebarAutoSettleOnMerge: false,
+    };
+    expect(splitSharedServerPatch(patch)).toEqual({
+      sharedPatch: { sidebarAutoSettleOnMerge: false },
+      localPatch: { projectSettingsOverrides: patch.projectSettingsOverrides },
+    });
+  });
+
+  it("routes collection documents only to the dedicated acknowledged flow", () => {
+    expect(
+      splitSharedServerPatch({
+        projectCollections: workCollections,
+        sidebarAutoSettleAfterDays: 7,
+        enableAgentBrowserAccess: false,
+      }),
+    ).toEqual({
+      sharedPatch: { sidebarAutoSettleAfterDays: 7 },
+      localPatch: { enableAgentBrowserAccess: false },
+      dedicatedPatch: { projectCollections: workCollections },
+    });
+  });
+
+  it.each([
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+      options: [{ id: "reasoningEffort", value: "low" }],
+    },
+    {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-4-6",
+      options: [{ id: "effort", value: "high" }],
+    },
+    DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
+  ])("shares the text generation model and options, including reset (%j)", (selection) => {
+    const patch = { textGenerationModelSelection: selection };
+    expect(splitSharedServerPatch(patch)).toEqual({ sharedPatch: patch, localPatch: {} });
+    expect(pickSharedServerSettings({ ...DEFAULT_SERVER_SETTINGS, ...patch })).toMatchObject(patch);
+    const environment = {
+      environmentId: boxId,
+      label: "Remote Box",
+      syncEligible: true,
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: { ...selection, model: "different-model" },
+      },
+    };
+    const input = {
+      primaryEnvironmentId: primaryId,
+      primarySettings: { ...DEFAULT_SERVER_SETTINGS, ...patch },
+      environments: [environment],
+    };
+    expect(findSharedSettingsMismatches(input)).toEqual([
+      { environmentId: boxId, label: "Remote Box" },
+    ]);
+    expect(
+      findSharedSettingsMismatches({
+        ...input,
+        environments: [{ ...environment, settings: input.primarySettings }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("routes preference keys to the shared patch and machine keys to the local patch", () => {
+    const { sharedPatch, localPatch } = splitSharedServerPatch({
+      sidebarAutoSettleAfterDays: 7,
+      sidebarAutoSettleOnMerge: false,
+      continueThreadsAfterServerUpdate: true,
+      enableAgentBrowserAccess: false,
+      defaultThreadEnvMode: "worktree",
+      newWorktreesStartFromOrigin: true,
+    });
+    expect(sharedPatch).toEqual({
+      sidebarAutoSettleAfterDays: 7,
+      sidebarAutoSettleOnMerge: false,
+      continueThreadsAfterServerUpdate: true,
+      newWorktreesStartFromOrigin: true,
+    });
+    expect(localPatch).toEqual({
+      enableAgentBrowserAccess: false,
+      defaultThreadEnvMode: "worktree",
+    });
+  });
+});
+
+describe("pickSharedServerSettings", () => {
+  it("returns only the shared keys", () => {
+    expect(
+      Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, restartCapabilities)).sort(),
+    ).toEqual([
+      "autoResumeLimitedThreads",
+      "continueThreadsAfterServerUpdate",
+      "newWorktreesStartFromOrigin",
+      "sidebarAutoSettleAfterDays",
+      "sidebarAutoSettleOnMerge",
+      "snoozeLimitedThreads",
+      "sourceControlWritingStyle",
+      "textGenerationModelSelection",
+    ]);
+  });
+
+  it("keeps collection documents out of generic pick and apply planning", () => {
+    const primarySettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectCollections: workCollections,
+      sidebarAutoSettleAfterDays: 7,
+    };
+    const picked = pickSharedServerSettings(primarySettings, restartCapabilities);
+    const applyPatch = filterSharedServerPatch(
+      picked,
+      restartCapabilities,
+      DEFAULT_SERVER_SETTINGS,
+      primarySettings,
+    );
+
+    expect(picked).not.toHaveProperty("projectCollections");
+    expect(applyPatch).not.toHaveProperty("projectCollections");
+    expect(applyPatch).toHaveProperty("sidebarAutoSettleAfterDays", 7);
+  });
+});
 
 describe("filterSharedServerPatch", () => {
+  it("cannot pass collection documents into generic shared fanout", () => {
+    expect(
+      filterSharedServerPatch(
+        { projectCollections: workCollections, sidebarAutoSettleAfterDays: 7 },
+        restartCapabilities,
+      ),
+    ).toEqual({ sidebarAutoSettleAfterDays: 7 });
+  });
+
   it.each([true, false])(
     "resets a disabled default provider only on the originating environment (%s)",
     (targetIsSource) => {
@@ -116,6 +289,36 @@ describe("filterSharedServerPatch", () => {
 
 describe("findSharedSettingsMismatches", () => {
   const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+
+  it("leaves collection drift to the dedicated mismatch state machine", () => {
+    const collectionPrimary = { ...primarySettings, projectCollections: workCollections };
+    const environment = {
+      environmentId: boxId,
+      label: "Remote Box",
+      syncEligible: true,
+      settings: primarySettings,
+    };
+
+    expect(
+      findSharedSettingsMismatches({
+        primaryEnvironmentId: primaryId,
+        primarySettings: collectionPrimary,
+        environments: [environment],
+      }),
+    ).toEqual([]);
+    expect(
+      findSharedSettingsMismatches({
+        primaryEnvironmentId: primaryId,
+        primarySettings: collectionPrimary,
+        environments: [
+          {
+            ...environment,
+            settings: { ...primarySettings, sidebarAutoSettleAfterDays: 14 },
+          },
+        ],
+      }),
+    ).toEqual([{ environmentId: boxId, label: "Remote Box" }]);
+  });
 
   it.each([true, false])(
     "detects remote restart continuation drift when the preference is %s",

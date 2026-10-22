@@ -62,6 +62,7 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
+  SquareArrowOutUpRightIcon,
   SquarePenIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -142,6 +143,7 @@ import {
   newProjectId,
 } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
@@ -158,6 +160,7 @@ import {
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
+  buildNewWindowActionItem,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -571,6 +574,8 @@ function OpenCommandPaletteDialog(props: {
       );
     }
   };
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectCollectionScope = useUiStateStore((store) => store.projectCollectionScope);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providersByEnvironment = useEnvironmentProviders();
@@ -1539,6 +1544,14 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  const newWindowActionItem = buildNewWindowActionItem({
+    scope: projectCollectionScope,
+    icon: <SquareArrowOutUpRightIcon className={ITEM_ICON_CLASS} />,
+  });
+  if (newWindowActionItem !== null) {
+    actionItems.push(newWindowActionItem);
+  }
 
   actionItems.push({
     kind: "action",

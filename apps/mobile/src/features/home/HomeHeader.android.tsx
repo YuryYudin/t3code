@@ -3,6 +3,8 @@ import { useCallback, useMemo } from "react";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { ThreadListToolbar } from "./ThreadListToolbar";
 import type { HomeHeaderProps } from "./HomeHeader.types";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
 
 export type { HomeHeaderEnvironment } from "./HomeHeader.types";
 
@@ -12,7 +14,7 @@ function checkedMenuState(checked: boolean) {
 
 export function HomeHeader(props: HomeHeaderProps) {
   const hasCustomListOptions =
-    props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
+    props.selectedEnvironmentId !== null || props.projectCollectionScope.kind !== "all";
   const menuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -31,6 +33,22 @@ export function HomeHeader(props: HomeHeaderProps) {
           })),
         ],
       },
+      ...(props.projectCollectionsAvailable
+        ? ([
+            {
+              id: "collection-scope",
+              title: "Collections",
+              subactions: props.projectCollectionScopeOptions.map((option) => ({
+                id: `collection-scope:${mobileProjectCollectionScopeKey(option.scope)}`,
+                title: `${option.label} (${option.count})`,
+                state: checkedMenuState(
+                  mobileProjectCollectionScopeKey(option.scope) ===
+                    mobileProjectCollectionScopeKey(props.projectCollectionScope),
+                ),
+              })),
+            },
+          ] satisfies MenuAction[])
+        : []),
       ...(props.projects.length === 0
         ? []
         : ([
@@ -41,7 +59,7 @@ export function HomeHeader(props: HomeHeaderProps) {
                 {
                   id: "project:all",
                   title: "All projects",
-                  state: checkedMenuState(props.selectedProjectKey === null),
+                  state: checkedMenuState(props.projectCollectionScope.kind === "all"),
                 },
                 ...props.projects.map((project) => ({
                   id: `project:${project.key}`,
@@ -52,7 +70,15 @@ export function HomeHeader(props: HomeHeaderProps) {
             },
           ] satisfies MenuAction[])),
     ],
-    [props.environments, props.projects, props.selectedEnvironmentId, props.selectedProjectKey],
+    [
+      props.environments,
+      props.projects,
+      props.selectedEnvironmentId,
+      props.selectedProjectKey,
+      props.projectCollectionScope,
+      props.projectCollectionScopeOptions,
+      props.projectCollectionsAvailable,
+    ],
   );
   const handleMenuAction = useCallback(
     (event: { nativeEvent: { event: string } }) => {
@@ -70,6 +96,15 @@ export function HomeHeader(props: HomeHeaderProps) {
         if (environment) {
           props.onEnvironmentChange(environment.environmentId);
         }
+        return;
+      }
+
+      if (id.startsWith("collection-scope:")) {
+        const scopeKey = id.slice("collection-scope:".length);
+        const option = props.projectCollectionScopeOptions.find(
+          (candidate) => mobileProjectCollectionScopeKey(candidate.scope) === scopeKey,
+        );
+        if (option) props.onProjectCollectionScopeChange(option.scope);
         return;
       }
 
@@ -100,6 +135,10 @@ export function HomeHeader(props: HomeHeaderProps) {
         onFilterAction={handleMenuAction}
         onOpenEnvironments={props.onOpenEnvironments}
       />
+      {/* Below the toolbar: with headerShown false, the toolbar is the only
+          thing applying the status-bar inset (see useMaterialToolbarLayout).
+          A strip rendered above it would sit under the status bar. */}
+      <ProjectCollectionScopeStrip {...props} />
     </>
   );
 }

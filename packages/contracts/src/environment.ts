@@ -116,6 +116,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   environmentThemes: Schema.optionalKey(Schema.Boolean),
   usageLimitSources: Schema.optionalKey(Schema.Boolean),
   usagePriceOverrides: Schema.optionalKey(Schema.Boolean),
+  /** Server persists complete project-collection documents. Absent on older
+      servers, so clients treat collection settings as read-only. */
+  projectCollections: Schema.optionalKey(Schema.Boolean),
+  /** Server persists model mappings and folds mapped usage into the target model. */
   usageModelAliases: Schema.optionalKey(Schema.Boolean),
   threadPinning: Schema.optionalKey(Schema.Boolean),
   threadPinReorder: Schema.optionalKey(Schema.Boolean),

@@ -7,6 +7,7 @@ import { getClientSettings, setClientSettings } from "./methods/clientSettings.t
 import {
   clearConnectionCatalog,
   getConnectionCatalog,
+  installConnectionCatalogEventForwarding,
   setConnectionCatalog,
 } from "./methods/connectionCatalog.ts";
 import {
@@ -46,6 +47,8 @@ import {
   getWindowFullscreenState,
   openExternal,
   openSystemSettings,
+  openWindow,
+  setWindowScope,
   checkSystemPermission,
   pasteAsText,
   probeRemoteEditors,
@@ -88,6 +91,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* installNotificationBadge();
   yield* PreviewIpc.installPreviewEventForwarding();
+  yield* installConnectionCatalogEventForwarding();
 
   yield* ipc.handle(AppActivationIpc.setReady);
   yield* ipc.handle(AppActivationIpc.complete);
@@ -150,6 +154,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(openExternal);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
+  yield* ipc.handle(openWindow);
+  yield* ipc.handle(setWindowScope);
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);

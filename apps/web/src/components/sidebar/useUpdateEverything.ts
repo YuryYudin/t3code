@@ -5,7 +5,7 @@ import { APP_VERSION } from "~/branding";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { isElectron } from "~/env";
 import { useEnvironments } from "~/state/environments";
-import { useNpmReleasePublished } from "~/state/npmRelease";
+import { useCliReleasePublished } from "~/state/cliRelease";
 import { environmentIdsKey } from "~/state/environmentAtomList";
 import { environmentUpdateStatesAtom } from "~/state/server";
 import { environmentSessionStatesAtom } from "~/state/session";
@@ -58,10 +58,9 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
     machines,
     targetVersion,
   );
-  // A desktop-managed server installs from its own app's update feed, so only
-  // servers that download t3 from npm wait for npm to publish the version.
-  const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
-  const published = useNpmReleasePublished(needsNpm ? targetVersion : null);
+  // Desktop-managed servers use their own app's feed; CLI servers need the fork archive.
+  const needsCliArchive = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
+  const published = useCliReleasePublished(needsCliArchive ? targetVersion : null);
   const servers = published
     ? behindServers
     : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
@@ -72,7 +71,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
       .map((server) => ({
         environmentId: server.environmentId,
         label: server.serverLabel,
-        reason: `t3@${targetVersion} is not on npm yet`,
+        reason: `The server archive for t3@${targetVersion} is not published yet`,
       })),
   ];
   const restarts = collectRestartingMachines(machines, servers, localUpdateVersion !== null);

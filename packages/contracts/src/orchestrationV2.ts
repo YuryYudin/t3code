@@ -1080,11 +1080,30 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
 );
 export type OrchestrationV2NotificationSource = typeof OrchestrationV2NotificationSource.Type;
 
+const ExternalAlertUrl = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
+    if (!URL.canParse(value)) return "url must be absolute";
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" || "url must use http or https";
+  }),
+);
+
+export const OrchestrationV2ExternalAlert = Schema.Struct({
+  incidentKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  state: Schema.Literals(["failing", "recovered"]),
+  url: ExternalAlertUrl,
+});
+export type OrchestrationV2ExternalAlert = typeof OrchestrationV2ExternalAlert.Type;
+
+// A notification records an observed event, not whether its payload has reached the agent.
+// Provider delivery, wake policy, and agent-facing instructions belong to the backend.
 export const OrchestrationV2Notification = Schema.Struct({
   source: OrchestrationV2NotificationSource,
   outcome: Schema.Literals(["completed", "failed", "cancelled", "updated", "unknown"]),
   summary: TrimmedNonEmptyString,
   detail: Schema.optional(Schema.String),
+  externalAlert: Schema.optional(OrchestrationV2ExternalAlert),
 });
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 
@@ -2566,6 +2585,21 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 });
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
+export const ThreadExternalAlertUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.external-alert.upsert"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  incidentKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  state: Schema.Literals(["failing", "recovered"]),
+  summary: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+  detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(16_000))),
+  url: ExternalAlertUrl,
+  createdAt: IsoDateTime,
+});
+export type ThreadExternalAlertUpsertCommand = typeof ThreadExternalAlertUpsertCommand.Type;
+
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.stop"),
@@ -3020,6 +3054,12 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  ThreadExternalAlertUpsertCommand,
+  /**
+   * Records what a pull request watch saw, and wakes the agent in the same transaction when
+   * `wake` is set. Rejected once the watch started at `startedAt` has ended, and a wake is
+   * rejected on a settled or archived thread, so a read that raced either changes nothing.
+   */
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,
