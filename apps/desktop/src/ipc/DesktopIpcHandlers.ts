@@ -4,7 +4,12 @@ import { receiveProviderAuthCallback, cancelProviderAuthCallback } from "./metho
 import * as DesktopIpc from "./DesktopIpc.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
-import { getConnectionCatalog, setConnectionCatalog } from "./methods/connectionCatalog.ts";
+import {
+  clearConnectionCatalog,
+  getConnectionCatalog,
+  installConnectionCatalogEventForwarding,
+  setConnectionCatalog,
+} from "./methods/connectionCatalog.ts";
 import {
   getHostEnvironmentId,
   getLocalEnvironmentEnabled,
@@ -44,6 +49,8 @@ import {
   openExternal,
   readMedia,
   openSystemSettings,
+  openWindow,
+  setWindowScope,
   checkSystemPermission,
   pasteAsText,
   probeRemoteEditors,
@@ -88,6 +95,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* installNotificationBadge();
   yield* PreviewIpc.installPreviewEventForwarding();
+  yield* installConnectionCatalogEventForwarding();
 
   yield* ipc.handle(AppActivationIpc.setReady);
   yield* ipc.handle(AppActivationIpc.complete);
@@ -151,6 +159,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(readMedia);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
+  yield* ipc.handle(openWindow);
+  yield* ipc.handle(setWindowScope);
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);

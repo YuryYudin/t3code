@@ -62,6 +62,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 
@@ -109,6 +110,7 @@ import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Si
 import { useThreadShell } from "../../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
+import { SidebarProjectCollectionDragHandle } from "../SidebarProjectCollections";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
@@ -595,6 +597,7 @@ type SidebarThreadRowProps = {
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
+  projectCollectionDrag: ComponentProps<typeof SidebarProjectCollectionDragHandle> | null;
 };
 
 // Mounted only while renaming, so each rename starts uncommitted.
@@ -1252,6 +1255,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           >
             {/* `contents` keeps one-line rows a single flex row. */}
             <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
+              {props.projectCollectionDrag ? (
+                <SidebarProjectCollectionDragHandle {...props.projectCollectionDrag} />
+              ) : null}
               {accessibleTitle}
               {inFolder ? null : (
                 <span
@@ -1447,6 +1453,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
+              {props.projectCollectionDrag ? (
+                <SidebarProjectCollectionDragHandle {...props.projectCollectionDrag} />
+              ) : null}
               {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />

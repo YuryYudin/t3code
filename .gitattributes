@@ -3,6 +3,8 @@
 # Batch files need CRLF for cmd.exe to parse them reliably.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# Bootstrap patches are immutable generated release inputs; don't parse their contents as diffs.
+scripts/fork-release-bootstrap/*.patch -diff
 # GitHub's and Expo's GraphQL schemas and the operations graphqlgen writes from them.
 packages/source-control-github/schema/** linguist-generated
 apps/server/schema/** linguist-generated

@@ -1,4 +1,5 @@
 import type { AppBarMenuItem } from "../../../components/ui/AppBar.types";
+import type { ProjectCollectionScopeStripProps } from "../../home/ProjectCollectionScopeStrip";
 
 /** The header of the workspace thread list, on Home and in the sidebar column. */
 export interface WorkspaceListHeaderProps {
@@ -16,6 +17,7 @@ export interface WorkspaceListHeaderProps {
     readonly customized: boolean;
     readonly items: ReadonlyArray<AppBarMenuItem>;
   };
+  readonly collectionStrip?: ProjectCollectionScopeStripProps;
   /** iOS: a settings button. Android reaches Settings from the workspace navigation. */
   readonly onOpenSettings?: () => void;
   /**

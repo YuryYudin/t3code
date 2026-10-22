@@ -1,17 +1,23 @@
-import { useRef } from "react";
+import { Fragment, useRef } from "react";
 import type { SearchBarCommands } from "react-native-screens";
 
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
 import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardCommands";
 import { getConnectionAwareBrandHeaderOptions } from "./brand-header-options";
 import { createWorkspaceListHeaderItems } from "./workspace-list-header-items";
+import { ProjectCollectionScopeStrip } from "../../home/ProjectCollectionScopeStrip";
 import {
   workspaceListFilterIcon,
   type WorkspaceListHeaderProps,
 } from "./WorkspaceListHeader.types";
 
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
-  return props.sidebar ? <SidebarColumnHeader {...props} sidebar={props.sidebar} /> : null;
+  return (
+    <Fragment>
+      {props.sidebar ? <SidebarColumnHeader {...props} sidebar={props.sidebar} /> : null}
+      {props.collectionStrip ? <ProjectCollectionScopeStrip {...props.collectionStrip} /> : null}
+    </Fragment>
+  );
 }
 
 function SidebarColumnHeader(
