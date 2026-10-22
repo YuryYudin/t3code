@@ -26,6 +26,8 @@ const runtime = vi.hoisted(() => ({
   threads: [] as ReadonlyArray<Record<string, unknown>>,
   selectedEnvironmentId: null as EnvironmentId | null,
   usesSplitView: false,
+  startNewTask: vi.fn(),
+  selectThreadRoute: vi.fn(),
   useProjectCollections: vi.fn(),
 }));
 
@@ -37,6 +39,7 @@ vi.mock("react-native", () => ({
   useWindowDimensions: () => ({ width: 390, height: 844 }),
 }));
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => runtime.navigation }));
+vi.mock("../../lib/uuid", () => ({ uuidv4: () => "release-smoke-draft" }));
 vi.mock("@effect/atom-react", () => ({
   useAtomSet: () => runtime.savePreferences,
   useAtomValue: () => runtime.preferences,
@@ -99,6 +102,7 @@ vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
   useAdaptiveWorkspaceLayout: () => ({
     layout: { usesSplitView: runtime.usesSplitView },
     panes: { primarySidebarVisible: false },
+    startNewTask: runtime.startNewTask,
   }),
 }));
 vi.mock("../layout/WorkspaceEmptyDetail", () => ({
@@ -127,7 +131,10 @@ vi.mock("./home-list-options", () => ({
     setThreadSortOrder: vi.fn(),
   }),
 }));
-vi.mock("./home-thread-navigation", () => ({ useHomeThreadSelection: () => vi.fn() }));
+vi.mock("./home-thread-navigation", () => ({
+  useHomeThreadSelection: () => vi.fn(),
+  useHomeThreadRouteSelection: () => runtime.selectThreadRoute,
+}));
 vi.mock("./home-route-visibility", () => ({
   useHomeRouteVisible: () => true,
   useAtomValueWhileVisible: () => runtime.threads,
@@ -295,6 +302,8 @@ beforeEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
   runtime.navigation.navigate.mockReset();
+  runtime.startNewTask.mockReset();
+  runtime.selectThreadRoute.mockReset();
   runtime.savePreferences.mockReset();
   runtime.useProjectCollections.mockReset();
   runtime.usesSplitView = false;
@@ -309,7 +318,7 @@ beforeEach(() => {
 });
 
 describe("HomeRouteScreen project collections", () => {
-  it("keeps New project on AddProject, New task on NewTask, and filters whole families", () => {
+  it("keeps new-project navigation separate from task creation and filters whole families", () => {
     act(() => {
       renderer = create(<HomeRouteScreen />);
     });
@@ -319,13 +328,9 @@ describe("HomeRouteScreen project collections", () => {
       header.props.projectCollectionScopeOptions.map((option: { label: string }) => option.label),
     ).toEqual(["All projects", "Work", "Unfiled"]);
     act(() => renderer!.root.findByProps({ accessibilityLabel: "New project" }).props.onPress());
-    expect(runtime.navigation.navigate).toHaveBeenLastCalledWith("NewTaskSheet", {
-      screen: "AddProject",
-    });
+    expect(runtime.navigation.navigate).toHaveBeenLastCalledWith("AddProject");
     act(() => renderer!.root.findByProps({ accessibilityLabel: "New task" }).props.onPress());
-    expect(runtime.navigation.navigate).toHaveBeenLastCalledWith("NewTaskSheet", {
-      screen: "NewTask",
-    });
+    expect(runtime.startNewTask).toHaveBeenCalledOnce();
 
     act(() =>
       header.props.onProjectCollectionScopeChange({ kind: "collection", collectionId: WORK_ID }),
@@ -366,9 +371,7 @@ describe("HomeRouteScreen project collections", () => {
     expect(renderer!.root.findAllByProps({ accessibilityLabel: "Manage collections" })).toEqual([]);
     expect(renderer!.root.findAllByType("project-collections-sheet" as never)).toEqual([]);
     act(() => renderer!.root.findByProps({ accessibilityLabel: "New project" }).props.onPress());
-    expect(runtime.navigation.navigate).toHaveBeenCalledWith("NewTaskSheet", {
-      screen: "AddProject",
-    });
+    expect(runtime.navigation.navigate).toHaveBeenCalledWith("AddProject");
   });
 
   it("preserves a stored collection scope while the authoritative document loads", () => {
@@ -473,8 +476,6 @@ describe("HomeRouteScreen project collections", () => {
 
     expect(runtime.useProjectCollections).not.toHaveBeenCalled();
     act(() => renderer!.root.findByType("workspace-empty-detail" as never).props.onStartNewTask());
-    expect(runtime.navigation.navigate).toHaveBeenCalledWith("NewTaskSheet", {
-      screen: "NewTask",
-    });
+    expect(runtime.startNewTask).toHaveBeenCalledOnce();
   });
 });

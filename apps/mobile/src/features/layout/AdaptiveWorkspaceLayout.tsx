@@ -580,7 +580,7 @@ function AdaptiveWorkspaceLayoutContent(
     );
   };
   const handleStartNewProject = () => {
-    navigation.navigate("NewTaskSheet", { screen: "AddProject" });
+    navigation.navigate("AddProject");
   };
 
   useHardwareKeyboardCommand("newTask", () => {

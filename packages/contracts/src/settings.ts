@@ -962,7 +962,7 @@ export type ProjectCollectionName = typeof ProjectCollectionName.Type;
 export const ProjectCollectionIconName = Schema.Literals(PROJECT_COLLECTION_ICON_NAMES);
 export type ProjectCollectionIconName = typeof ProjectCollectionIconName.Type;
 
-export const MAX_PROJECT_COLLECTION_EMOJI_LENGTH = 32;
+const MAX_PROJECT_COLLECTION_EMOJI_LENGTH = 32;
 const projectCollectionEmojiSequence =
   /^(?:\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?)(?:\u200D\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?)*$/u;
 const projectCollectionEmojiFlag = /^\p{Regional_Indicator}{2}$/u;

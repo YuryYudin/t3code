@@ -14,6 +14,7 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopUserData from "./DesktopUserData.ts";
 
 const defaultEnvironmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -266,10 +267,7 @@ describe("DesktopAppIdentity", () => {
           assert.isDefined(runtimeName);
           assert.equal(runtimeName, `T3 Code ${stage}`);
           assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
-          assert.equal(
-            calls.setAboutPanelOptions[0]?.applicationName,
-            stage === "Latest" ? "T3 Code" : `T3 Code (${stage})`,
-          );
+          assert.equal(calls.setAboutPanelOptions[0]?.applicationName, displayName);
         }),
         { calls, environment },
       );

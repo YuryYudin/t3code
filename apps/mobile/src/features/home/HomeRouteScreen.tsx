@@ -97,9 +97,7 @@ function SplitHomeRouteScreen() {
             : undefined
         }
         onStartNewTask={
-          Platform.OS === "android" && panes.primarySidebarVisible
-            ? undefined
-            : startNewTask
+          Platform.OS === "android" && panes.primarySidebarVisible ? undefined : startNewTask
         }
       />
     </>
@@ -115,7 +113,8 @@ function CompactHomeRouteScreen({
   const columnMetrics = useNativeColumnLayoutMetrics();
   const deviceType = useDeviceType();
   const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
-  const { primarySidebarSearchQuery, setPrimarySidebarSearchQuery, startNewTask } = useAdaptiveWorkspaceLayout();
+  const { primarySidebarSearchQuery, setPrimarySidebarSearchQuery, startNewTask } =
+    useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   // Streaming turns rewrite thread shells many times a second. While a Thread
   // covers Home, rebuilding this list is invisible work.
@@ -342,7 +341,7 @@ function CompactHomeRouteScreen({
           }
           onSearchQueryChange={setSearchQuery}
           onStartNewTask={startNewTask}
-          onStartNewProject={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
+          onStartNewProject={() => navigation.navigate("AddProject")}
         />
 
         <HomeScreen

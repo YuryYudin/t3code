@@ -18,10 +18,13 @@ import {
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
+  findHighlightedCommandPaletteItem,
   reduceCommandPaletteUiState,
   createCommandPaletteSearchState,
   reduceCommandPaletteSearchState,
   type CommandPaletteUiState,
+  type CommandPaletteActionItem,
+  type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
 describe("linked pull request thread navigation", () => {

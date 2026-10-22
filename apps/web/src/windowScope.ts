@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
  * localStorage ui-state blob.
  */
 export const WINDOW_SCOPE_STORAGE_KEY = "t3code:window-scope:v1";
-export const LAUNCH_SCOPE_SEARCH_PARAM = "scope";
+const LAUNCH_SCOPE_SEARCH_PARAM = "scope";
 
 const isProjectCollectionId = Schema.is(ProjectCollectionIdSchema);
 

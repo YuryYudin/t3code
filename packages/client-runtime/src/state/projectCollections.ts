@@ -415,7 +415,7 @@ export type ProjectCollectionScope =
   | { readonly kind: "project"; readonly projectKey: ProjectCollectionProjectKeyCandidate };
 
 export const ALL_PROJECTS_COLLECTION_SCOPE = { kind: "all" } as const;
-export const UNFILED_PROJECT_COLLECTION_SCOPE = { kind: "unfiled" } as const;
+const UNFILED_PROJECT_COLLECTION_SCOPE = { kind: "unfiled" } as const;
 
 export function sanitizeProjectCollectionScope(
   document: ProjectCollectionsDocument,

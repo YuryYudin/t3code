@@ -59,12 +59,14 @@ vi.mock("react-native-gesture-handler", () => ({
   GestureDetector: ({ children }: { readonly children?: ReactNode }) => children,
   useNativeGesture: () => ({}),
 }));
-vi.mock("@legendapp/list/react-native", async () => {
+vi.mock("@legendapp/list/reanimated", async () => {
   const React = await import("react");
   return {
-    LegendList: (props: Record<string, unknown>) => React.createElement("legend-list", props),
+    AnimatedLegendList: (props: Record<string, unknown>) =>
+      React.createElement("legend-list", props),
   };
 });
+vi.mock("./threadListAnimations", () => ({ THREAD_SIDEBAR_ROW_LAYOUT: undefined }));
 vi.mock("@effect/atom-react", () => ({
   useAtomSet: () => runtime.savePreferences,
   useAtomValue: (atom: symbol) =>
@@ -389,9 +391,8 @@ describe("ThreadNavigationSidebar project collections", () => {
       readonly accessibilityLabel: string;
       readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
     }>;
-    const filterItems = headerItems.find(
-      (item) => item.accessibilityLabel === "Filter threads",
-    )!.menu!.items;
+    const filterItems = headerItems.find((item) => item.accessibilityLabel === "Filter threads")!
+      .menu!.items;
     const findItem = (
       items: ReadonlyArray<NativeMenuItem>,
       label: string,
