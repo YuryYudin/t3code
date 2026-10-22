@@ -658,7 +658,6 @@ function AdaptiveWorkspaceLayoutContent(
       }),
     );
   };
-
   useHardwareKeyboardCommand("newTask", () => {
     handleStartNewTask();
     return true;

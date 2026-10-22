@@ -170,6 +170,7 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
           new Request(`http://localhost/api/orchestration/threads/${threadId}/transcript`, {
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
           }),
+          services,
         ),
       );
 
@@ -277,6 +278,7 @@ it.effect("leaves older settled threads out of the HTTP shell only when asked", 
           new Request(`http://localhost/api/orchestration/shell${query}`, {
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
           }),
+          services,
         );
         return (await response.json()) as {
           readonly threads: ReadonlyArray<{ readonly id: string }>;

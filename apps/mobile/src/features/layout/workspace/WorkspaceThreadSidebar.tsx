@@ -85,6 +85,7 @@ export function WorkspaceThreadSidebar() {
           },
         })
       }
+      onStartNewProject={() => navigation.navigate("AddProject")}
       onOpenPendingTask={openPendingTask}
       onSelectThread={(thread) =>
         selectThreadRoute({
