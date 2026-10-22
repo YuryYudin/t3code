@@ -1,4 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import type { MobileProjectCollectionsModel } from "./mobileProjectCollections";
+import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
@@ -34,8 +37,14 @@ export function buildHomeListFilterMenu(props: {
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly projectCollectionScope: ProjectCollectionScope;
+  readonly projectCollectionScopeOptions: MobileProjectCollectionsModel["scopeOptions"];
+  readonly projectCollectionsAvailable: boolean;
+  readonly canManageProjectCollections: boolean;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onProjectCollectionScopeChange: (scope: ProjectCollectionScope) => void;
+  readonly onManageProjectCollections: () => void;
 }): HomeListFilterMenu {
   const items: Array<HomeListFilterMenuAction | HomeListFilterMenuSubmenu> = [];
 
@@ -62,6 +71,23 @@ export function buildHomeListFilterMenu(props: {
     ],
   });
 
+  if (props.projectCollectionsAvailable) {
+    items.push({
+      type: "submenu",
+      title: "Collections",
+      items: props.projectCollectionScopeOptions.map((option) => ({
+        type: "action" as const,
+        title: `${option.label} (${option.count})`,
+        state:
+          mobileProjectCollectionScopeKey(option.scope) ===
+          mobileProjectCollectionScopeKey(props.projectCollectionScope)
+            ? ("on" as const)
+            : ("off" as const),
+        onPress: () => props.onProjectCollectionScopeChange(option.scope),
+      })),
+    });
+  }
+
   if (props.projects.length > 0) {
     items.push({
       type: "submenu",
@@ -71,7 +97,7 @@ export function buildHomeListFilterMenu(props: {
           type: "action",
           title: "All projects",
           subtitle: "Show threads from every project",
-          state: props.selectedProjectKey === null ? "on" : "off",
+          state: props.projectCollectionScope.kind === "all" ? "on" : "off",
           onPress: () => props.onProjectChange(null),
         },
         ...props.projects.map((project) => ({
@@ -81,6 +107,14 @@ export function buildHomeListFilterMenu(props: {
           onPress: () => props.onProjectChange(project.key),
         })),
       ],
+    });
+  }
+
+  if (props.canManageProjectCollections) {
+    items.push({
+      type: "action",
+      title: "Manage collections",
+      onPress: props.onManageProjectCollections,
     });
   }
 
