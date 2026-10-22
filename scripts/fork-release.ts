@@ -27,6 +27,7 @@ import {
   readJsonFile,
   recoveryCommandId,
   requiredReleaseAssets,
+  resolveCliNodeVersion,
   sha256File,
   targetIdentity,
   validateBootstrap,
@@ -958,6 +959,19 @@ function verifyBootstrapCommand(args: ParsedArguments): void {
 function main(): void {
   const args = parseArguments(process.argv.slice(2));
   switch (args.command) {
+    case "cli-node-version": {
+      const root = NodePath.resolve(flag(args, "root", process.cwd()));
+      const manifest = readJsonFile<{ engines?: { node?: string } }>(
+        NodePath.join(root, "package.json"),
+      );
+      process.stdout.write(
+        resolveCliNodeVersion(
+          NodeFS.readFileSync(NodePath.join(root, "apps/server/vite.config.ts"), "utf8"),
+          manifest.engines?.node,
+        ) + "\n",
+      );
+      return;
+    }
     case "resolve":
       return resolveCommand(args);
     case "prepare":
@@ -980,7 +994,7 @@ function main(): void {
       return verifyBootstrapCommand(args);
     default:
       throw new Error(
-        "Usage: fork-release <resolve|prepare|incident|verify-assets|release-draft|promote|verify-bootstrap> [options]",
+        "Usage: fork-release <resolve|prepare|incident|verify-assets|release-draft|promote|verify-bootstrap|cli-node-version> [options]",
       );
   }
 }

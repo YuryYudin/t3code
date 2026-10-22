@@ -9,6 +9,17 @@ export const FORK_REPOSITORY = "YuryYudin/t3code";
 export const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 export const FORK_UPDATE_REPOSITORY = FORK_REPOSITORY;
 
+export function resolveCliNodeVersion(serverBuildConfig: string, nodeEngine: string | undefined) {
+  const legacyPin = serverBuildConfig.match(
+    /^\s*const\s+SEA_NODE_VERSION\s*=\s*["']([^"']+)["']/m,
+  )?.[1];
+  const version = legacyPin ?? nodeEngine;
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error("Native CLI builds require an exact Node version in the candidate source.");
+  }
+  return version;
+}
+
 export const INCIDENT_MODES = [
   "nightly-integration",
   "automatic-stable-release",
