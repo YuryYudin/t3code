@@ -669,7 +669,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
       });
     }
     if (Object.keys(serverPatch).length > 0 && canWriteServerPatch) {
-      const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
+      const { sharedPatch, localPatch, dedicatedPatch } = splitSharedServerPatch(serverPatch);
       // Dropping the write silently leaves the control looking saved.
       const warnUnsaved = (description = m(PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE)) => {
         options?.onFailed?.();
@@ -679,6 +679,9 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           description,
         });
       };
+      if (dedicatedPatch !== undefined) {
+        warnUnsaved("Manage project collections from the collection organizer.");
+      }
       if (Object.keys(localPatch).length > 0) {
         if (environmentId) {
           void persistServerSettings(
@@ -704,6 +707,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           const target = environments.find((candidate) => candidate.environmentId === targetId);
           const targetPatch = filterSharedServerPatch(
             sharedPatch,
+            target?.serverConfig?.environment.capabilities,
             target?.serverConfig?.settings,
             sourceSettings,
             targetId === environmentId,

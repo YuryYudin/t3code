@@ -80,6 +80,7 @@ import {
   PinIcon,
   PinOffIcon,
   PlugIcon,
+  SquareArrowOutUpRightIcon,
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
@@ -189,6 +190,8 @@ import {
   isWindowsPlatform,
   newProjectId,
 } from "../lib/utils";
+import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
@@ -207,6 +210,7 @@ import {
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
   newThreadNoProjectIndex,
+  buildNewWindowActionItem,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -538,6 +542,7 @@ function OpenCommandPaletteDialog(props: {
     if (activeThreadReferenceCopyTarget === null) return;
     await copyThreadReference(activeThreadReferenceCopyTarget);
   };
+  const projectCollectionScope = useUiStateStore((store) => store.projectCollectionScope);
   // Threads the sidebar shows under their parent open there, so opening a project never lands on one.
   const delegatedUnderParent = useDelegatedUnderParent();
   const threads = useVisibleThreadShells().filter(
@@ -1775,6 +1780,14 @@ function OpenCommandPaletteDialog(props: {
         queueWorkspaceFocusFromPalette(direction);
       },
     });
+  }
+
+  const newWindowActionItem = buildNewWindowActionItem({
+    scope: projectCollectionScope,
+    icon: <SquareArrowOutUpRightIcon className={ITEM_ICON_CLASS} />,
+  });
+  if (newWindowActionItem !== null) {
+    actionItems.push(newWindowActionItem);
   }
 
   actionItems.push({

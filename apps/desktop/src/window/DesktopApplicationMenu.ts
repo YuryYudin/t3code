@@ -61,6 +61,12 @@ const zoomMainWindow = Effect.fn("desktop.menu.zoomMainWindow")(function* (
   yield* desktopWindow.zoomMain(direction);
 });
 
+// A new window opens with no scope; the renderer picks its own default.
+const createNewWindow = Effect.gen(function* () {
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  yield* desktopWindow.create({});
+}).pipe(Effect.withSpan("desktop.menu.createNewWindow"));
+
 const runMainContentsCommand = Effect.fn("desktop.menu.runMainContentsCommand")(function* (
   command: DesktopWindow.MainWindowContentsCommand,
 ): Effect.fn.Return<void, never, DesktopWindow.DesktopWindow> {
@@ -191,6 +197,9 @@ export const make = Effect.gen(function* () {
   };
 
   const configure = Effect.gen(function* () {
+    const newWindowClick = () => {
+      runMenuEffect("new-window", createNewWindow);
+    };
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
@@ -248,6 +257,13 @@ export const make = Effect.gen(function* () {
       {
         label: m(msg("File", { $context: "menu bar title" })),
         submenu: [
+          {
+            label: "New Window",
+            // mod+N and mod+shift+N are taken by web keybindings.
+            accelerator: "CmdOrCtrl+Alt+N",
+            click: newWindowClick,
+          },
+          { type: "separator" },
           ...(environment.platform === "darwin"
             ? []
             : [

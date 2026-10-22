@@ -31,6 +31,7 @@ import { SettingsScreen } from "./components/SettingsScreen";
 import type { SettingsPageTarget } from "./components/settings-page-targets";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+import { ProjectCollectionsSettingsSection } from "./ProjectCollectionsSettingsSection";
 import { filterSettingsSections } from "./settings-search";
 import { usePaneRole } from "../../components/ui/Pane";
 import { useGT, useMessages } from "gt-react-native";
@@ -188,6 +189,12 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
     query,
     m,
   );
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const showProjectCollections =
+    normalizedQuery.length === 0 ||
+    ["project collections", "collections", "reference layout"].some((label) =>
+      label.includes(normalizedQuery),
+    );
 
   return (
     <View collapsable={false} className="flex-1">
@@ -206,14 +213,17 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
               : Math.max(Math.max(insets.bottom, 18) + 18, workspace?.bottomClearance ?? 0),
         }}
       >
-        {sections.length ? (
-          sections.map((section, index) => (
-            <SettingsSection key={section.title ?? `untitled-${index}`} title={section.title}>
-              {section.rows.map(({ id, ...row }) => (
-                <SettingsRow key={id} {...row} />
-              ))}
-            </SettingsSection>
-          ))
+        {sections.length > 0 || showProjectCollections ? (
+          <>
+            {sections.map((section, index) => (
+              <SettingsSection key={section.title ?? `untitled-${index}`} title={section.title}>
+                {section.rows.map(({ id, ...row }) => (
+                  <SettingsRow key={id} {...row} />
+                ))}
+              </SettingsSection>
+            ))}
+            {showProjectCollections ? <ProjectCollectionsSettingsSection /> : null}
+          </>
         ) : (
           <EmptyState
             variant="plain"

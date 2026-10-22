@@ -1,8 +1,8 @@
 import { useGT, useMessages } from "gt-react-native";
+import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import {
   useAppearancePreferences,
   useAndroidFloatingTabs,
@@ -15,8 +15,11 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_LIST_ROW_LAYOUT } from "./threadListAnimations";
 import { useAtomValue } from "@effect/atom-react";
-import { useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { DEFAULT_PROJECT_COLLECTIONS_DOCUMENT } from "@t3tools/contracts";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import { AsyncResult } from "effect/reactivity";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Modal, Platform, StyleSheet, View } from "react-native";
 import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { FLOATING_TABS } from "../layout/workspace/floating-workspace-tabs";
@@ -27,6 +30,8 @@ import { Button } from "../../components/ui/Button";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects } from "../../state/entities";
 import { steadyNavigationThreadShellsAtom } from "../../state/threads";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { useThreadListNow } from "./use-thread-list-now";
@@ -50,11 +55,13 @@ import {
   buildHomeListFilterMenuItems,
   homeListFilterEnvironments,
 } from "../home/home-list-filter-menu";
+import { buildHomeProjectScopes } from "../home/homeThreadList";
 import {
-  buildHomeProjectScopes,
-  resolveHomeProjectFilterScope,
-  sortHomeProjectScopes,
-} from "../home/homeThreadList";
+  buildMobileProjectCollectionsModel,
+  mobileProjectCollectionScopeKey,
+} from "../home/mobileProjectCollections";
+import { ProjectCollectionsSheet } from "../projects/ProjectCollectionsSheet";
+import { useProjectCollections } from "../projects/useProjectCollections";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -99,6 +106,7 @@ interface ThreadNavigationSidebarProps {
   readonly onOpenEnvironmentSettings: () => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
+  readonly onStartNewProject: () => void;
   readonly onOpenPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
@@ -158,24 +166,39 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { confirmDeletePendingTask } = usePendingTaskListActions((params) =>
     selectDetail({ name: "Thread", params }),
   );
-  const environments = homeListFilterEnvironments(workspaceEnvironments);
-  const availableEnvironmentIds = new Set(
-    environments.map((environment) => environment.environmentId),
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
+  const projectCollections = useProjectCollections();
+  const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
+  const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
+  const environments = useMemo(
+    () => homeListFilterEnvironments(workspaceEnvironments),
+    [workspaceEnvironments],
   );
-  const { options, setSelectedEnvironmentId, setSelectedProjectKey } =
-    useHomeListOptions(availableEnvironmentIds);
-  const searchEnvironmentIds =
-    options.selectedEnvironmentId === null
-      ? workspaceEnvironments
-          .filter((environment) => environment.connectionState === "connected")
-          .map((environment) => environment.environmentId)
-      : workspaceEnvironments.some(
-            (environment) =>
-              environment.environmentId === options.selectedEnvironmentId &&
-              environment.connectionState === "connected",
-          )
-        ? [options.selectedEnvironmentId]
-        : [];
+  const availableEnvironmentIds = useMemo(
+    () => new Set(environments.map((environment) => environment.environmentId)),
+    [environments],
+  );
+  const {
+    options,
+    setSelectedEnvironmentId,
+    setSelectedProjectKey: setHomeSelectedProjectKey,
+  } = useHomeListOptions(availableEnvironmentIds);
+  const searchEnvironmentIds = useMemo(
+    () =>
+      options.selectedEnvironmentId === null
+        ? workspaceEnvironments
+            .filter((environment) => environment.connectionState === "connected")
+            .map((environment) => environment.environmentId)
+        : workspaceEnvironments.some(
+              (environment) =>
+                environment.environmentId === options.selectedEnvironmentId &&
+                environment.connectionState === "connected",
+            )
+          ? [options.selectedEnvironmentId]
+          : [],
+    [options.selectedEnvironmentId, workspaceEnvironments],
+  );
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes(
@@ -188,17 +211,107 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       ),
     [projects, options.selectedEnvironmentId, options.projectGroupingMode, messages],
   );
-  const projectFilterOptions = pickableProjectGroups(
-    sortHomeProjectScopes({
-      scopes: projectScopes,
+  const storedProjectCollectionScope = AsyncResult.isSuccess(preferencesResult)
+    ? (preferencesResult.value.projectCollectionScope ?? ({ kind: "all" } as const))
+    : ({ kind: "all" } as const);
+  const requestedProjectCollectionScope = scopeOverride ?? storedProjectCollectionScope;
+  const resolvedProjectCollectionScope = useMemo<ProjectCollectionScope>(() => {
+    if (requestedProjectCollectionScope.kind !== "project") {
+      return requestedProjectCollectionScope;
+    }
+    return {
+      kind: "project",
+      projectKey:
+        resolveScratchProjectScopeKey(requestedProjectCollectionScope.projectKey, projects, {
+          sidebarProjectGroupingMode: options.projectGroupingMode,
+          sidebarProjectGroupingOverrides: {},
+        }) ?? requestedProjectCollectionScope.projectKey,
+    };
+  }, [options.projectGroupingMode, projects, requestedProjectCollectionScope]);
+  const projectCollectionModel = useMemo(
+    () =>
+      buildMobileProjectCollectionsModel({
+        projects,
+        threads,
+        pendingTasks,
+        environmentId: options.selectedEnvironmentId,
+        projectGroupingMode: options.projectGroupingMode,
+        projectSortOrder: options.projectSortOrder,
+        document: projectCollections.document ?? DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        scope: resolvedProjectCollectionScope,
+        resolve: messages,
+      }),
+    [
+      options.projectGroupingMode,
+      options.projectSortOrder,
+      options.selectedEnvironmentId,
+      pendingTasks,
+      projectCollections.document,
+      projects,
+      resolvedProjectCollectionScope,
       threads,
-      pendingTasks: [],
-      projectSortOrder: "updated_at",
-    }),
-  ).map((scope) => ({
-    key: scope.key,
-    label: scope.title,
-  }));
+      messages,
+    ],
+  );
+  const selectedProjectKey =
+    projectCollectionModel.activeScope.kind === "project"
+      ? projectCollectionModel.activeScope.projectKey
+      : null;
+  const projectFilterOptions = useMemo(
+    () =>
+      projectCollectionModel.projectChoices.map((project) => ({
+        key: project.projectKey,
+        label: project.label,
+      })),
+    [projectCollectionModel.projectChoices],
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reconciles the persisted collection scope with the new-task project filter
+  useEffect(() => {
+    const activeProjectKey =
+      projectCollectionModel.activeScope.kind === "project"
+        ? projectCollectionModel.activeScope.projectKey
+        : null;
+    if (
+      AsyncResult.isSuccess(preferencesResult) &&
+      options.selectedProjectKey !== activeProjectKey
+    ) {
+      setHomeSelectedProjectKey(activeProjectKey);
+    }
+    if (projectCollections.document === null) return;
+    if (
+      mobileProjectCollectionScopeKey(requestedProjectCollectionScope) !==
+      mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)
+    ) {
+      setScopeOverride(projectCollectionModel.activeScope);
+      if (AsyncResult.isSuccess(preferencesResult)) {
+        void savePreferences({ projectCollectionScope: projectCollectionModel.activeScope });
+      }
+    }
+  }, [
+    preferencesResult,
+    options.selectedProjectKey,
+    projectCollectionModel.activeScope,
+    projectCollections.document,
+    savePreferences,
+    setHomeSelectedProjectKey,
+    requestedProjectCollectionScope,
+  ]);
+  const setProjectCollectionScope = useCallback(
+    (scope: ProjectCollectionScope) => {
+      setScopeOverride(scope);
+      setHomeSelectedProjectKey(scope.kind === "project" ? scope.projectKey : null);
+      void savePreferences({ projectCollectionScope: scope });
+    },
+    [savePreferences, setHomeSelectedProjectKey],
+  );
+  const setSelectedProjectKey = useCallback(
+    (projectKey: string | null) => {
+      setProjectCollectionScope(
+        projectKey === null ? { kind: "all" } : { kind: "project", projectKey },
+      );
+    },
+    [setProjectCollectionScope],
+  );
   const projectTitleByProjectKey = useMemo(
     () =>
       new Map(
@@ -214,18 +327,36 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       ),
     [projectScopes],
   );
-  const selectedProjectScope = resolveHomeProjectFilterScope(projectScopes, projects, options);
+  const selectedProjectRefsForList = useMemo(() => {
+    if (projectCollectionModel.activeScope.kind === "all") return null;
+    const refs = new Map(
+      projectCollectionModel.visibleProjects.map((project) => [
+        scopedProjectKey(project.environmentId, project.id),
+        { environmentId: project.environmentId, projectId: project.id },
+      ]),
+    );
+    for (const pendingTask of projectCollectionModel.visiblePendingTasks) {
+      refs.set(scopedProjectKey(pendingTask.environmentId, pendingTask.projectId), {
+        environmentId: pendingTask.environmentId,
+        projectId: pendingTask.projectId,
+      });
+    }
+    return [...refs.values()];
+  }, [
+    projectCollectionModel.activeScope.kind,
+    projectCollectionModel.visiblePendingTasks,
+    projectCollectionModel.visibleProjects,
+  ]);
   const threadSearch = useThreadSearch(
     searchEnvironmentIds,
     props.searchQuery,
-    selectedProjectScope === null
+    selectedProjectRefsForList === null
       ? {}
-      : { projectIds: selectedProjectScope.projectRefs.map((ref) => ref.projectId) },
+      : { projectIds: selectedProjectRefsForList.map((ref) => ref.projectId) },
   );
   // This map reaches LegendList's extraData, which re-renders every row whenever it changes
   // identity; the hook keeps it stable.
   const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
-  const selectedProjectKey = selectedProjectScope?.key ?? null;
   const projectByKey = useMemo(() => {
     const map = new Map<string, EnvironmentProject>();
     for (const project of projects) {
@@ -237,7 +368,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   );
-  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${selectedProjectKey ?? "all"}:${props.searchQuery.trim()}`;
+  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${mobileProjectCollectionScopeKey(projectCollectionModel.activeScope)}:${props.searchQuery.trim()}`;
   const [lastSettledResetKey, setLastSettledResetKey] = useState(settledResetKey);
   if (lastSettledResetKey !== settledResetKey) {
     setLastSettledResetKey(settledResetKey);
@@ -278,9 +409,9 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     olderSettledShelf,
   } = useThreadListV2({
     threads: launchingThreads,
-    pendingTasks,
+    pendingTasks: projectCollectionModel.visiblePendingTasks,
     environmentId: options.selectedEnvironmentId,
-    projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
+    projectRefs: selectedProjectRefsForList,
     searchQuery: props.searchQuery,
     searchMatches: threadSearchMatchByKey,
     settlementEnvironmentIds,
@@ -546,18 +677,35 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         accessibilityLabel: gt("Search threads"),
       }}
       filter={{
-        customized: options.selectedEnvironmentId !== null || selectedProjectKey !== null,
+        customized:
+          options.selectedEnvironmentId !== null ||
+          projectCollectionModel.activeScope.kind !== "all",
         items: buildHomeListFilterMenuItems(
           {
             environments,
             projects: projectFilterOptions,
             selectedEnvironmentId: options.selectedEnvironmentId,
             selectedProjectKey,
+            projectCollectionScope: projectCollectionModel.activeScope,
+            projectCollectionScopeOptions: projectCollectionModel.scopeOptions,
+            projectCollectionsAvailable: projectCollections.document !== null,
+            canManageProjectCollections: projectCollections.document !== null,
             onEnvironmentChange: setSelectedEnvironmentId,
             onProjectChange: setSelectedProjectKey,
+            onProjectCollectionScopeChange: setProjectCollectionScope,
+            onManageProjectCollections: () => setProjectCollectionsOpen(true),
           },
           messages,
         ),
+      }}
+      collectionStrip={{
+        projectCollectionScope: projectCollectionModel.activeScope,
+        projectCollectionScopeOptions: projectCollectionModel.scopeOptions,
+        projectCollectionsAvailable: projectCollections.document !== null,
+        canManageProjectCollections: projectCollections.document !== null,
+        onProjectCollectionScopeChange: setProjectCollectionScope,
+        onManageProjectCollections: () => setProjectCollectionsOpen(true),
+        onStartNewProject: props.onStartNewProject,
       }}
       sidebar={{
         width: props.width,
@@ -589,8 +737,10 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 : threadSearch.failed
                   ? gt("Couldn't search thread messages")
                   : gt("No matching threads")
-              : selectedProjectScope !== null
-                ? gt("No threads in {project}", { project: selectedProjectScope.title })
+              : projectCollectionModel.activeScope.kind !== "all"
+                ? gt("No threads in {project}", {
+                    project: projectCollectionModel.activeScopeLabel,
+                  })
                 : gt("No threads yet")}
       </Text>
       {showAddEnvironment ? (
@@ -605,6 +755,20 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         </View>
       ) : null}
     </View>
+  );
+  const collectionsModal = (
+    <Modal
+      animationType="slide"
+      onRequestClose={() => setProjectCollectionsOpen(false)}
+      presentationStyle="pageSheet"
+      visible={projectCollectionsOpen && projectCollections.document !== null}
+    >
+      <ProjectCollectionsSheet
+        onClose={() => setProjectCollectionsOpen(false)}
+        projects={projectCollectionModel.projects}
+        sync={projectCollections}
+      />
+    </Modal>
   );
 
   if (Platform.OS === "ios") {
@@ -648,6 +812,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           </SwipeableScrollGateProvider>
           <ThreadUndoNotice visible={props.visible} />
         </View>
+        {collectionsModal}
       </>
     );
   }
@@ -702,6 +867,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         )}
       </View>
       {header}
+      {collectionsModal}
       <ThreadUndoNotice visible={props.visible} />
     </View>
   );
