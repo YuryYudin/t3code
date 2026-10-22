@@ -389,7 +389,7 @@ def runQuality(String slug, String candidateRef) {
                 fi
                 for project in packages/contracts packages/shared packages/client-runtime apps/server apps/web apps/mobile apps/desktop; do
                     echo "Type check: $project"
-                    corepack pnpm --dir "$project" run typecheck
+                    corepack pnpm exec vp run --filter "./$project" typecheck
                 done
                 test -z "$(git status --porcelain)"
             '''
