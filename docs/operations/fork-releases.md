@@ -17,6 +17,16 @@ Scheduled `auto` builds perform release work only on the `main` job. The reposit
 
 Fetch upstream `main` with `--no-tags`. The release resolver fetches the selected official stable tag into `refs/upstream-tags/`; upstream movable aliases such as `android-nightly` must not share the fork's `refs/tags/` namespace. The desktop artifact tests load the checked-out workspace configuration before packaging so malformed build approvals fail in the repairable quality gate.
 
+## Standalone CLI releases
+
+Starting with `v0.1.1-2`, Jenkins publishes `t3-<version>-linux-x64.tar.gz` and `install.sh` alongside the desktop and Android installers. The archive includes the executable, web client, runtime dependencies, and resource monitor; the Linux build smoke-tests it before publication. `SHA256SUMS` and `SHA256SUMS.txt` contain identical checksums of the final artifacts, excluding the checksum files themselves. Both names are required because the CLI installer and updater use `SHA256SUMS`, while existing fork consumers use `SHA256SUMS.txt`.
+
+Download `install.sh` from the fork release, inspect it, then run it with `T3CODE_VERSION=<version>` to install an exact fork version. Without that variable it selects the fork's latest published stable release. Do not use `t3.codes/install.sh` or `npx t3` to install a fork version: those distribution channels belong to upstream. This fork currently publishes standalone CLI archives for Linux x64 only; other platforms use the desktop app.
+
+The CLI's release index and default archive downloads point to `YuryYudin/t3code`. Stable update selection accepts numeric fork revisions and skips drafts and archived prereleases. `T3CODE_RELEASE_BASE_URL` remains available for archive mirrors. Jenkins runs the installer, update-selection, and pinned-runtime regression tests during maintenance so rebases retain this behavior.
+
+For a V1-to-V2 migration, stop the existing service and back up its actual T3 home before installing and activating the new version. Installing the executable does not itself migrate or restart an already running service. Use that executable's `service install` command to install or repair the background service, retaining the existing home and connection settings. Upgrade one remote first and verify access before moving the remaining hosts; V1 clients cannot connect to V2 servers.
+
 ## Fork version policy
 
 New fork builds should retain the exact official upstream stable version and add a numeric fork revision: upstream `v0.0.44` becomes fork `v0.0.44-1`, followed by `v0.0.44-2` for another build on that base. Select the official published, non-prerelease GitHub release and resolve its tag from the upstream remote; a stable-looking local tag alone is insufficient. Archived prereleases and drafts reserve their tag numbers but do not satisfy stable-release coverage.
