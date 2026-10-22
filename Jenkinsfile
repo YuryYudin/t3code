@@ -245,6 +245,16 @@ def ensureMacBuildSpace() {
         // pip reports a nonzero status when its cache is already empty.
         sh(returnStatus: true, script: 'python3 -m pip cache purge')
     }
+    // pnpm 12 cannot reclaim the older global virtual stores left by pnpm 11 and 8.
+    for (legacyVersion in ['11.10.0', '8.15.9']) {
+        if (freeBytes() >= 8L * 1024 * 1024 * 1024) break
+        withEnv(['COREPACK_ENABLE_AUTO_PIN=0', "LEGACY_PNPM_VERSION=${legacyVersion}"]) {
+            sh(returnStatus: true, script: '''
+                cd "$HOME"
+                corepack "pnpm@$LEGACY_PNPM_VERSION" store prune
+            ''')
+        }
+    }
     if (freeBytes() < 8L * 1024 * 1024 * 1024) {
         error('Mac packaging requires at least 8 GiB free after cache cleanup.')
     }
