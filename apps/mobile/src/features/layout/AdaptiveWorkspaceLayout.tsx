@@ -543,6 +543,9 @@ function AdaptiveWorkspaceLayoutContent(
       newTaskDestination(layout.usesSplitView, projects, currentProject, uuidv4()),
     );
   };
+  const handleStartNewProject = () => {
+    navigation.navigate("AddProject");
+  };
 
   useHardwareKeyboardCommand("newTask", () => {
     handleStartNewTask();
@@ -856,6 +859,7 @@ function AdaptiveWorkspaceLayoutContent(
                           onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
                           onNewThreadInProject={handleNewThreadInProject}
                           onNewThreadOnBranch={handleNewThreadOnBranch}
+                          onStartNewProject={handleStartNewProject}
                           onOpenPendingTask={handleOpenPendingTask}
                           onSelectThread={handleSelectThread}
                           onOpenThreadPullRequests={handleOpenThreadPullRequests}

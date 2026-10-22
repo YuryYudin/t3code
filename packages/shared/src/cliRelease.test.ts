@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { cliArchiveTarCommand, newestCliReleaseVersion, parseChecksums } from "./cliRelease.ts";
+import {
+  cliArchiveTarCommand,
+  cliReleaseDownloadBaseUrl,
+  cliReleaseIndexPageUrl,
+  newestCliReleaseVersion,
+  parseChecksums,
+} from "./cliRelease.ts";
 
 describe("cliRelease", () => {
+  it("keeps the default release index and archive downloads on the fork, retaining mirrors", () => {
+    expect(cliReleaseIndexPageUrl(1)).toBe(
+      "https://api.github.com/repos/YuryYudin/t3code/releases?per_page=100&page=1",
+    );
+    expect(cliReleaseDownloadBaseUrl("0.1.1-2")).toBe(
+      "https://github.com/YuryYudin/t3code/releases/download/v0.1.1-2",
+    );
+    expect(cliReleaseDownloadBaseUrl("0.1.1-2", "https://mirror.example/t3/")).toBe(
+      "https://mirror.example/t3/v0.1.1-2",
+    );
+  });
   it("parses sha256sum output including binary-mode markers", () => {
     const checksums = parseChecksums(
       [
@@ -31,12 +48,15 @@ describe("cliRelease", () => {
       { tag_name: "v1.2.4-preview.20260912.8" },
       { tag_name: "v1.2.4-nightly.20260912.7" },
       { tag_name: "desktop-preview" },
-      { tag_name: "v1.2.3" },
+      { tag_name: "v1.2.4-1", prerelease: true },
+      { tag_name: "v1.2.4" },
+      { tag_name: "v1.2.4-rc.1" },
+      { tag_name: "v1.2.3-2" },
       { tag_name: "v1.2.3-nightly.20260911.2" },
     ];
     expect(newestCliReleaseVersion(releases, "preview")).toBe("1.2.4-preview.20260912.8");
     expect(newestCliReleaseVersion(releases, "nightly")).toBe("1.2.4-nightly.20260912.7");
-    expect(newestCliReleaseVersion(releases, "stable")).toBe("1.2.3");
-    expect(newestCliReleaseVersion([{ tag_name: "v1.2.3" }], "preview")).toBeUndefined();
+    expect(newestCliReleaseVersion(releases, "stable")).toBe("1.2.3-2");
+    expect(newestCliReleaseVersion([{ tag_name: "v1.2.3-2" }], "preview")).toBeUndefined();
   });
 });

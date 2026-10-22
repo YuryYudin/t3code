@@ -78,7 +78,7 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
-export type DesktopAppStageLabel = "Alpha" | "Beta" | "Dev" | "Nightly";
+export type DesktopAppStageLabel = "Beta" | "Dev" | "Latest" | "Nightly";
 
 export const DesktopUpdateStatusSchema = Schema.Literals([
   "disabled",
@@ -93,7 +93,7 @@ export const DesktopUpdateStatusSchema = Schema.Literals([
 export const DesktopRuntimeArchSchema = Schema.Literals(["arm64", "x64", "other"]);
 export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
-export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Beta", "Dev", "Nightly"]);
+export const DesktopAppStageLabelSchema = Schema.Literals(["Beta", "Dev", "Latest", "Nightly"]);
 
 export interface DesktopAppBranding {
   baseName: string;
@@ -1002,6 +1002,23 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+/**
+ * The sidebar scope a desktop window is pinned to, in the web client's encoded
+ * form (`all`, `unfiled`, `collection:<id>`, `project:<key>`). The main process
+ * treats it as opaque: it only carries it into a window's launch URL and
+ * persists it so the window can be restored with the same scope.
+ */
+export const DesktopWindowScopeSchema = Schema.String.check(Schema.isTrimmed()).check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(600),
+);
+export type DesktopWindowScope = typeof DesktopWindowScopeSchema.Type;
+
+export const DesktopOpenWindowInputSchema = Schema.Struct({
+  scope: Schema.optionalKey(DesktopWindowScopeSchema),
+});
+export type DesktopOpenWindowInput = typeof DesktopOpenWindowInputSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getRelayTelemetryEnabled?: () => boolean;
@@ -1031,6 +1048,7 @@ export interface DesktopBridge {
   getConnectionCatalog?: () => Promise<string | null>;
   setConnectionCatalog?: (catalog: string) => Promise<boolean>;
   clearConnectionCatalog?: () => Promise<void>;
+  onConnectionCatalogChanged?: (listener: () => void) => () => void;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   resolveSshHost: (alias: string) => Promise<DesktopSshEnvironmentTarget>;
   requestSnapShotPermissions?: (includeAccessibility: boolean) => Promise<void>;
@@ -1090,6 +1108,20 @@ export interface DesktopBridge {
   receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
+  /**
+   * Open another app window, pinned to a sidebar scope when one is given.
+   * Optional: older desktop builds lack it, and web callers hide the action.
+   */
+  openWindow?: (input: DesktopOpenWindowInput) => Promise<void>;
+  /**
+   * Tell the main process which scope the calling window now shows so it can
+   * restore the window with that scope. Optional like `openWindow`.
+   */
+  setWindowScope?: (scope: DesktopWindowScope) => Promise<void>;
+  /**
+   * Open a System Settings pane by identifier. Optional: older desktop builds
+   * lack it, and callers no-op when it is missing.
+   */
   openSystemSettings?: (pane: SystemSettingsPane) => Promise<boolean>;
   checkSystemPermission?: (pane: SystemSettingsPane) => Promise<boolean>;
   /** Older builds lack this; fall back to VS Code only. */
