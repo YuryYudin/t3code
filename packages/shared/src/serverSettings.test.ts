@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
+  ProjectCollectionsDocument,
   ProviderDriverKind,
   ProviderInstanceId,
   SecretProviderId,
@@ -30,6 +31,8 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
+
+const decodeProjectCollectionsDocument = Schema.decodeUnknownSync(ProjectCollectionsDocument);
 
 describe("fallbackTextGenerationModelSelection", () => {
   it("replaces and clears the fallback without carrying model options", () => {
@@ -119,6 +122,78 @@ describe("serverSettings helpers", () => {
       hosts: { "github.com": { enabled: false } },
       tokens: {},
     });
+  });
+  it("replaces SSH host lists when saving, editing, and removing hosts", () => {
+    const host = { kind: "ssh" as const, id: "mini", label: "Mac mini", target: "mini" };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { deviceHosts: [host] });
+    expect(saved.deviceHosts).toEqual([host]);
+    const replacement = { ...host, target: "other-mini" };
+    const edited = applyServerSettingsPatch(saved, { deviceHosts: [replacement] });
+    expect(edited.deviceHosts).toEqual([replacement]);
+    expect(applyServerSettingsPatch(edited, { deviceHosts: [] }).deviceHosts).toEqual([]);
+  });
+
+  it("persists a smaller project-collections document as one complete replacement", () => {
+    const projectCollections = decodeProjectCollectionsDocument({
+      schemaVersion: 1,
+      collections: [
+        {
+          id: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+          name: "Work",
+          visual: { kind: "lucide", name: "briefcase", color: "blue" },
+        },
+      ],
+      assignments: [
+        {
+          projectKey: "github.com/t3tools/t3code",
+          collectionId: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+        },
+      ],
+    });
+    const currentProjectCollections = decodeProjectCollectionsDocument({
+      schemaVersion: 1,
+      collections: [
+        ...projectCollections.collections,
+        {
+          id: "6826d7e2-7f87-4381-8d65-8b1333727d2e",
+          name: "Personal",
+          visual: { kind: "emoji", emoji: "🏠" },
+        },
+      ],
+      assignments: [
+        ...projectCollections.assignments,
+        {
+          projectKey: "github.com/example/removed",
+          collectionId: "6826d7e2-7f87-4381-8d65-8b1333727d2e",
+        },
+      ],
+    });
+    const current = { ...DEFAULT_SERVER_SETTINGS, projectCollections: currentProjectCollections };
+
+    const next = applyServerSettingsPatch(current, { projectCollections });
+
+    expect(next.projectCollections).toBe(projectCollections);
+    expect(next.projectCollections.collections).toHaveLength(1);
+    expect(next.projectCollections.assignments).toHaveLength(1);
+  });
+
+  it("replaces EAS host lists the same way", () => {
+    const host = {
+      kind: "eas" as const,
+      id: "eas",
+      label: "EAS Simulator",
+      accessToken: "",
+      maxSessionMinutes: 30,
+      idleMinutes: 10,
+      maxConcurrentSessions: 2,
+    };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { easDeviceHosts: [host] });
+    expect(saved.easDeviceHosts).toEqual([host]);
+    const edited = applyServerSettingsPatch(saved, {
+      easDeviceHosts: [{ ...host, maxSessionMinutes: 60 }],
+    });
+    expect(edited.easDeviceHosts).toEqual([{ ...host, maxSessionMinutes: 60 }]);
+    expect(applyServerSettingsPatch(edited, { easDeviceHosts: [] }).easDeviceHosts).toEqual([]);
   });
 
   it("inherits actions, preserves existing actions, and supports empty overrides and reset", () => {

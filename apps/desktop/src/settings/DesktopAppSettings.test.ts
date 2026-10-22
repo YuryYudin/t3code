@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 
@@ -33,6 +34,22 @@ const DesktopSettingsPatch = Schema.Struct({
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
   wslMode: Schema.optionalKey(Schema.Literals(["local", "wsl"])),
   wslDistro: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  windows: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        bounds: Schema.NullOr(
+          Schema.Struct({
+            x: Schema.Number,
+            y: Schema.Number,
+            width: Schema.Number,
+            height: Schema.Number,
+          }),
+        ),
+        maximized: Schema.Boolean,
+        scope: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
   wslOnly: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -140,6 +157,126 @@ describe("DesktopSettings", () => {
         }),
       ),
   );
+  it.effect("loads defaults when no settings file exists", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        assert.deepEqual(yield* settings.load, DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS);
+        assert.deepEqual(yield* settings.get, DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS);
+      }),
+    ),
+  );
+
+  it("defaults packaged nightly builds to the nightly update channel", () => {
+    assert.deepEqual(
+      DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1"),
+      {
+        linuxPasswordStore: "auto",
+        localEnvironmentEnabled: true,
+        mainWindowBounds: null,
+        mainWindowMaximized: false,
+        serverExposureMode: "local-only",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+        updateChannel: "nightly",
+        updateChannelConfiguredByUser: false,
+        wslBackendEnabled: false,
+        wslOnly: false,
+        wslDistro: null,
+        windows: [],
+      } satisfies DesktopAppSettings.DesktopSettings,
+    );
+  });
+
+  it.effect("loads persisted settings and applies semantic updates", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* writeSettingsPatch({
+          linuxPasswordStore: "gnome-libsecret",
+          serverExposureMode: "network-accessible",
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 8443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: true,
+        });
+
+        assert.deepEqual(yield* settings.load, {
+          linuxPasswordStore: "gnome-libsecret",
+          localEnvironmentEnabled: true,
+          mainWindowBounds: null,
+          mainWindowMaximized: false,
+          serverExposureMode: "network-accessible",
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 8443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: true,
+          wslBackendEnabled: false,
+          wslOnly: false,
+          wslDistro: null,
+          windows: [],
+        } satisfies DesktopAppSettings.DesktopSettings);
+
+        const exposure = yield* settings.setServerExposureMode("local-only");
+        assert.isTrue(exposure.changed);
+        assert.equal(exposure.settings.serverExposureMode, "local-only");
+
+        const tailscale = yield* settings.setTailscaleServe({
+          enabled: true,
+          port: Option.some(9443),
+        });
+        assert.isTrue(tailscale.changed);
+        assert.equal(tailscale.settings.tailscaleServePort, 9443);
+
+        const updateChannel = yield* settings.setUpdateChannel("nightly");
+        assert.isTrue(updateChannel.changed);
+        assert.equal(updateChannel.settings.updateChannel, "nightly");
+        assert.equal(updateChannel.settings.updateChannelConfiguredByUser, true);
+      }),
+    ),
+  );
+
+  it.effect("reports the failed desktop settings write operation and path", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* fileSystem.makeDirectory(environment.desktopSettingsPath, { recursive: true });
+
+        const error = yield* settings.setServerExposureMode("network-accessible").pipe(Effect.flip);
+        assert.instanceOf(error, DesktopAppSettings.DesktopSettingsWriteError);
+        assert.equal(error.operation, "replace-settings-file");
+        assert.equal(error.path, environment.desktopSettingsPath);
+        assert.exists(error.cause);
+        assert.equal(
+          error.message,
+          `Desktop settings write failed during replace-settings-file at ${environment.desktopSettingsPath}.`,
+        );
+      }),
+    ),
+  );
+
+  it.effect("does not persist no-op semantic updates", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+
+        const exposure = yield* settings.setServerExposureMode("local-only");
+        assert.isFalse(exposure.changed);
+
+        const tailscale = yield* settings.setTailscaleServe({
+          enabled: false,
+          port: Option.none(),
+        });
+        assert.isFalse(tailscale.changed);
+
+        const updateChannel = yield* settings.setUpdateChannel("latest");
+        assert.isFalse(updateChannel.changed);
+        assert.equal(updateChannel.settings.updateChannelConfiguredByUser, false);
+      }),
+    ),
+  );
 
   it.effect("falls back to defaults when the settings file is malformed", () =>
     withSettings(
@@ -186,6 +323,10 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          // Legacy document: the saved main window becomes the one restore record.
+          windows: [
+            { bounds: { x: 120, y: 80, width: 1280, height: 900 }, maximized: false, scope: null },
+          ],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
     ),
@@ -209,6 +350,46 @@ describe("DesktopSettings", () => {
     ),
   );
 
+  it.effect(
+    "normalizes unsupported linux password-store values without dropping other settings",
+    () =>
+      withSettings(
+        Effect.gen(function* () {
+          const environment = yield* DesktopEnvironment.DesktopEnvironment;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const settings = yield* DesktopAppSettings.DesktopAppSettings;
+          yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+          yield* fileSystem.writeFileString(
+            environment.desktopSettingsPath,
+            `{
+            "linuxPasswordStore": "unsupported-store",
+            "serverExposureMode": "network-accessible",
+            "tailscaleServeEnabled": true,
+            "tailscaleServePort": 8443,
+            "updateChannel": "nightly",
+            "updateChannelConfiguredByUser": true
+          }\n`,
+          );
+
+          assert.deepEqual(yield* settings.load, {
+            linuxPasswordStore: "auto",
+            localEnvironmentEnabled: true,
+            mainWindowBounds: null,
+            mainWindowMaximized: false,
+            serverExposureMode: "network-accessible",
+            tailscaleServeEnabled: true,
+            tailscaleServePort: 8443,
+            updateChannel: "nightly",
+            updateChannelConfiguredByUser: true,
+            wslBackendEnabled: false,
+            wslOnly: false,
+            wslDistro: null,
+            windows: [],
+          } satisfies DesktopAppSettings.DesktopSettings);
+        }),
+      ),
+  );
+
   it.effect("persists sparse desktop settings documents", () =>
     withSettings(
       Effect.gen(function* () {
@@ -226,6 +407,13 @@ describe("DesktopSettings", () => {
           mainWindowBounds: { x: -1200, y: 40, width: 1440, height: 960 },
           mainWindowMaximized: true,
           serverExposureMode: "network-accessible",
+          windows: [
+            {
+              bounds: { x: -1200, y: 40, width: 1440, height: 960 },
+              maximized: true,
+              scope: null,
+            },
+          ],
         } satisfies typeof DesktopSettingsPatch.Type);
       }),
     ),
@@ -281,6 +469,7 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
@@ -310,9 +499,38 @@ describe("DesktopSettings", () => {
           wslBackendEnabled: false,
           wslOnly: false,
           wslDistro: null,
+          windows: [],
         } satisfies DesktopAppSettings.DesktopSettings);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
+    ),
+  );
+
+  it.effect("normalizes invalid persisted Tailscale Serve ports", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* writeSettingsPatch({
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 0,
+        });
+
+        assert.deepEqual(yield* settings.load, {
+          linuxPasswordStore: "auto",
+          localEnvironmentEnabled: true,
+          mainWindowBounds: null,
+          mainWindowMaximized: false,
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+          wslBackendEnabled: false,
+          wslOnly: false,
+          wslDistro: null,
+          windows: [],
+        } satisfies DesktopAppSettings.DesktopSettings);
+      }),
     ),
   );
 
@@ -387,6 +605,182 @@ describe("DesktopSettings", () => {
         const loaded = yield* settings.load;
         assert.equal(loaded.wslBackendEnabled, true);
         assert.equal(loaded.wslDistro, "Ubuntu-22.04");
+      }),
+    ),
+  );
+
+  it.effect("drops invalid persisted wsl distro values on load", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* writeSettingsPatch({
+          wslBackendEnabled: true,
+          wslDistro: "bad/name",
+        });
+        const loaded = yield* settings.load;
+        assert.equal(loaded.wslBackendEnabled, true);
+        assert.equal(loaded.wslDistro, null);
+      }),
+    ),
+  );
+
+  it.effect("keeps a window record per window and mirrors the first one", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const mainBounds = { x: 0, y: 0, width: 1100, height: 780 };
+        const secondBounds = { x: 400, y: 120, width: 1280, height: 900 };
+
+        yield* settings.setWindowRecord(0, {
+          bounds: mainBounds,
+          maximized: false,
+          scope: "collection:one",
+        });
+        yield* settings.setWindowRecord(1, {
+          bounds: secondBounds,
+          maximized: true,
+          scope: "collection:two",
+        });
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: secondBounds, maximized: true, scope: "collection:two" },
+        ]);
+        // A downgraded build reads only the mirrored main window keys.
+        assert.deepEqual(loaded.mainWindowBounds, mainBounds);
+        assert.isFalse(loaded.mainWindowMaximized);
+        const persisted = yield* decodeDesktopSettingsPatch(
+          yield* fileSystem.readFileString(environment.desktopSettingsPath),
+        );
+        assert.deepEqual(persisted.mainWindowBounds, mainBounds);
+        assert.deepEqual(persisted.windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: secondBounds, maximized: true, scope: "collection:two" },
+        ]);
+
+        // A secondary window moving never touches the main window's record.
+        const moved = { x: 500, y: 200, width: 1280, height: 900 };
+        yield* settings.setWindowRecord(1, {
+          bounds: moved,
+          maximized: false,
+          scope: "collection:two",
+        });
+        assert.deepEqual((yield* settings.load).windows, [
+          { bounds: mainBounds, maximized: false, scope: "collection:one" },
+          { bounds: moved, maximized: false, scope: "collection:two" },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("removes a closed window's record and re-indexes the rest", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const first = { x: 0, y: 0, width: 1100, height: 780 };
+        const second = { x: 40, y: 40, width: 1280, height: 900 };
+        yield* settings.setWindowRecord(0, { bounds: first, maximized: false, scope: null });
+        yield* settings.setWindowRecord(1, {
+          bounds: second,
+          maximized: false,
+          scope: "collection:two",
+        });
+
+        const removed = yield* settings.removeWindowRecord(0);
+        assert.isTrue(removed.changed);
+        assert.deepEqual(removed.settings.windows, [
+          { bounds: second, maximized: false, scope: "collection:two" },
+        ]);
+        assert.deepEqual(removed.settings.mainWindowBounds, second);
+        assert.isFalse((yield* settings.removeWindowRecord(4)).changed);
+
+        // With no windows left the last known main bounds survive for the next launch.
+        const emptied = yield* settings.removeWindowRecord(0);
+        assert.deepEqual(emptied.settings.windows, []);
+        assert.deepEqual(emptied.settings.mainWindowBounds, second);
+      }),
+    ),
+  );
+
+  it.effect("setMainWindowBounds still writes record 0 and keeps its scope", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setWindowRecord(0, {
+          bounds: { x: 0, y: 0, width: 1100, height: 780 },
+          maximized: false,
+          scope: "collection:one",
+        });
+
+        const bounds = { x: 20, y: 20, width: 1200, height: 800 };
+        const change = yield* settings.setMainWindowBounds(bounds, true);
+        assert.isTrue(change.changed);
+        assert.deepEqual(change.settings.windows, [
+          { bounds, maximized: true, scope: "collection:one" },
+        ]);
+        assert.isFalse((yield* settings.setMainWindowBounds(bounds, true)).changed);
+      }),
+    ),
+  );
+
+  it.effect("drops unusable persisted window entries", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.desktopSettingsPath,
+          `{
+            "mainWindowBounds": { "x": 10, "y": 10, "width": 1100, "height": 780 },
+            "windows": [
+              null,
+              7,
+              { "bounds": { "x": 10, "y": 10, "width": 1100, "height": 780 }, "scope": "collection:one" },
+              { "bounds": { "x": 1, "y": 2, "width": 10, "height": 10 }, "maximized": true, "scope": 5 }
+            ]
+          }\n`,
+        );
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, [
+          {
+            bounds: { x: 10, y: 10, width: 1100, height: 780 },
+            maximized: false,
+            scope: "collection:one",
+          },
+          // Unusable bounds still restore a window, just at the default size.
+          { bounds: null, maximized: false, scope: null },
+        ]);
+        assert.deepEqual(loaded.mainWindowBounds, { x: 10, y: 10, width: 1100, height: 780 });
+      }),
+    ),
+  );
+
+  it.effect("keeps the legacy main window bounds when the window list is empty", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.desktopSettingsPath,
+          `{
+            "mainWindowBounds": { "x": 10, "y": 10, "width": 1100, "height": 780 },
+            "mainWindowMaximized": true,
+            "windows": []
+          }\n`,
+        );
+
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.windows, []);
+        assert.deepEqual(loaded.mainWindowBounds, { x: 10, y: 10, width: 1100, height: 780 });
+        assert.isTrue(loaded.mainWindowMaximized);
       }),
     ),
   );

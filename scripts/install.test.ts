@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Drives the real shell installer against a local GitHub fixture.
+// @effect-diagnostics nodeBuiltinImport:off - Drives the real shell installer through a PTY and a gated HTTP fixture.
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -8,6 +8,145 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
+describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer terminal", () => {
+  it.each([
+    { fail: false, lookup: false },
+    { fail: true, lookup: false },
+    { fail: false, lookup: true },
+  ])(
+    "preserves download and install behavior (HTTP failure: $fail, latest lookup: $lookup)",
+    async ({ fail, lookup }) => {
+      const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-progress-"));
+      const version = "0.1.1-2";
+      const stem = `t3-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+      const archiveName = `${stem}.tar.gz`;
+      let resumeDownload: (() => void) | undefined;
+      let sawPartialProgress = false;
+      let output = "";
+      await NodeFSP.mkdir(NodePath.join(root, stem));
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, "t3"),
+        `#!/bin/sh\necho 't3 v${version}'\n`,
+        {
+          mode: 0o755,
+        },
+      );
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, "payload"),
+        NodeCrypto.randomBytes(64 * 1024),
+      );
+      NodeChildProcess.execFileSync("tar", [
+        "-czf",
+        NodePath.join(root, archiveName),
+        "-C",
+        root,
+        stem,
+      ]);
+      const archive = await NodeFSP.readFile(NodePath.join(root, archiveName));
+      const checksum = NodeCrypto.createHash("sha256").update(archive).digest("hex");
+      const requests: string[] = [];
+      const server = NodeHttp.createServer((request, response) => {
+        requests.push(request.url ?? "");
+        if (request.url === "/releases/latest") {
+          response.setHeader("Content-Type", "application/json");
+          response.end(
+            JSON.stringify({ tag_name: `v${version}`, draft: false, prerelease: false }),
+          );
+        } else if (request.url?.endsWith("/SHA256SUMS")) {
+          response.end(`${checksum}  ${archiveName}\n`);
+        } else if (fail) {
+          response.writeHead(500).end();
+        } else {
+          response.writeHead(200, { "Content-Length": archive.length });
+          resumeDownload = () => response.end(archive.subarray(Math.floor(archive.length / 2)));
+          response.write(archive.subarray(0, Math.floor(archive.length / 2)));
+        }
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
+      const toolBin = NodePath.join(root, "tools");
+      await NodeFSP.mkdir(toolBin);
+      const curl = NodeChildProcess.execFileSync("which", ["curl"], { encoding: "utf8" }).trim();
+      // Route only the production fork index URL to the HTTP fixture; keep real curl transfers.
+      await NodeFSP.writeFile(
+        NodePath.join(toolBin, "curl"),
+        `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2).map(arg => arg === 'https://github.com/YuryYudin/t3code/releases/latest' ? 'http://127.0.0.1:${address.port}/releases/latest' : arg);
+const child = spawnSync(${JSON.stringify(curl)}, args, { stdio: 'inherit' });
+process.exit(child.status ?? 1);
+`,
+        { mode: 0o755 },
+      );
+      const installer = NodePath.resolve(import.meta.dirname, "install.sh").replaceAll(
+        "'",
+        "'\\''",
+      );
+      const child = NodeChildProcess.spawn("script", ["-qec", `sh '${installer}'`, "/dev/null"], {
+        env: {
+          ...process.env,
+          TERM: "xterm",
+          NO_COLOR: "1",
+          PATH: `${toolBin}:${process.env.PATH}`,
+          T3CODE_VERSION: lookup ? "" : version,
+          T3CODE_HOME: NodePath.join(root, "home"),
+          T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const collect = (chunk: Buffer) => {
+        output += chunk.toString();
+        if (!sawPartialProgress && /\b[1-9]\d?%/.test(output)) {
+          sawPartialProgress = true;
+          resumeDownload?.();
+        }
+      };
+      child.stdout.on("data", collect);
+      child.stderr.on("data", collect);
+      try {
+        const code = await new Promise<number | null>((resolve, reject) => {
+          child.on("error", reject);
+          child.on("close", resolve);
+        });
+        const versions = NodePath.join(root, "home/runtime/versions");
+        if (fail) {
+          expect(code).not.toBe(0);
+          expect(output).toContain("500");
+          expect(output).not.toContain("100%");
+          expect(output).not.toContain("Installed T3 Code");
+          expect(await NodeFSP.readdir(versions)).toEqual([]);
+        } else {
+          expect(code).toBe(0);
+          expect(sawPartialProgress).toBe(true);
+          expect(output).toContain("100%");
+          expect(output).toContain("0.1 / 0.1 MB");
+          expect(output).toContain(`Installed T3 Code ${version}`);
+          expect(requests.includes("/releases/latest")).toBe(lookup);
+          expect(
+            await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
+          ).toBe(`${version}\n`);
+          expect(
+            NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+              encoding: "utf8",
+            }).trim(),
+          ).toBe(`t3 v${version}`);
+          expect(await NodeFSP.readdir(versions)).toEqual([version]);
+          expect(
+            await NodeFSP.readFile(NodePath.join(root, "home/runtime/launchers"), "utf8"),
+          ).toBe(`${NodePath.join(root, "bin/t3")}\n`);
+        }
+      } finally {
+        if (child.exitCode === null) child.kill();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await NodeFSP.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 const nightlies = Array.from({ length: 100 }, (_, index) => ({
   tag_name: `v1.2.4-nightly.20261020.${200 - index}`,
 }));
@@ -15,7 +154,7 @@ const nightlies = Array.from({ length: 100 }, (_, index) => ({
 // regression: #22490
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer channel lookup", () => {
   it.each([
-    ["stable", "1.2.3"],
+    ["stable", "1.2.3-4"],
     ["preview", "1.2.4-preview.20261019.50"],
   ])("finds the newest %s release behind a full page of nightlies", async (channel, version) => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-index-"));
@@ -23,11 +162,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
     const server = NodeHttp.createServer((request, response) => {
       const url = new URL(request.url ?? "/", "http://fixture");
       const body =
-        url.pathname === "/pingdotgg/t3code/releases/latest" &&
+        url.pathname === "/YuryYudin/t3code/releases/latest" &&
         request.headers.accept === "application/json"
-          ? { tag_name: "v1.2.3" }
-          : url.pathname === "/repos/pingdotgg/t3code/releases"
-            ? { "1": nightlies, "2": [{ tag_name: `v${version}` }, { tag_name: "v1.2.3" }] }[
+          ? { tag_name: "v1.2.3-4" }
+          : url.pathname === "/repos/YuryYudin/t3code/releases"
+            ? { "1": nightlies, "2": [{ tag_name: `v${version}` }, { tag_name: "v1.2.3-4" }] }[
                 url.searchParams.get("page") ?? ""
               ]
             : undefined;

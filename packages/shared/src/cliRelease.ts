@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
 
-const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
+const CLI_RELEASE_REPOSITORY = "YuryYudin/t3code";
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";
@@ -104,11 +104,29 @@ export function cliReleaseIndexPageUrl(page: number): string {
   return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
 }
 
+export function cliReleaseTagUrl(version: string): string {
+  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases/tags/v${encodeURIComponent(version)}`;
+}
+
+export function cliReleaseMigrationsUrl(version: string): string {
+  return `https://raw.githubusercontent.com/${CLI_RELEASE_REPOSITORY}/v${encodeURIComponent(version)}/apps/server/src/persistence/Migrations.ts`;
+}
+
+/** Highest registered migration id in a tagged server's migration manifest source. */
+export function cliReleaseDatabaseMigration(source: string): number | undefined {
+  const ids = [...source.matchAll(/^\s*\[(\d+),\s*"/gm)].flatMap((match) => {
+    const id = Number(match[1]);
+    return Number.isSafeInteger(id) ? [id] : [];
+  });
+  return ids.length === 0 ? undefined : Math.max(...ids);
+}
+
 /** Draft assets are not downloadable. */
 export function newestCliReleaseVersion(
   releases: ReadonlyArray<{
     readonly tag_name: string;
     readonly draft?: boolean | undefined;
+    readonly prerelease?: boolean | undefined;
   }>,
   channel: CliReleaseChannel,
 ): string | undefined {
@@ -116,6 +134,10 @@ export function newestCliReleaseVersion(
     if (release.draft) continue;
     const version = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
     if (version === undefined) continue;
+    // Fork revisions are stable builds, while withdrawn releases remain archived as prereleases.
+    if (channel === "stable" && (release.prerelease || !/^\d+\.\d+\.\d+-\d+$/.test(version))) {
+      continue;
+    }
     if (cliReleaseChannelOf(version) === channel) return version;
   }
   return undefined;

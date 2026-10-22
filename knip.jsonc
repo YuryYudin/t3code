@@ -25,8 +25,10 @@
       // release-desktop.yml runs the desktop launch check through xvfb-run, which knip
       // does not trace.
       "entry": [
+        "diagnose-apple-notarization.ts",
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        "fork-integration.ts",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",

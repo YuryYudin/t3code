@@ -9,7 +9,7 @@ import { AsyncResult } from "effect/reactivity";
 import { APP_VERSION } from "~/branding";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments } from "~/state/environments";
-import { npmReleaseAtom, npmReleaseFailureMessage } from "~/state/npmRelease";
+import { npmReleaseAtom } from "~/state/npmRelease";
 import { downloadLocalUpdate, installLocalUpdate } from "../sidebar/SidebarUpdatePill";
 import { UpdateEverythingDialog } from "../sidebar/UpdateEverythingDialog";
 import {
@@ -39,7 +39,7 @@ export function UpdateTrackSwitchDialog({
   readonly channel: DesktopUpdateChannel;
   readonly onClose: () => void;
 }) {
-  // npm dist-tags match the desktop channel names.
+  // The fork release index maps the desktop channel names to its published tracks.
   const release = useAtomValue(npmReleaseAtom(channel));
   if (AsyncResult.isSuccess(release) && release.value !== null) {
     return <SwitchPlan release={{ channel, ...release.value }} onClose={onClose} />;
@@ -51,11 +51,9 @@ export function UpdateTrackSwitchDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Switch to {label}</AlertDialogTitle>
           <AlertDialogDescription>
-            {AsyncResult.isFailure(release)
-              ? npmReleaseFailureMessage(release.cause)
-              : AsyncResult.isSuccess(release)
-                ? `Could not find the latest ${label} release in this environment's npm registry.`
-                : "Checking releases…"}
+            {AsyncResult.isFailure(release) || AsyncResult.isSuccess(release)
+              ? `Could not find the latest ${label} fork release. Try again later.`
+              : "Checking releases…"}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

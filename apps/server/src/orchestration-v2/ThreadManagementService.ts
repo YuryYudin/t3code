@@ -99,6 +99,7 @@ function existingThreadIdsForCommand(
 ): ReadonlyArray<ThreadId> {
   switch (command.type) {
     case "thread.create":
+    case "thread.external-alert.upsert":
       return [];
     // Read-state commands only rewrite the thread payload's visited/unread
     // watermark and open stats; they never touch messages, so they do not need the imported

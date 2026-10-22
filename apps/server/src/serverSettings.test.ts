@@ -34,6 +34,7 @@ import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
 
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 const decodeServerSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 
@@ -407,6 +408,34 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("persists a non-default project collections document atomically", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const patch = yield* decodeSettingsPatch({
+        projectCollections: {
+          schemaVersion: 1,
+          collections: [
+            {
+              id: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+              name: "Work",
+              visual: { kind: "lucide", name: "briefcase", color: "indigo" },
+            },
+          ],
+          assignments: [],
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings(patch);
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      const persisted = JSON.parse(raw);
+
+      assert.deepEqual(next.projectCollections, patch.projectCollections);
+      assert.deepEqual(persisted.projectCollections, patch.projectCollections);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("keeps an external settings edit that the watcher has not reloaded yet", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
@@ -543,6 +572,34 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         (yield* serverSettings.getSettings).providerInstances[instanceId]?.displayName,
         "Kilo",
       );
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("persists a non-default project collections document atomically", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const patch = yield* decodeSettingsPatch({
+        projectCollections: {
+          schemaVersion: 1,
+          collections: [
+            {
+              id: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+              name: "Work",
+              visual: { kind: "lucide", name: "briefcase", color: "indigo" },
+            },
+          ],
+          assignments: [],
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings(patch);
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      const persisted = JSON.parse(raw);
+
+      assert.deepEqual(next.projectCollections, patch.projectCollections);
+      assert.deepEqual(persisted.projectCollections, patch.projectCollections);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 

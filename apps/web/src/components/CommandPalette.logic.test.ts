@@ -1,20 +1,34 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import type { Thread } from "../types";
+import {
+  EnvironmentId,
+  ProjectCollectionId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
   newThreadNoProjectIndex,
+  buildBrowseGroups,
+  buildNewWindowActionItem,
+  buildCommandPaletteProjectMetadata,
+  buildCommandPaletteRows,
+  buildProjectActionItems,
   buildNestedSearchItems,
   resolveCommandPaletteProject,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
+  findHighlightedCommandPaletteItem,
   reduceCommandPaletteUiState,
   resolveAddProjectEntry,
   createCommandPaletteSearchState,
   reduceCommandPaletteSearchState,
   type CommandPaletteUiState,
+  type CommandPaletteActionItem,
+  type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
 describe("linked pull request thread navigation", () => {
@@ -837,6 +851,101 @@ it.each([
   expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
     "Implementation",
   ]);
+});
+
+describe("filterCommandPaletteGroups", () => {
+  it("sorts secondary settings results after other matches", () => {
+    const item = (value: string, title: string, secondary?: boolean) =>
+      ({
+        kind: "action",
+        value,
+        title,
+        searchTerms: [title, "General"],
+        icon: null,
+        run: async () => undefined,
+        ...(secondary ? { secondary } : {}),
+      }) satisfies CommandPaletteActionItem;
+    const [group] = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "model",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      settingsSearchItems: [
+        item("setting:keybinding-modelPicker.toggle", "Model Picker: Toggle", true),
+        item("setting:default-model", "Default model"),
+      ],
+      threadSearchItems: [],
+    });
+    expect(group?.items.map((entry) => entry.value)).toEqual([
+      "setting:default-model",
+      "setting:keybinding-modelPicker.toggle",
+    ]);
+  });
+});
+
+describe("new window command", () => {
+  it("is offered only when the desktop shell can open windows", () => {
+    expect(buildNewWindowActionItem({ scope: { kind: "all" }, icon: null })).toBeNull();
+    expect(buildNewWindowActionItem({ scope: { kind: "all" }, icon: null, bridge: {} })).toBeNull();
+  });
+
+  it("opens a window pinned to the scope this window is showing", async () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const openWindow = vi.fn(async () => {});
+
+    const item = buildNewWindowActionItem({
+      scope: { kind: "collection", collectionId },
+      icon: null,
+      bridge: { openWindow },
+    });
+
+    expect(item?.value).toBe("action:new-window");
+    await item?.run();
+    expect(openWindow).toHaveBeenCalledWith({ scope: `collection:${collectionId}` });
+  });
+});
+
+describe("virtualized command palette rows", () => {
+  const action = (value: string, disabled = false): CommandPaletteActionItem => ({
+    kind: "action",
+    value,
+    searchTerms: [],
+    title: value,
+    icon: null,
+    ...(disabled ? { disabled } : {}),
+    run: async () => {},
+  });
+  const groups: CommandPaletteGroup[] = [
+    { value: "actions", label: "Actions", items: [action("new-thread"), action("offline", true)] },
+    { value: "threads", label: "Threads", items: [action("thread-a"), action("thread-b")] },
+  ];
+
+  it("keeps group order and headings while indexing only enabled items", () => {
+    const { rows, itemValues, rowIndexByItemIndex } = buildCommandPaletteRows(groups);
+
+    expect(rows.map((row) => (row.kind === "label" ? `# ${row.label}` : row.key))).toEqual([
+      "# Actions",
+      "actions:new-thread",
+      "actions:offline",
+      "# Threads",
+      "threads:thread-a",
+      "threads:thread-b",
+    ]);
+    expect(itemValues).toEqual(["new-thread", "thread-a", "thread-b"]);
+    expect(rowIndexByItemIndex).toEqual([1, 4, 5]);
+    expect(rows.flatMap((row) => (row.kind === "item" ? [row.itemIndex] : []))).toEqual([
+      0,
+      null,
+      1,
+      2,
+    ]);
+  });
+
+  it("resolves Enter to the highlighted item without needing its row mounted", () => {
+    expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
+    expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
+    expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
+  });
 });
 
 describe("command palette search return", () => {
