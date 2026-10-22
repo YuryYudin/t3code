@@ -347,13 +347,16 @@ def buildLinux(String slug, String candidateRef, String version) {
                             set -euo pipefail
                             vp_home="$PWD/.vite-plus-ci"
                             curl --silent --show-error --fail-with-body --location https://vite.plus | VP_VERSION=0.3.2 VP_HOME="$vp_home" VP_SELF_SETUP_NO_MODIFY_PATH=1 bash
+                            cli_node_version=$(node scripts/fork-release.ts cli-node-version)
+                            PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" "$vp_home/bin/vp" env on
+                            PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION="$cli_node_version" "$vp_home/bin/vp" env exec node --version
                         '''
                     }
                 }
                 sh '''
                     vp_home="$PWD/.vite-plus-ci"
-                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" "$vp_home/bin/vp" env on
-                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION=26.8.2 "$vp_home/bin/vp" env exec node apps/server/scripts/cli.ts build-exe --verbose
+                    cli_node_version=$(node scripts/fork-release.ts cli-node-version)
+                    PATH="$vp_home/bin:$PATH" VP_HOME="$vp_home" VP_NODE_VERSION="$cli_node_version" "$vp_home/bin/vp" env exec node apps/server/scripts/cli.ts build-exe --verbose
                 '''
                 sh """
                     mkdir -p artifacts/cli-resource-monitor/linux-x64 artifacts/wsl-runtime
