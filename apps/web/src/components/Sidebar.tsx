@@ -186,7 +186,6 @@ import {
   type SidebarRouteReveal,
 } from "./sidebar/routeReveal";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { Button } from "./ui/button";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
@@ -971,7 +970,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   // Scope flips drop the selection: rows selected under the old scope may be
   // hidden now, and bulk actions must never count or touch invisible rows.
+  const selectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
+    if (selectionScopeRef.current === projectCollectionScopeKey) return;
+    selectionScopeRef.current = projectCollectionScopeKey;
     clearSelection();
   }, [clearSelection, projectCollectionScopeKey]);
 

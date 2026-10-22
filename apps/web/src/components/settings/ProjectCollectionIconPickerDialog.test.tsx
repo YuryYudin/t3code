@@ -1,15 +1,9 @@
+import { act } from "../../../test/rendererAct";
 import {
   PROJECT_COLLECTION_ICON_NAMES,
   type ProjectCollectionVisual,
 } from "@t3tools/contracts/settings";
-import {
-  act,
-  Children,
-  cloneElement,
-  isValidElement,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { PROJECT_ICON_COLORS } from "../../projectIconOptions";
@@ -131,7 +125,6 @@ function renderPicker(
 
 beforeEach(() => {
   focusedLabels = [];
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 });
 
 afterEach(() => {

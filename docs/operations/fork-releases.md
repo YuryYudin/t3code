@@ -8,7 +8,10 @@ Use **Build with Parameters** for these manual actions:
 
 - `validate-only` checks an exact `UPSTREAM_REF` without changing GitHub, T3 Code, or release branches.
 - `out-of-cycle` publishes the current fork source on the latest upstream stable base with the next numeric suffix. To release a reviewed maintenance branch before moving `main`, run that branch's job with `SOURCE_REF=HEAD`; Jenkins validates the full artifact set before promoting its candidate to `main`.
+
 - `sync-upstream` immediately merges current upstream `main` into the persistent integration branch, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
+
+For an explicitly requested release base, set `EXPECTED_UPSTREAM_VERSION` to its official version, such as `0.1.2`. If another stable release appears before a retry resolves its plan, Jenkins stops before candidate preparation instead of silently changing the requested base. Scheduled builds leave this empty and continue following the latest official stable release.
 
 `apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.
 
@@ -16,6 +19,16 @@ Use **Build with Parameters** for these manual actions:
 Scheduled `auto` builds perform release work only on the `main` job. The repository's Jenkinsfile guards other current branches. Reindex the multibranch project when branch jobs or their Jenkinsfiles are stale; indexing can queue builds for every changed discovered branch, so watch the queue and stop redundant builds by their exact job/build ID.
 
 Fetch upstream `main` with `--no-tags`. The release resolver fetches the selected official stable tag into `refs/upstream-tags/`; upstream movable aliases such as `android-nightly` must not share the fork's `refs/tags/` namespace. The desktop artifact tests load the checked-out workspace configuration before packaging so malformed build approvals fail in the repairable quality gate.
+
+## Standalone CLI releases
+
+Starting with `v0.1.2-1`, Jenkins publishes `t3-<version>-linux-x64.tar.gz` and `install.sh` alongside the desktop and Android installers. The archive includes the executable, web client, runtime dependencies, and resource monitor; the Linux build smoke-tests it before publication. `SHA256SUMS` and `SHA256SUMS.txt` contain identical checksums of the final artifacts, excluding the checksum files themselves. Both names are required because the CLI installer and updater use `SHA256SUMS`, while existing fork consumers use `SHA256SUMS.txt`.
+
+Download `install.sh` from the fork release, inspect it, then run it with `T3CODE_VERSION=<version>` to install an exact fork version. Without that variable it selects the fork's latest published stable release. Do not use `t3.codes/install.sh` or `npx t3` to install a fork version: those distribution channels belong to upstream. This fork currently publishes standalone CLI archives for Linux x64 only; other platforms use the desktop app.
+
+The CLI's release index and default archive downloads point to `YuryYudin/t3code`. Stable update selection accepts numeric fork revisions and skips drafts and archived prereleases. The desktop and web **Update everything** action checks the fork's public GitHub release for the uploaded Linux x64 archive and checksums instead of waiting for an upstream npm publication. `T3CODE_RELEASE_BASE_URL` remains available for archive mirrors. Jenkins runs the installer, update-selection, availability, and pinned-runtime regression tests during maintenance so rebases retain this behavior.
+
+For a V1-to-V2 migration, stop the existing service and back up its actual T3 home before installing and activating the new version. Installing the executable does not itself migrate or restart an already running service. Use that executable's `service install` command to install or repair the background service, retaining the existing home and connection settings. Upgrade one remote first and verify access before moving the remaining hosts; V1 clients cannot connect to V2 servers.
 
 ## Fork version policy
 

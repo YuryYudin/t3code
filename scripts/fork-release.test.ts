@@ -315,6 +315,9 @@ describe("release asset gate", () => {
     "latest-linux.yml",
     "latest.yml",
     "SHA256SUMS.txt",
+    "SHA256SUMS",
+    "t3-0.0.41-1-linux-x64.tar.gz",
+    "install.sh",
   ];
 
   it("requires the complete four-target matrix and merged manifests", () => {
@@ -338,6 +341,18 @@ describe("release asset gate", () => {
       ),
     ).toThrow(/Android arm64/);
   });
+
+  it.each(["t3-0.0.41-1-linux-x64.tar.gz", "SHA256SUMS", "install.sh"])(
+    "rejects a release missing the server installation asset %s",
+    (missing) => {
+      expect(() =>
+        requiredReleaseAssets(
+          assets.filter((name) => name !== missing),
+          "0.0.41-1",
+        ),
+      ).toThrow(/CLI/);
+    },
+  );
 
   function releaseFixture() {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-release-assets-"));
@@ -387,7 +402,12 @@ describe("release asset gate", () => {
       const checksums = NodeFS.readFileSync(NodePath.join(directory, "SHA256SUMS.txt"), "utf8");
       expect(checksums).toContain(`${evidence.sha256[dmg]}  ${dmg}\n`);
       expect(checksums).toContain(`${evidence.sha256["latest-mac.yml"]}  latest-mac.yml\n`);
-      expect(checksums).not.toContain("SHA256SUMS.txt");
+      expect(checksums).not.toContain("SHA256SUMS");
+      expect(checksums).toContain(
+        `${evidence.sha256["t3-0.0.41-1-linux-x64.tar.gz"]}  t3-0.0.41-1-linux-x64.tar.gz\n`,
+      );
+      expect(NodeFS.readFileSync(NodePath.join(directory, "SHA256SUMS"), "utf8")).toBe(checksums);
+      expect(finalizeReleaseAssets(directory, "0.0.41-1")).toEqual(evidence);
     } finally {
       NodeFS.rmSync(directory, { recursive: true, force: true });
     }

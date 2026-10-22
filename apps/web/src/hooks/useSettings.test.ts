@@ -1,13 +1,13 @@
+import { act } from "../../test/rendererAct";
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectCollectionId,
-  ProviderDriverKind,
   ProviderInstanceId,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS, type ClientSettings } from "@t3tools/contracts/settings";
-import { act, createElement, useLayoutEffect } from "react";
+import { createElement, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -62,14 +62,12 @@ import {
   persistClientSettingsPatch,
   persistClientSettingsUpdate,
   prepareModelPreferencesPatch,
-  resolveEnvironmentIdentificationMode,
   useUpdateEnvironmentSettings,
   useUpdatePrimarySettings,
 } from "./useSettings";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   persistenceMocks.getClientSettings.mockReset().mockResolvedValue(null);
   persistenceMocks.setClientSettings.mockReset().mockResolvedValue(undefined);
   __resetClientSettingsPersistenceForTests();

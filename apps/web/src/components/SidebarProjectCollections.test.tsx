@@ -1,3 +1,4 @@
+import { act } from "../../test/rendererAct";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   EnvironmentId,
@@ -7,7 +8,6 @@ import {
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import {
-  act,
   Children,
   cloneElement,
   isValidElement,
@@ -16,7 +16,7 @@ import {
   type ReactNode,
 } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("lucide-react/dynamic", () => ({
   DynamicIcon: ({ name }: { readonly name: string }) => <svg data-icon={name} />,
@@ -112,18 +112,18 @@ vi.mock("@base-ui/react/combobox", async () => {
   }) => {
     const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
     const open = controlledOpen ?? uncontrolledOpen;
-    const setOpen = React.useCallback(
-      (nextOpen: boolean) => {
-        if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
-        onOpenChange?.(nextOpen);
-      },
-      [controlledOpen, onOpenChange, setUncontrolledOpen],
-    );
-    const selectItem = React.useCallback((item: unknown) => onValueChange?.(item), [onValueChange]);
-    const contextValue = React.useMemo(
-      () => ({ autoHighlight, filteredItems, onValueChange: selectItem, open, setOpen }),
-      [autoHighlight, filteredItems, open, selectItem, setOpen],
-    );
+    const setOpen = (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    };
+    const selectItem = (item: unknown) => onValueChange?.(item);
+    const contextValue = (() => ({
+      autoHighlight,
+      filteredItems,
+      onValueChange: selectItem,
+      open,
+      setOpen,
+    }))();
     return (
       <Context.Provider value={contextValue}>
         <div>{children}</div>
@@ -439,7 +439,6 @@ function renderBoundary(
   };
 }
 
-beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;

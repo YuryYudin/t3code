@@ -388,6 +388,9 @@ export function requiredReleaseAssets(names: ReadonlyArray<string>, version: str
     ["Linux update manifest", (name) => name === "latest-linux.yml"],
     ["Windows update manifest", (name) => name === "latest.yml"],
     ["SHA-256 checksums", (name) => name === "sha256sums.txt"],
+    ["CLI checksums", (name) => name === "sha256sums"],
+    ["Linux x64 CLI archive", (name) => name === `t3-${versionToken}-linux-x64.tar.gz`],
+    ["CLI installer", (name) => name === "install.sh"],
   ];
   const missing = required.filter(([, predicate]) => !has(predicate)).map(([label]) => label);
   if (missing.length > 0) throw new Error(`Incomplete release asset set: ${missing.join(", ")}.`);
@@ -464,14 +467,14 @@ export function finalizeReleaseAssets(directory: string, version: string): Relea
       ),
     );
   }
-  NodeFS.writeFileSync(
-    NodePath.join(directory, "SHA256SUMS.txt"),
-    names
-      .filter((name) => name !== "SHA256SUMS.txt")
-      .sort()
-      .map((name) => `${sha256File(NodePath.join(directory, name))}  ${name}\n`)
-      .join(""),
-  );
+  const checksums = names
+    .filter((name) => name !== "SHA256SUMS.txt" && name !== "SHA256SUMS")
+    .sort()
+    .map((name) => `${sha256File(NodePath.join(directory, name))}  ${name}\n`)
+    .join("");
+  for (const name of ["SHA256SUMS.txt", "SHA256SUMS"]) {
+    NodeFS.writeFileSync(NodePath.join(directory, name), checksums);
+  }
   return collectReleaseEvidence(directory, version);
 }
 

@@ -1,3 +1,4 @@
+import { act } from "../../test/rendererAct";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
   ProjectCollectionId,
@@ -7,14 +8,13 @@ import {
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import {
-  act,
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("@base-ui/react/menu", async () => {
   const React = await import("react");
@@ -37,28 +37,25 @@ vi.mock("@base-ui/react/menu", async () => {
   function Root({ children }: { readonly children?: ReactNode }) {
     const [open, setOpen] = React.useState(false);
     const [focusTarget, setFocusTarget] = React.useState<MenuContextValue["focusTarget"]>(null);
-    const openFromKeyboard = React.useCallback(() => {
+    const openFromKeyboard = () => {
       setOpen(true);
       setFocusTarget("menu");
-    }, [setFocusTarget, setOpen]);
-    const toggleFromPointer = React.useCallback(() => {
+    };
+    const toggleFromPointer = () => {
       setOpen((current) => !current);
       setFocusTarget(null);
-    }, [setFocusTarget, setOpen]);
-    const closeToTrigger = React.useCallback(() => {
+    };
+    const closeToTrigger = () => {
       setOpen(false);
       setFocusTarget("trigger");
-    }, [setFocusTarget, setOpen]);
-    const value = React.useMemo<MenuContextValue>(
-      () => ({
-        open,
-        focusTarget,
-        openFromKeyboard,
-        toggleFromPointer,
-        closeToTrigger,
-      }),
-      [closeToTrigger, focusTarget, open, openFromKeyboard, toggleFromPointer],
-    );
+    };
+    const value = ((): MenuContextValue => ({
+      open,
+      focusTarget,
+      openFromKeyboard,
+      toggleFromPointer,
+      closeToTrigger,
+    }))();
     return <MenuContext.Provider value={value}>{children}</MenuContext.Provider>;
   }
 
@@ -250,7 +247,6 @@ function keyboardEvent(key: string) {
   };
 }
 
-beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => {
   await act(() => renderer?.unmount());
   renderer = undefined;

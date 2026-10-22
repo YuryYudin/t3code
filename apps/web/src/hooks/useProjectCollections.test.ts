@@ -1,10 +1,11 @@
+import { act } from "../../test/rendererAct";
 import {
   DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
   EnvironmentId,
   ProjectCollectionId,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
-import { act, createElement, useLayoutEffect } from "react";
+import { createElement, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -130,7 +131,6 @@ function failure() {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   testState.environments = [environment(referenceId), environment(secondaryId)];
   testState.primaryEnvironmentId = referenceId;
   testState.preferredReferenceEnvironmentId = referenceId;

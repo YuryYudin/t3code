@@ -70,6 +70,12 @@ def integrationArgs(Map resolved) {
     return "--kind ${kind} --source ${resolved.candidateSourceSha} --target ${resolved.target.commit} --observed ${observed}"
 }
 
+def isUserAbort(Throwable failure) {
+    // isActualInterruption() is not sandbox-approved here. Suppress only the explicit
+    // operator-stop cause; timeouts and unknown interruptions still report failures.
+    return failure instanceof org.jenkinsci.plugins.workflow.steps.FlowInterruptedException && failure.message?.startsWith('Aborted by ')
+}
+
 def requestIntegrationRepair(Map resolved, String feedback = '') {
     node('built-in') {
         stage('Automatic integration repair') {
@@ -335,7 +341,7 @@ def buildMac(String slug, String candidateRef, String version, boolean publishRe
 
 def buildLinux(String slug, String candidateRef, String version) {
     node('linux') {
-        stage("${slug}: Linux x64 + WSL runtime") {
+        stage("${slug}: Linux x64 + CLI/WSL runtime") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             withEnv([
                 'CC=clang-15',
@@ -393,8 +399,10 @@ def runQuality(String slug, String candidateRef) {
                 node scripts/fork-release.ts verify-bootstrap
                 corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
                 corepack pnpm run test:project-collections-acceptance
+                corepack pnpm exec vp test run packages/client-runtime/src/state/projectGrouping.test.ts
                 corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts
                 corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
+                corepack pnpm exec vp test run packages/shared/src/cliRelease.test.ts apps/server/src/cli/update.test.ts apps/server/src/cloud/pinnedRuntime.test.ts apps/server/src/cloud/selfUpdate.test.ts scripts/install.test.ts apps/web/src/state/cliRelease.test.ts
                 corepack pnpm run test:fork-release-acceptance
                 corepack pnpm exec vp test run scripts/fork-integration.test.ts apps/desktop/src/window/DesktopWindow.test.ts apps/desktop/src/window/DesktopApplicationMenu.test.ts apps/desktop/src/ipc/methods/window.test.ts
                 if [[ -f apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts ]]; then
@@ -614,6 +622,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 }
                 qualityPassed = true
             } catch (qualityError) {
+                if (isUserAbort(qualityError)) throw qualityError
                 if (!managed) throw qualityError
                 requestIntegrationRepair(resolved, "quality-feedback-${slug}")
                 ensureIntegrationBundle(resolved, slug, candidateRef)
@@ -643,14 +652,16 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
                 installWorkspace()
                 sh '''
                     mkdir -p release-complete
-                    for artifact in artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/* artifacts/android/*; do
+                    for artifact in artifacts/mac-arm64/* artifacts/mac-x64/* artifacts/linux-x64/* artifacts/windows-x64/* artifacts/android/* artifacts/wsl-runtime/*.tar.gz; do
                         if [ "${artifact##*/}" != builder-debug.yml ]; then
                             cp "$artifact" release-complete/
                         fi
                     done
+                    cp scripts/install.sh release-complete/install.sh
                     node scripts/merge-update-manifests.ts --platform mac release-complete/latest-mac.yml release-complete/latest-mac-x64.yml release-complete/latest-mac.yml
                     rm release-complete/latest-mac-x64.yml
                     (cd release-complete && find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 shasum -a 256 | sed 's#  ./#  #' > SHA256SUMS.txt)
+                    cp release-complete/SHA256SUMS.txt release-complete/SHA256SUMS
                 '''
                 failureClass = 'manifest-verification'
                 sh "node scripts/fork-release.ts verify-assets --version ${version} --assets release-complete"
@@ -687,6 +698,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
             if (incremental) queueIntegrationFollowup(resolved)
         }
     } catch (error) {
+        if (isUserAbort(error)) throw error
         if (!params.DRY_RUN && params.ACTION != 'validate-only') {
             reportIncident(resolved, failureClass, "${slug} failed at ${failureClass}: ${error.message}")
         }
@@ -712,6 +724,7 @@ pipeline {
         choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check', 'sync-upstream'], description: 'Scheduled tracking, read-only validation, a stable release, an Apple check, or integration-only synchronization.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
         string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for out-of-cycle or sync-upstream; leave empty to use main.')
+        string(name: 'EXPECTED_UPSTREAM_VERSION', defaultValue: '', description: 'For out-of-cycle releases, require this official stable version (for example 0.1.2); stop if latest has changed.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
     }
 
@@ -737,6 +750,9 @@ pipeline {
                     }
                     if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
                         error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
+                    }
+                    if (params.EXPECTED_UPSTREAM_VERSION && (params.ACTION != 'out-of-cycle' || !(params.EXPECTED_UPSTREAM_VERSION ==~ /[0-9]+\.[0-9]+\.[0-9]+/))) {
+                        error('EXPECTED_UPSTREAM_VERSION requires out-of-cycle and an exact upstream version.')
                     }
                     withWorkflowLock {
                     Map nightly
@@ -764,6 +780,9 @@ pipeline {
                                 def stableMode = params.ACTION == 'out-of-cycle' ? 'out-of-cycle-release' : 'automatic-stable-release'
                                 sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
                                 stable = readResolvedPlan('.fork-release-stable.json')
+                                if (params.EXPECTED_UPSTREAM_VERSION && stable.target.version != params.EXPECTED_UPSTREAM_VERSION) {
+                                    error("Expected upstream ${params.EXPECTED_UPSTREAM_VERSION}, but latest is ${stable.target.version}; refusing to change the release base.")
+                                }
                             }
                         }
                     }
