@@ -1275,7 +1275,8 @@ export const make = Effect.gen(function* () {
               });
               const sameEndpoint =
                 previous !== undefined &&
-                gitHubRoutingConnectionKey(previous) === gitHubRoutingConnectionKey(entry);
+                pullRequestRoutingConnectionKey(previous) ===
+                  pullRequestRoutingConnectionKey(entry);
               const next =
                 sameEndpoint && previous !== undefined
                   ? { ...entry, ...unsupportedState(previous) }
@@ -1292,7 +1293,7 @@ export const make = Effect.gen(function* () {
               )
                 return;
               if (previous !== undefined && !sameEndpoint) {
-                yield* githubRoutingPermissions.forget(environmentId);
+                yield* pullRequestRoutingPermissions.forget(environmentId);
               }
               yield* Ref.update(persistedEnvironmentIds, (current) =>
                 new Set(current).add(environmentId),

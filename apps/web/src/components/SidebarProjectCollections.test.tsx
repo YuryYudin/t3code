@@ -1,6 +1,7 @@
 import { act } from "../../test/rendererAct";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
@@ -306,7 +307,7 @@ function project(id: string, key: string): EnvironmentProject {
       canonicalKey: key,
       locator: { source: "git-remote", remoteName: "origin", remoteUrl: `git:${key}` },
       rootPath: `/work/${id}`,
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "acme",
       name: id,
       displayName: id,
