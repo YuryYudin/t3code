@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as Electron from "electron";
@@ -957,8 +958,6 @@ describe("DesktopWindow", () => {
     }),
   );
 
-  // Ctrl+wheel bypasses the menu accelerators, so it has to take the same
-  // zoom step, preview restore included, from the window's zoom-changed event.
   it.effect("zooms the app from Ctrl+wheel like the menu does", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
@@ -1653,6 +1652,11 @@ describe("DesktopWindow", () => {
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
       const quitting = yield* Ref.make(false);
       const backendReady = yield* Ref.make(false);
+      const primaryBackendStartup = yield* SubscriptionRef.make<DesktopState.PrimaryBackendStartup>(
+        {
+          _tag: "Ready",
+        },
+      );
       const removedWindowRecords: number[] = [];
       const windowRecordUpdates: {
         index: number;
@@ -1666,7 +1670,11 @@ describe("DesktopWindow", () => {
         mainWindow,
         removedWindowRecords,
         windowRecordUpdates,
-        desktopState: Layer.succeed(DesktopState.DesktopState, { backendReady, quitting }),
+        desktopState: Layer.succeed(DesktopState.DesktopState, {
+          backendReady,
+          quitting,
+          primaryBackendStartup,
+        }),
         desktopSettings: {
           ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
           mainWindowBounds: bounds,

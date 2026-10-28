@@ -100,9 +100,23 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => runtime.threads,
 }));
 vi.mock("../../state/queries", () => ({
-  useThreadSearch: () => ({ matches: [], isPending: false }),
+  useThreadSearch: () => ({ matches: [], query: "", isPending: false }),
 }));
 vi.mock("../../state/thread-order", () => ({ usePendingThreadOrder: () => null }));
+vi.mock("../../state/olderSettledShelf", () => ({
+  useOlderSettledShelf: () => ({
+    environments: new Map(),
+    visibleCount: 0,
+    pages: new Map(),
+    grow: vi.fn(),
+    isListed: () => false,
+    unloadedCount: () => 0,
+    loading: false,
+    failed: false,
+    retry: vi.fn(),
+  }),
+  useOlderSettledShelfGrowth: vi.fn(),
+}));
 vi.mock("../../state/use-pending-new-tasks", () => ({
   usePendingNewTasks: () => runtime.pendingTasks,
 }));
@@ -121,11 +135,15 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
   }),
 }));
 vi.mock("../settings/appearance/AppearancePreferencesProvider", () => ({
+  useAndroidFloatingTabs: () => false,
   useAppearancePreferences: () => ({
     appearance: { baseFontSize: 16 },
     materialYouStyleLayoutActive: false,
     themeVariables: { "--color-screen": "black", "--color-foreground-muted": "gray" },
   }),
+}));
+vi.mock("../workspace/useSelectWorkspaceDetail", () => ({
+  useSelectWorkspaceDetail: () => vi.fn(),
 }));
 vi.mock("../home/home-list-options", () => ({
   hasCustomHomeListOptions: () => false,
@@ -194,6 +212,9 @@ vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: fal
 vi.mock("../../native/native-layout-metrics", () => ({
   useNativeLayoutMetrics: () => null,
   useNativeColumnLayoutMetrics: () => null,
+}));
+vi.mock("../../native/NativeScrollViewMarker", () => ({
+  NativeScrollView: "native-scroll-view",
 }));
 vi.mock("../../components/ui/useToolbarLayout", () => ({
   useToolbarLayout: () => ({ height: 48, paddingTop: 0, paddingBottom: 0 }),

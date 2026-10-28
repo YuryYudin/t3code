@@ -4,6 +4,7 @@ import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
+  SourceControlProviderKind,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -37,7 +38,7 @@ function project(id: string, canonicalKey: string | null): EnvironmentProject {
               remoteUrl: `git:${canonicalKey}`,
             },
             rootPath: `/work/${id}`,
-            provider: "github",
+            provider: SourceControlProviderKind.make("github"),
             owner: "acme",
             name: id,
             displayName: id,

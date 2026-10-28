@@ -6,7 +6,7 @@ import { DesktopAppBrandingSchema, DesktopEnvironmentBootstrapSchema } from "./i
 describe("DesktopAppBrandingSchema", () => {
   it("accepts Latest as the stable packaged stage", () => {
     expect(
-      Schema.decodeUnknownSync(DesktopAppBrandingSchema)({
+      Schema.decodeSync(DesktopAppBrandingSchema)({
         baseName: "T3 Code",
         stageLabel: "Latest",
         displayName: "T3 Code",

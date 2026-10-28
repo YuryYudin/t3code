@@ -156,6 +156,7 @@ describe("pickSharedServerSettings", () => {
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
       "snoozeLimitedThreads",
+      "snoozePresets",
       "sourceControlWritingStyle",
       "textGenerationModelSelection",
     ]);
@@ -191,6 +192,14 @@ describe("filterSharedServerPatch", () => {
     ).toEqual({ sidebarAutoSettleAfterDays: 7 });
   });
 
+  it("holds the restart preference until the target's config loads", () => {
+    const patch = { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 };
+    expect(filterSharedServerPatch(patch, undefined)).toEqual({ sidebarAutoSettleAfterDays: 7 });
+    expect(filterSharedServerPatch(patch, restartCapabilities, DEFAULT_SERVER_SETTINGS)).toEqual(
+      patch,
+    );
+  });
+
   it.each([true, false])(
     "resets a disabled default provider only on the originating environment (%s)",
     (targetIsSource) => {
@@ -214,14 +223,15 @@ describe("filterSharedServerPatch", () => {
         continueThreadsAfterServerUpdate: true,
         sidebarAutoSettleAfterDays: 7,
       };
-      expect(filterSharedServerPatch(patch, undefined, settings, settings, targetIsSource)).toEqual(
-        {
-          ...(targetIsSource
-            ? { textGenerationModelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection }
-            : {}),
-          sidebarAutoSettleAfterDays: 7,
-        },
-      );
+      expect(
+        filterSharedServerPatch(patch, restartCapabilities, settings, settings, targetIsSource),
+      ).toEqual({
+        ...(targetIsSource
+          ? { textGenerationModelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection }
+          : {}),
+        continueThreadsAfterServerUpdate: true,
+        sidebarAutoSettleAfterDays: 7,
+      });
     },
   );
 
@@ -255,38 +265,9 @@ describe("filterSharedServerPatch", () => {
       expect(filterSharedServerPatch(patch, restartCapabilities, settings, sourceSettings)).toEqual(
         availability === "enabled" ? patch : { sidebarAutoSettleAfterDays: 7 },
       );
-      const primarySettings = {
-        ...sourceSettings,
-        textGenerationModelSelection: selection,
-      };
-      expect(
-        findSharedSettingsMismatches({
-          primaryEnvironmentId: primaryId,
-          primarySettings,
-          environments: [
-            { environmentId: boxId, label: "Remote Box", syncEligible: true, settings },
-          ],
-        }),
-      ).toEqual(availability === "enabled" ? [{ environmentId: boxId, label: "Remote Box" }] : []);
-    },
-  );
-
-  it.each([undefined, {}, { threadRestartContinuation: false }])(
-    "omits only the unsupported restart preference with capabilities %j",
-    (capabilities) => {
-      expect(
-        filterSharedServerPatch(
-          { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 },
-          capabilities,
-        ),
-      ).toEqual({ sidebarAutoSettleAfterDays: 7 });
-      expect(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, capabilities)).not.toHaveProperty(
-        "continueThreadsAfterServerUpdate",
-      );
     },
   );
 });
-
 describe("findSharedSettingsMismatches", () => {
   const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
 

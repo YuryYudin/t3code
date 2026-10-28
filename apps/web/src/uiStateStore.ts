@@ -15,7 +15,6 @@ import {
   subscribeStorageKey,
   type ForeignStateSync,
 } from "./lib/crossWindowStorage";
-import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import {
   publishWindowScope,
   readLaunchScopeParam,
@@ -24,6 +23,7 @@ import {
   sanitizePersistedProjectCollectionScope,
   writeWindowScope,
 } from "./windowScope";
+import { normalizeProjectPathForComparison } from "@t3tools/client-runtime/state/projects";
 
 export const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
 const THREAD_CHANGED_FILES_EXPANSION_VERSION = 2;
@@ -51,6 +51,7 @@ export interface PersistedUiState {
   sidebarProjectScopeKey?: string | null;
   projectCollectionScope?: unknown;
   projectCollectionsPreferredReferenceEnvironmentId?: string | null;
+  sidebarProjectScopeKeys?: string[];
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
@@ -62,6 +63,7 @@ export interface UiProjectState {
   sidebarProjectScopeKey: string | null;
   projectCollectionScope: ProjectCollectionScope;
   projectCollectionsPreferredReferenceEnvironmentId: EnvironmentId | null;
+  sidebarProjectScopeKeys: string[];
 }
 
 export interface UiThreadState {
@@ -86,6 +88,7 @@ const initialState: UiState = {
   sidebarProjectScopeKey: null,
   projectCollectionScope: ALL_PROJECTS_COLLECTION_SCOPE,
   projectCollectionsPreferredReferenceEnvironmentId: null,
+  sidebarProjectScopeKeys: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -204,6 +207,9 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     )
       ? parsed.projectCollectionsPreferredReferenceEnvironmentId
       : null,
+    sidebarProjectScopeKeys: sanitizeStringArray(
+      parsed.sidebarProjectScopeKeys ?? [parsed.sidebarProjectScopeKey],
+    ),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -314,7 +320,14 @@ export function persistState(state: UiState): void {
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
-        sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarProjectScopeKeys: state.sidebarProjectScopeKeys,
+        // Older clients read only this field.
+        sidebarProjectScopeKey:
+          state.projectCollectionScope.kind === "project"
+            ? state.projectCollectionScope.projectKey
+            : state.sidebarProjectScopeKeys.length === 1
+              ? (state.sidebarProjectScopeKeys[0] ?? null)
+              : null,
         projectCollectionScope: state.projectCollectionScope,
         projectCollectionsPreferredReferenceEnvironmentId:
           state.projectCollectionsPreferredReferenceEnvironmentId,
@@ -418,18 +431,32 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
 
 export function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
   const nextKey = sanitizeOptionalKey(projectKey);
+  return setProjectCollectionScope(
+    state,
+    nextKey === null ? ALL_PROJECTS_COLLECTION_SCOPE : { kind: "project", projectKey: nextKey },
+  );
+}
+
+function setSidebarProjectScopeKeys(state: UiState, projectKeys: readonly string[]): UiState {
+  const nextKeys = sanitizeStringArray(projectKeys);
   const projectCollectionScope: ProjectCollectionScope =
-    nextKey === null ? ALL_PROJECTS_COLLECTION_SCOPE : { kind: "project", projectKey: nextKey };
+    nextKeys.length === 1
+      ? { kind: "project", projectKey: nextKeys[0]! }
+      : ALL_PROJECTS_COLLECTION_SCOPE;
+  const sidebarProjectScopeKey = nextKeys.length === 1 ? nextKeys[0]! : null;
   if (
-    state.sidebarProjectScopeKey === nextKey &&
+    nextKeys.length === state.sidebarProjectScopeKeys.length &&
+    nextKeys.every((key, index) => key === state.sidebarProjectScopeKeys[index]) &&
+    state.sidebarProjectScopeKey === sidebarProjectScopeKey &&
     projectCollectionScopesEqual(state.projectCollectionScope, projectCollectionScope)
   ) {
     return state;
   }
   return {
     ...state,
-    sidebarProjectScopeKey: nextKey,
+    sidebarProjectScopeKey,
     projectCollectionScope,
+    sidebarProjectScopeKeys: nextKeys,
   };
 }
 
@@ -453,15 +480,19 @@ export function setProjectCollectionScope(
 ): UiState {
   const sidebarProjectScopeKey =
     projectCollectionScope.kind === "project" ? projectCollectionScope.projectKey : null;
+  const sidebarProjectScopeKeys = sidebarProjectScopeKey === null ? [] : [sidebarProjectScopeKey];
   if (
     projectCollectionScopesEqual(state.projectCollectionScope, projectCollectionScope) &&
-    state.sidebarProjectScopeKey === sidebarProjectScopeKey
+    state.sidebarProjectScopeKey === sidebarProjectScopeKey &&
+    sidebarProjectScopeKeys.length === state.sidebarProjectScopeKeys.length &&
+    sidebarProjectScopeKeys.every((key, index) => key === state.sidebarProjectScopeKeys[index])
   ) {
     return state;
   }
   return {
     ...state,
     sidebarProjectScopeKey,
+    sidebarProjectScopeKeys,
     projectCollectionScope,
   };
 }
@@ -572,6 +603,7 @@ interface UiStateStore extends UiState {
   setProjectCollectionsPreferredReferenceEnvironmentId: (
     environmentId: EnvironmentId | null,
   ) => void;
+  setSidebarProjectScopeKeys: (projectKeys: readonly string[]) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
@@ -599,6 +631,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   },
   setProjectCollectionsPreferredReferenceEnvironmentId: (environmentId) =>
     set((state) => setProjectCollectionsPreferredReferenceEnvironmentId(state, environmentId)),
+  setSidebarProjectScopeKeys: (projectKeys) =>
+    set((state) => setSidebarProjectScopeKeys(state, projectKeys)),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
@@ -679,6 +713,7 @@ export function mergeForeignUiState(local: UiState, incoming: UiState): UiState 
     // Per-window: another window's scope must never move this window's sidebar.
     projectCollectionScope: local.projectCollectionScope,
     sidebarProjectScopeKey: local.sidebarProjectScopeKey,
+    sidebarProjectScopeKeys: local.sidebarProjectScopeKeys,
   };
 }
 

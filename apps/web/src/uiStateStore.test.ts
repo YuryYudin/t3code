@@ -40,6 +40,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     sidebarProjectScopeKey: null,
     projectCollectionScope: { kind: "all" },
     projectCollectionsPreferredReferenceEnvironmentId: null,
+    sidebarProjectScopeKeys: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -232,6 +233,7 @@ describe("parsePersistedState", () => {
       sidebarProjectScopeKey: null,
       projectCollectionScope: { kind: "all" },
       projectCollectionsPreferredReferenceEnvironmentId: null,
+      sidebarProjectScopeKeys: [],
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -380,6 +382,7 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKeys: [],
       sidebarProjectScopeKey: null,
       projectCollectionScope: { kind: "all" },
       projectCollectionsPreferredReferenceEnvironmentId: null,
@@ -398,15 +401,31 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code"));
+    const keys = ["github.com/pingdotgg/t3code", "github.com/pingdotgg/uploadthing"];
+    persistState(makeUiState({ sidebarProjectScopeKeys: keys }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
-    expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/pingdotgg/t3code",
-    );
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(keys);
+  });
+
+  it("keeps a single-project scope readable by older clients", () => {
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["github.com/pingdotgg/t3code"] }));
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(persisted.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
+  });
+
+  it("restores a single-project scope saved before multi-project filtering", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" })
+        .sidebarProjectScopeKeys,
+    ).toEqual(["github.com/pingdotgg/t3code"]);
   });
 
   it("round-trips collection scope and preferred reference across reloads", () => {
@@ -463,6 +482,7 @@ describe("uiStateStore per-window scope", () => {
     const persisted = makeUiState({
       projectCollectionScope: { kind: "project", projectKey: "repository:acme/work" },
       sidebarProjectScopeKey: "repository:acme/work",
+      sidebarProjectScopeKeys: ["repository:acme/work"],
     });
     const launch = { kind: "collection", collectionId } as const;
 
@@ -605,7 +625,10 @@ function persistedSnapshot(state: UiState): PersistedUiState {
     threadLastVisitedAtById: state.threadLastVisitedAtById,
     defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
     sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+    sidebarProjectScopeKeys: state.sidebarProjectScopeKeys,
     projectCollectionScope: state.projectCollectionScope,
+    projectCollectionsPreferredReferenceEnvironmentId:
+      state.projectCollectionsPreferredReferenceEnvironmentId,
     threadChangedFilesExpansionVersion: 2,
     threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
     pullRequestMergeMethod: state.pullRequestMergeMethod,

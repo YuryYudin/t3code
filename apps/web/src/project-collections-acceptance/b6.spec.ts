@@ -5,6 +5,7 @@ import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
+  SourceControlProviderKind,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import {
@@ -134,7 +135,7 @@ const project: EnvironmentProject = {
       remoteUrl: "https://github.com/acme/pockeor.git",
     },
     rootPath: "/work/pockeor",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "acme",
     name: "pockeor",
     displayName: "PockeoR",

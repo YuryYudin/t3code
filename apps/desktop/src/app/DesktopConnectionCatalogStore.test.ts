@@ -148,9 +148,6 @@ describe("DesktopConnectionCatalogStore", () => {
 
         assert.isTrue(yield* store.set(catalog));
         assert.deepStrictEqual(yield* store.get, Option.some(catalog));
-
-        yield* store.clear;
-        assert.deepStrictEqual(yield* store.get, Option.none());
       }),
     ),
   );

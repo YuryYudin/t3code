@@ -1,5 +1,5 @@
 import { act } from "../../test/rendererAct";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
 import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
@@ -194,7 +194,7 @@ const project: EnvironmentProject = {
       remoteUrl: "https://github.com/acme/pockeor.git",
     },
     rootPath: "/work/pockeor",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "acme",
     name: "pockeor",
     displayName: "PockeoR",

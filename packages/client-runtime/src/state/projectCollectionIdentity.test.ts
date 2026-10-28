@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -13,7 +13,7 @@ const repositoryIdentity = {
     remoteUrl: "https://github.com/acme/platform.git",
   },
   rootPath: "/work/platform",
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   owner: "acme",
   name: "platform",
   displayName: "Platform",

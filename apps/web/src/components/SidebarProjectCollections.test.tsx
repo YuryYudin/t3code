@@ -5,6 +5,7 @@ import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
+  SourceControlProviderKind,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import {
@@ -306,7 +307,7 @@ function project(id: string, key: string): EnvironmentProject {
       canonicalKey: key,
       locator: { source: "git-remote", remoteName: "origin", remoteUrl: `git:${key}` },
       rootPath: `/work/${id}`,
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "acme",
       name: id,
       displayName: id,
