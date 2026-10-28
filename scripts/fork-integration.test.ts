@@ -11,6 +11,7 @@ import {
   ZERO_SHA,
   dispatchRepair,
   integrationGit,
+  shareCheckout,
   verifiedIntegrationCurrent,
   workflowLock,
 } from "./lib/fork-integration.ts";
@@ -57,6 +58,44 @@ function fixture() {
   };
   return { root, repo, git, commit, base, source, target, stateDir, inputs, integration, repair };
 }
+
+describe.skipIf(NodeChildProcess.spawnSync("setfacl", ["--version"]).status !== 0)(
+  "shared repair checkout access",
+  () => {
+    it("keeps both accounts in the inherited access of new dependency files", () => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-checkout-access-"));
+      roots.push(root);
+      const ownerUid = NodeFS.statSync(root).uid;
+      const workerUid = ownerUid + 1;
+      shareCheckout(root, workerUid);
+
+      const dependency = NodePath.join(root, "node_modules", ".pnpm", "package", "index.js");
+      NodeFS.mkdirSync(NodePath.dirname(dependency), { recursive: true });
+      NodeFS.writeFileSync(dependency, "export {};\n");
+      const access = NodeChildProcess.execFileSync("getfacl", ["-cpn", dependency], {
+        encoding: "utf8",
+      });
+      expect(access).toContain(`user:${ownerUid}:rwx`);
+      expect(access).toContain(`user:${workerUid}:rwx`);
+      expect(access).toContain("mask::rw-");
+    });
+
+    it("leaves symlink targets outside the checkout unchanged", () => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-checkout-symlink-"));
+      roots.push(root);
+      const checkout = NodePath.join(root, "checkout");
+      const external = NodePath.join(root, "external");
+      NodeFS.mkdirSync(checkout);
+      NodeFS.mkdirSync(external);
+      NodeFS.symlinkSync(external, NodePath.join(checkout, "linked"));
+      const access = () =>
+        NodeChildProcess.execFileSync("getfacl", ["-cpn", external], { encoding: "utf8" });
+      const before = access();
+      shareCheckout(checkout, NodeFS.statSync(checkout).uid + 1);
+      expect(access()).toBe(before);
+    });
+  },
+);
 
 describe("persistent integration", () => {
   it("preserves a resolved merge through new upstream and main commits", () => {
