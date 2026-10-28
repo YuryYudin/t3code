@@ -100,13 +100,31 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => runtime.threads,
 }));
 vi.mock("../../state/queries", () => ({
-  useThreadSearch: () => ({ matches: [], isPending: false }),
+  useThreadSearch: (_environmentIds: unknown, query: string) => ({
+    query,
+    matches: [],
+    isPending: false,
+  }),
 }));
 vi.mock("../../state/thread-order", () => ({ usePendingThreadOrder: () => null }));
 vi.mock("../../state/use-pending-new-tasks", () => ({
   usePendingNewTasks: () => runtime.pendingTasks,
 }));
 vi.mock("../../state/use-thread-outbox", () => ({ useQueuedThreadKeys: () => new Set() }));
+vi.mock("../../state/olderSettledShelf", () => ({
+  useOlderSettledShelf: () => ({
+    environments: new Map(),
+    visibleCount: 0,
+    pages: new Map(),
+    grow: vi.fn(),
+    isListed: () => true,
+    unloadedCount: () => 0,
+    loading: false,
+    failed: false,
+    retry: vi.fn(),
+  }),
+  useOlderSettledShelfGrowth: vi.fn(),
+}));
 vi.mock("../../state/workspace", () => ({
   useWorkspaceState: () => ({
     environments: [{ environmentId: ENVIRONMENT_ID, connectionState: "connected" }],
@@ -146,8 +164,11 @@ vi.mock("../home/home-list-options", () => ({
 vi.mock("./use-thread-list-v2-shelf-preferences", () => ({
   useThreadListV2ShelfPreferences: () => ({
     loaded: true,
+    workingShelfEnabled: false,
+    workingShelfExpanded: false,
     settledShelfExpanded: false,
     snoozedShelfExpanded: false,
+    toggleWorkingShelf: vi.fn(),
     toggleSettledShelf: vi.fn(),
     toggleSnoozedShelf: vi.fn(),
   }),
@@ -193,6 +214,13 @@ vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
+vi.mock("../../native/NativeScrollViewMarker", async () => {
+  const React = await import("react");
+  return {
+    NativeScrollView: (props: Record<string, unknown>) =>
+      React.createElement("native-scroll-view", props, props.children as ReactNode),
+  };
+});
 vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: false }));
 vi.mock("../../native/native-layout-metrics", () => ({
   useNativeLayoutMetrics: () => null,
@@ -229,8 +257,10 @@ vi.mock("./thread-list-items", () => ({
 vi.mock("./thread-list-v2-items", () => ({
   ThreadListV2PendingRow: "v2-pending-row",
   ThreadListV2Row: "v2-row",
+  ThreadListV2ShowMoreRow: "v2-show-more",
   ThreadListV2SettledShelfHeader: "v2-settled",
   ThreadListV2SnoozedShelfHeader: "v2-snoozed",
+  ThreadListV2WorkingShelfHeader: "v2-working",
 }));
 vi.mock("../projects/ProjectCollectionsSheet", async () => {
   const React = await import("react");
