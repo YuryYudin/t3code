@@ -127,10 +127,7 @@ export interface SharedSettingsEnvironment {
     | undefined;
 }
 
-/**
- * Callers must pass the real loaded settings, never a default fallback, or
- * "apply to all" would push defaults over real values.
- */
+/** Callers pass loaded settings so applying shared preferences never overwrites real values. */
 export function findSharedSettingsMismatches(input: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly primarySettings: ServerSettings | null;
@@ -139,13 +136,9 @@ export function findSharedSettingsMismatches(input: {
     | undefined;
   readonly environments: ReadonlyArray<SharedSettingsEnvironment>;
 }): ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly label: string }> {
-  if (input.primaryEnvironmentId === null || input.primarySettings === null) {
-    return [];
-  }
-  const primarySettings = pickSharedServerSettings(
-    input.primarySettings,
-    input.primaryCapabilities,
-  );
+  if (input.primaryEnvironmentId === null || input.primarySettings === null) return [];
+  const sourceSettings = input.primarySettings;
+  const primarySettings = pickSharedServerSettings(sourceSettings, input.primaryCapabilities);
   return input.environments.flatMap((environment) => {
     if (
       environment.environmentId === input.primaryEnvironmentId ||
@@ -158,7 +151,7 @@ export function findSharedSettingsMismatches(input: {
       primarySettings,
       environment.capabilities,
       environment.settings,
-      input.primarySettings ?? undefined,
+      sourceSettings,
     );
     let actual = filterSharedServerPatch(
       pickSharedServerSettings(environment.settings, environment.capabilities),
