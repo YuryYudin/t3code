@@ -1,5 +1,6 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
@@ -37,7 +38,7 @@ function project(id: string, canonicalKey: string | null): EnvironmentProject {
               remoteUrl: `git:${canonicalKey}`,
             },
             rootPath: `/work/${id}`,
-            provider: "github",
+            provider: SourceControlProviderKind.make("github"),
             owner: "acme",
             name: id,
             displayName: id,

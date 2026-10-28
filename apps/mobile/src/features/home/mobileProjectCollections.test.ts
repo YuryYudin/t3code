@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  SourceControlProviderKind,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
@@ -30,7 +31,7 @@ const identified = {
       remoteUrl: "https://github.com/acme/platform.git",
     },
     rootPath: "/work/platform",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "acme",
     name: "platform",
     displayName: "Platform",

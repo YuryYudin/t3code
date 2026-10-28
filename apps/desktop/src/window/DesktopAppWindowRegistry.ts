@@ -67,7 +67,7 @@ export class DesktopAppWindowRegistry extends Context.Service<
   }
 >()("@t3tools/desktop/window/DesktopAppWindowRegistry") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.sync(() => {
   const records = new Map<number, MutableDesktopAppWindowRecord>();
   let sequence = 0;
@@ -94,7 +94,7 @@ export const make = Effect.sync(() => {
     });
 
   return DesktopAppWindowRegistry.of({
-    register: (window, scope) =>
+    register: Effect.fn("DesktopAppWindowRegistry.register")((window, scope) =>
       Effect.sync(() => {
         const order = ++sequence;
         records.set(window.id, {
@@ -109,19 +109,26 @@ export const make = Effect.sync(() => {
           if (record !== undefined) record.focusOrder = ++sequence;
         });
       }),
-    unregister: (window) =>
+    ),
+    unregister: Effect.fn("DesktopAppWindowRegistry.unregister")((window) =>
       Effect.sync(() => {
         records.delete(window.id);
       }),
-    setReady: (window, ready) => update(window, (record) => (record.ready = ready)),
-    setScope: (window, scope) => update(window, (record) => (record.scope = scope)),
-    findBySender: (webContentsId) =>
+    ),
+    setReady: Effect.fn("DesktopAppWindowRegistry.setReady")((window, ready) =>
+      update(window, (record) => (record.ready = ready)),
+    ),
+    setScope: Effect.fn("DesktopAppWindowRegistry.setScope")((window, scope) =>
+      update(window, (record) => (record.scope = scope)),
+    ),
+    findBySender: Effect.fn("DesktopAppWindowRegistry.findBySender")((webContentsId) =>
       Effect.sync(() => {
         const record = liveRecords().find(
           (candidate) => candidate.window.webContents.id === webContentsId,
         );
         return record === undefined ? Option.none() : Option.some(snapshot(record));
       }),
+    ),
     focusedOrRecent: Effect.sync(() => {
       const candidates = liveRecords();
       const focused = candidates.find((record) => record.window.isFocused());
@@ -130,16 +137,18 @@ export const make = Effect.sync(() => {
       return selected === undefined ? Option.none() : Option.some(snapshot(selected));
     }),
     all: Effect.sync(() => liveRecords().map(snapshot)),
-    sendAll: (channel, ...args) =>
+    sendAll: Effect.fn("DesktopAppWindowRegistry.sendAll")((channel, ...args) =>
       Effect.sync(() => {
         for (const record of liveRecords()) record.window.webContents.send(channel, ...args);
       }),
+    ),
     destroyAll: Effect.sync(() => {
       for (const record of liveRecords()) record.window.destroy();
       records.clear();
     }),
-    syncAllAppearance: (sync) =>
+    syncAllAppearance: Effect.fn("DesktopAppWindowRegistry.syncAllAppearance")((sync) =>
       Effect.forEach(liveRecords(), (record) => sync(record.window), { discard: true }),
+    ),
   });
 });
 

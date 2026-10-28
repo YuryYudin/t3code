@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { SourceControlProviderKind, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,
@@ -41,7 +41,7 @@ function project(environmentId: string, id: string, workspaceRoot: string): Envi
         remoteUrl: "https://github.com/acme/pockeor.git",
       },
       rootPath: workspaceRoot,
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "acme",
       name: "pockeor",
       displayName: "PockeoR",
