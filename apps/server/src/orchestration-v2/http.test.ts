@@ -253,7 +253,7 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
 
 it.effect("leaves older settled threads out of the HTTP shell only when asked", () =>
   Effect.gen(function* () {
-    const { eventSink, handler } = yield* serveOrchestrationHttp(() => true);
+    const { eventSink, handler, services } = yield* serveOrchestrationHttp(() => true);
     yield* eventSink.write({
       events: Array.from({ length: 26 }, (_, index) => {
         const id = ThreadId.make(`settled-${index}`);
