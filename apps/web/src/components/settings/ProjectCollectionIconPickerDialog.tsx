@@ -13,6 +13,7 @@ import {
   projectIconColorClassName,
 } from "../../projectIconOptions";
 import { cn } from "~/lib/utils";
+import { m } from "~/i18n/messages";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -152,7 +153,7 @@ export function ProjectCollectionIconPickerDialog({
                     <button
                       key={option.value}
                       type="button"
-                      aria-label={option.label}
+                      aria-label={m(option.label)}
                       aria-pressed={color === option.value}
                       className={cn(
                         "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -212,7 +213,7 @@ export function ProjectCollectionIconPickerDialog({
                       key={option.emoji}
                       type="button"
                       role="radio"
-                      aria-label={option.label}
+                      aria-label={m(option.label)}
                       aria-checked={emoji === option.emoji}
                       tabIndex={emoji === option.emoji || (!hasPresetEmoji && index === 0) ? 0 : -1}
                       className={cn(

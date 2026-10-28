@@ -7,7 +7,7 @@ import {
   ProjectCollectionProjectKey,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts/settings";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { SourceControlProviderKind, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -554,7 +554,7 @@ describe("project collection mutations", () => {
             remoteUrl: "https://example.com/acme/app.git",
           },
           rootPath: "/work/app",
-          provider: "example",
+          provider: SourceControlProviderKind.make("example"),
           owner: "acme",
           name: "app",
           displayName: "App",

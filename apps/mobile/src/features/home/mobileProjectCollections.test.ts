@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  SourceControlProviderKind,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,

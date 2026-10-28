@@ -7,6 +7,7 @@ import { Children, cloneElement, isValidElement, type ReactElement, type ReactNo
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { PROJECT_ICON_COLORS } from "../../projectIconOptions";
+import { m } from "../../i18n/messages";
 
 vi.mock("lucide-react/dynamic", () => ({
   DynamicIcon: ({ name }: { readonly name: string }) => (
@@ -159,7 +160,7 @@ describe("ProjectCollectionIconPickerDialog", () => {
     const colorGroup = root.findByProps({ role: "group", "aria-label": "Icon color" });
 
     expect(colorGroup.findAllByType("button").map((button) => button.props["aria-label"])).toEqual(
-      PROJECT_ICON_COLORS.map((option) => option.label),
+      PROJECT_ICON_COLORS.map((option) => m(option.label)),
     );
 
     act(() => colorGroup.findByProps({ "aria-label": "Rose" }).props.onClick());

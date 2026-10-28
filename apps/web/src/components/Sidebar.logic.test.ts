@@ -9,17 +9,13 @@ import { AsyncResult } from "effect/reactivity";
 import {
   shouldCreateNewThreadInCurrentProject,
   deleteSelectedThreadEntries,
-  filterSidebarProjectScopeItems,
   deriveSidebarProjectCollections,
-  filterSidebarV2VisibleThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   resolveSidebarSweepKeys,
   resolveSidebarRowStatus,
-  resolveSidebarThreadSection,
-  resolveSidebarRowAccessibility,
   resolveSidebarProjectCollectionDragProject,
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
@@ -51,7 +47,6 @@ import {
 } from "@t3tools/client-runtime/state/thread-sort";
 import { resolveProjectExpanded } from "../uiStateStore";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
   EnvironmentId,
   ProjectId,
