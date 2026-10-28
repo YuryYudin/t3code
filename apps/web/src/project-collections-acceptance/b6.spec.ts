@@ -1,6 +1,7 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
@@ -134,7 +135,7 @@ const project: EnvironmentProject = {
       remoteUrl: "https://github.com/acme/pockeor.git",
     },
     rootPath: "/work/pockeor",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "acme",
     name: "pockeor",
     displayName: "PockeoR",

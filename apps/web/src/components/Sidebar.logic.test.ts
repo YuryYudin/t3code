@@ -7,9 +7,7 @@ import { AsyncResult } from "effect/reactivity";
 import {
   archiveSelectedThreadEntries,
   deleteSelectedThreadEntries,
-  filterSidebarProjectScopeItems,
   deriveSidebarProjectCollections,
-  filterSidebarV2VisibleThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
@@ -18,8 +16,6 @@ import {
   pinOrderKeyBetween,
   resolveProjectStatusIndicator,
   resolveSidebarSweepKeys,
-  resolveSidebarThreadSection,
-  resolveSidebarRowAccessibility,
   resolveSidebarProjectCollectionDragProject,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
@@ -42,8 +38,8 @@ import {
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -1021,7 +1017,7 @@ describe("deriveSidebarProjectCollections", () => {
       canonicalKey: "github.com/acme/work",
       locator: { source: "git-remote", remoteName: "origin", remoteUrl: "git@example/work" },
       rootPath: "/tmp/work",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "acme",
       name: "work",
       displayName: "Work repo",
@@ -1035,7 +1031,7 @@ describe("deriveSidebarProjectCollections", () => {
       canonicalKey: "github.com/acme/personal",
       locator: { source: "git-remote", remoteName: "origin", remoteUrl: "git@example/personal" },
       rootPath: "/tmp/personal",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "acme",
       name: "personal",
       displayName: "Personal repo",
@@ -1225,7 +1221,7 @@ describe("deriveSidebarProjectCollections", () => {
             remoteUrl: `git@example/project-${index}`,
           },
           rootPath: visible.workspaceRoot,
-          provider: "github" as const,
+          provider: SourceControlProviderKind.make("github"),
           owner: "acme",
           name: `project-${index}`,
           displayName: `Project ${index}`,

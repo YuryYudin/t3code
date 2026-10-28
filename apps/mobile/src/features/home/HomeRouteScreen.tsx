@@ -91,11 +91,7 @@ function SplitHomeRouteScreen() {
       <WorkspaceEmptyDetail
         onAddConnection={
           Platform.OS === "android" && !catalogState.hasConnections
-            ? () =>
-                navigation.navigate("SettingsSheet", {
-                  screen: "SettingsContent",
-                  params: { screen: "SettingsEnvironmentNew" },
-                })
+            ? () => openSettings(navigation, "SettingsEnvironmentNew")
             : undefined
         }
         onStartNewTask={

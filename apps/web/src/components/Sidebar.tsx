@@ -1026,10 +1026,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       ? {}
       : {
           projectIds: [
-            ...new Set(
-              [...scopedProjectKeys].map((key) => key.slice(key.indexOf(":") + 1)),
-            ),
-          ].map(ProjectId.make),
+            ...new Set([...scopedProjectKeys].map((key) => key.slice(key.indexOf(":") + 1))),
+          ].map((id) => ProjectId.make(id)),
         },
   );
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
