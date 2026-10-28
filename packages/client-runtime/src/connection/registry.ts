@@ -1301,7 +1301,8 @@ export const make = Effect.gen(function* () {
               });
               const sameEndpoint =
                 previous !== undefined &&
-                pullRequestRoutingConnectionKey(previous) === pullRequestRoutingConnectionKey(entry);
+                pullRequestRoutingConnectionKey(previous) ===
+                  pullRequestRoutingConnectionKey(entry);
               const next =
                 sameEndpoint && previous !== undefined
                   ? { ...entry, ...unsupportedState(previous) }
