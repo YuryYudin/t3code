@@ -94,12 +94,13 @@ function unresolved(cwd: string): string[] {
 }
 export function shareCheckout(checkout: string, uid: number): void {
   if (!Number.isSafeInteger(uid) || uid < 0) throw new Error("Invalid shared checkout UID.");
+  const ownerUid = process.getuid?.();
   const owned: string[] = [];
   const directories: string[] = [];
   const visit = (path: string) => {
     const stat = NodeFS.lstatSync(path);
     if (stat.isSymbolicLink()) return;
-    if (stat.uid === process.getuid?.()) {
+    if (stat.uid === ownerUid) {
       owned.push(path);
       if (stat.isDirectory()) directories.push(path);
     }
@@ -114,7 +115,13 @@ export function shareCheckout(checkout: string, uid: number): void {
     run("setfacl", ["-m", `u:${uid}:rwX`, ...owned.slice(index, index + 200)]);
   }
   for (let index = 0; index < directories.length; index += 200) {
-    run("setfacl", ["-m", `d:u:${uid}:rwx`, ...directories.slice(index, index + 200)]);
+    // A new file belongs to its creator. Retain named access for both accounts
+    // so worker-created dependencies remain writable by Jenkins on the next attempt.
+    const defaults = [
+      `d:u:${uid}:rwx`,
+      ...(ownerUid === undefined || ownerUid === uid ? [] : [`d:u:${ownerUid}:rwx`]),
+    ].join(",");
+    run("setfacl", ["-m", defaults, ...directories.slice(index, index + 200)]);
   }
 }
 
