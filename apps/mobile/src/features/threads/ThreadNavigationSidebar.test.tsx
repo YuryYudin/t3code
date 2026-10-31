@@ -32,7 +32,6 @@ const runtime = vi.hoisted(() => ({
 }));
 const atoms = vi.hoisted(() => ({
   preferences: Symbol("preferences"),
-  serverConfigs: Symbol("serverConfigs"),
   listEnvironments: Symbol("listEnvironments"),
 }));
 
@@ -90,8 +89,7 @@ vi.mock("../../state/preferences", () => ({
   mobilePreferencesAtom: atoms.preferences,
   updateMobilePreferencesAtom: Symbol("updateMobilePreferencesAtom"),
 }));
-vi.mock("../../state/server", () => ({
-  environmentServerConfigsAtom: atoms.serverConfigs,
+vi.mock("../../state/presentation", () => ({
   threadListEnvironmentsAtom: atoms.listEnvironments,
 }));
 vi.mock("../../state/entities", () => ({
@@ -111,6 +109,9 @@ vi.mock("../../state/use-pending-new-tasks", () => ({
   usePendingNewTasks: () => runtime.pendingTasks,
 }));
 vi.mock("../../state/use-thread-outbox", () => ({ useQueuedThreadKeys: () => new Set() }));
+vi.mock("../../state/thread-pr-demand", () => ({
+  ThreadPrDemandProvider: ({ children }: { readonly children?: ReactNode }) => children,
+}));
 vi.mock("../../state/olderSettledShelf", () => ({
   useOlderSettledShelf: () => ({
     environments: new Map(),
