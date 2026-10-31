@@ -10,6 +10,7 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -1754,7 +1755,13 @@ describe("DesktopWindow", () => {
         mainWindow,
         removedWindowRecords,
         windowRecordUpdates,
-        desktopState: Layer.succeed(DesktopState.DesktopState, { backendReady, quitting }),
+        desktopState: Layer.succeed(DesktopState.DesktopState, {
+          backendReady,
+          quitting,
+          primaryBackendStartup: yield* SubscriptionRef.make<DesktopState.PrimaryBackendStartup>({
+            _tag: "Starting",
+          }),
+        }),
         desktopSettings: {
           ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
           mainWindowBounds: bounds,
