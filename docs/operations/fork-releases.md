@@ -1,6 +1,6 @@
 # Fork releases
 
-The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. Independently, when a new upstream stable release appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
+The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. When a new upstream stable release appears, the build prepares and publishes that stable candidate before development integration, so development failures or queue delays cannot consume its time budget. It builds the complete desktop matrix and advances fork `main` only after verification.
 
 GitHub Actions is disabled for this fork at the repository level; Jenkins owns CI and releases. This setting survives upstream workflow changes. Verify it with `gh api repos/YuryYudin/t3code/actions/permissions`; restore it with `gh api --method PUT repos/YuryYudin/t3code/actions/permissions -F enabled=false` if Actions has been enabled again.
 
@@ -83,7 +83,7 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 
 macOS packaging needs at least 8 GiB of free space. Below 12 GiB, Jenkins prunes regenerable pnpm and pip download caches before installing dependencies; if space remains insufficient, it stops before packaging.
 
-Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. The Jenkins account does not need sudo after that provisioning step.
+Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. Windows packaging uses the provisioned `pockeo-windows` agent pool so one offline VM does not block a release. The Jenkins account does not need sudo after that provisioning step.
 
 Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It holds the durable incident, repair, lock, and verification journals plus validated Git rerere resolutions. It contains no credentials.
 

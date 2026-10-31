@@ -387,13 +387,14 @@ def buildLinux(String slug, String candidateRef, String version) {
 }
 
 def runQuality(String slug, String candidateRef) {
+    def passed = false
     node('linux') {
         stage("${slug}: Feature + release gates") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             installWorkspace()
             sh 'git config --local status.showUntrackedFiles all; echo .fork-quality.log >> .git/info/exclude'
             try {
-            sh '''#!/usr/bin/env bash
+            passed = sh(returnStatus: true, script: '''#!/usr/bin/env bash
                 set -euo pipefail
                 exec > >(tee .fork-quality.log) 2>&1
                 node scripts/fork-release.ts verify-bootstrap
@@ -413,15 +414,17 @@ def runQuality(String slug, String candidateRef) {
                     corepack pnpm exec vp run --filter "./$project" typecheck
                 done
                 test -z "$(git status --porcelain)"
-            '''
+            ''') == 0
             } finally {
                 stash name: "quality-feedback-${slug}", includes: ".fork-quality.log", allowEmpty: true
             }
         }
     }
+    return passed
 }
 
 def checkMobileNative(String slug, String candidateRef, String observed) {
+    def passed = true
     node('ggnode2') {
         stage("${slug}: Android native compatibility") {
             checkoutCandidate("candidate-${slug}", candidateRef)
@@ -434,7 +437,7 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
             withEnv(['EXPO_NO_DOTENV=1', 'EXPO_NO_GIT_STATUS=1', 'APP_VARIANT=development']) {
                 installWorkspace()
                 try {
-                sh '''#!/usr/bin/env bash
+                passed = sh(returnStatus: true, script: '''#!/usr/bin/env bash
                     set -euo pipefail
                     exec > >(tee .fork-quality.log) 2>&1
                     export ANDROID_HOME="$HOME/Android/Sdk"
@@ -444,17 +447,18 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
                     corepack pnpm exec expo prebuild --clean --platform android --no-install
                     cd android
                     ./gradlew :app:assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
-                '''
+                ''') == 0
                 } finally {
                     stash name: "quality-feedback-${slug}", includes: '.fork-quality.log', allowEmpty: true
                 }
             }
         }
     }
+    return passed
 }
 
 def buildWindows(String slug, String candidateRef, String version) {
-    node('pockeo-windows-3') {
+    node('pockeo-windows') {
         stage("${slug}: Windows x64 unsigned") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             unstash "artifacts-linux-${slug}"
@@ -613,17 +617,14 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         failureClass = 'validation'
         def qualityPassed = false
         while (!qualityPassed) {
-            try {
-                runQuality(slug, candidateRef)
-                if (managed) {
-                    def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
-                    if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
-                    checkMobileNative(slug, candidateRef, observedMobile)
-                }
-                qualityPassed = true
-            } catch (qualityError) {
-                if (isUserAbort(qualityError)) throw qualityError
-                if (!managed) throw qualityError
+            qualityPassed = runQuality(slug, candidateRef)
+            if (qualityPassed && managed) {
+                def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
+                if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
+                qualityPassed = checkMobileNative(slug, candidateRef, observedMobile)
+            }
+            if (!qualityPassed) {
+                if (!managed) error('Candidate quality checks failed; see the gate log.')
                 requestIntegrationRepair(resolved, "quality-feedback-${slug}")
                 ensureIntegrationBundle(resolved, slug, candidateRef)
             }
@@ -795,15 +796,16 @@ pipeline {
                     } else if (stable.firstRelease) {
                         runCandidate(stable, 'automatic-stable-release', true)
                     } else {
-                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
-                            runCandidate(nightly, 'nightly-integration', false)
-                        }
+                        // Release the known stable target before development work can consume the build timeout.
                         if (stable.releaseRequired) {
                             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
                                 runCandidate(stable, 'automatic-stable-release', true)
                             }
                         } else {
                             echo 'No new upstream stable release requires a fork release.'
+                        }
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+                            runCandidate(nightly, 'nightly-integration', false)
                         }
                     }
                     }
