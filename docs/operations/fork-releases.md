@@ -83,7 +83,7 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 
 macOS packaging needs at least 8 GiB of free space. Below 12 GiB, Jenkins prunes regenerable pnpm and pip download caches before installing dependencies; if space remains insufficient, it stops before packaging.
 
-Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. Windows packaging uses the provisioned `pockeo-windows` agent pool so one offline VM does not block a release. The Jenkins account does not need sudo after that provisioning step.
+Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. Windows packaging uses `pockeo-windows-1` or `pockeo-windows-3`. Both need Python 3 and the Visual Studio SDK, C++ toolset, and Spectre libraries from the [Windows prerequisites](development.md#windows-installer-prerequisites); other Windows CI workers do not have the full release toolchain. The pipeline also searches `C:\Tools\T3Python`, allowing the backup worker to use a dedicated Python installation without changing its system PATH. The Jenkins account does not need sudo after that provisioning step.
 
 Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It holds the durable incident, repair, lock, and verification journals plus validated Git rerere resolutions. It contains no credentials.
 

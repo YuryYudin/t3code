@@ -458,12 +458,13 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
 }
 
 def buildWindows(String slug, String candidateRef, String version) {
-    node('pockeo-windows') {
+    node('pockeo-windows-1 || pockeo-windows-3') {
         stage("${slug}: Windows x64 unsigned") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             unstash "artifacts-linux-${slug}"
             withEnv([
                 'RUSTUP_TOOLCHAIN=stable',
+                'PATH+T3CODE_PYTHON=C:\\Tools\\T3Python',
                 'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
             ]) {
                 installWorkspace()
