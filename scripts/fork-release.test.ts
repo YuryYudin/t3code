@@ -104,6 +104,18 @@ describe("upstream stable releases", () => {
     expect(
       parseUpstreamStableRelease({ tag_name: "v0.0.44", draft: false, prerelease: false }),
     ).toEqual({ tag: "v0.0.44", version: "0.0.44" });
+    expect(
+      parseUpstreamStableRelease(
+        { tag_name: "v0.0.44", draft: false, prerelease: false },
+        "0.0.44",
+      ),
+    ).toEqual({ tag: "v0.0.44", version: "0.0.44" });
+    expect(() =>
+      parseUpstreamStableRelease(
+        { tag_name: "v0.0.45", draft: false, prerelease: false },
+        "0.0.44",
+      ),
+    ).toThrow(/Expected upstream 0.0.44/);
   });
 
   it("rejects draft and prerelease releases even when their tags look stable", () => {

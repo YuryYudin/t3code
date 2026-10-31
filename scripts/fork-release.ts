@@ -173,9 +173,11 @@ function assertLinearRange(range: string): ReadonlyArray<string> {
   return commits;
 }
 
-function latestStableTag(): { tag: string; version: string; commit: string } {
+function officialStableTag(version?: string): { tag: string; version: string; commit: string } {
+  const endpoint = version === undefined ? "latest" : `tags/v${normalizeStableVersion(version)}`;
   const release = parseUpstreamStableRelease(
-    JSON.parse(gh(["api", `repos/${UPSTREAM_REPOSITORY}/releases/latest`])),
+    JSON.parse(gh(["api", `repos/${UPSTREAM_REPOSITORY}/releases/${endpoint}`])),
+    version,
   );
   const ref = `refs/upstream-tags/${release.tag}`;
   git(["fetch", "--no-tags", "upstream", `+refs/tags/${release.tag}:${ref}`]);
@@ -207,6 +209,10 @@ function resolveCommand(args: ParsedArguments): void {
   const mode = enumFlag(args, "mode", INCIDENT_MODES);
   const upstreamRef = optionalFlag(args, "upstream-ref");
   const sourceRef = optionalFlag(args, "source");
+  const upstreamVersion = optionalFlag(args, "upstream-version");
+  if (upstreamVersion && (action !== "out-of-cycle" || mode === "nightly-integration")) {
+    throw new Error("--upstream-version is accepted only for an out-of-cycle stable release.");
+  }
   if (upstreamRef && action !== "validate-only") {
     throw new Error("--upstream-ref is accepted only with --action validate-only.");
   }
@@ -218,7 +224,7 @@ function resolveCommand(args: ParsedArguments): void {
       ? { tag: null, version: null, commit: resolveCommit(upstreamRef) }
       : mode === "nightly-integration"
         ? { tag: null, version: null, commit: resolveCommit("upstream/main") }
-        : latestStableTag();
+        : officialStableTag(upstreamVersion);
   const observedMainSha = resolveCommit("origin/main");
   const bootstrap = readJsonFile<ForkReleaseBootstrap>(
     NodePath.resolve("scripts/fork-release-bootstrap.json"),
