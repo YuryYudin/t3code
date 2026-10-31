@@ -29,8 +29,7 @@ const isReleaseIndex = Schema.is(
 export const npmReleaseAtom = Atom.family((spec: string) =>
   Atom.make(
     Effect.gen(function* () {
-      const channel =
-        spec === "nightly" ? "nightly" : spec === "latest" ? "stable" : null;
+      const channel = spec === "nightly" ? "nightly" : spec === "latest" ? "stable" : null;
       if (channel === null) return null;
       let version: string | undefined;
       for (let page = 1; page <= 10; page += 1) {
@@ -43,12 +42,10 @@ export const npmReleaseAtom = Atom.family((spec: string) =>
         if (version !== undefined || body.length < 100) break;
       }
       if (version === undefined) return null;
-      const manifestResponse = yield* HttpClient.get(
-        cliReleaseMigrationsUrl(version),
+      const manifestResponse = yield* HttpClient.get(cliReleaseMigrationsUrl(version));
+      const migrationSource = yield* HttpClientResponse.filterStatusOk(manifestResponse).pipe(
+        Effect.flatMap((ok) => ok.text),
       );
-      const migrationSource = yield* HttpClientResponse.filterStatusOk(
-        manifestResponse,
-      ).pipe(Effect.flatMap((ok) => ok.text));
       return {
         version,
         databaseMigration: cliReleaseDatabaseMigration(migrationSource),
