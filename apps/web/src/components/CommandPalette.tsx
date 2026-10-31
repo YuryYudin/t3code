@@ -156,7 +156,6 @@ import {
   isWindowsPlatform,
   newProjectId,
 } from "../lib/utils";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
@@ -480,7 +479,6 @@ function OpenCommandPaletteDialog(props: {
     if (activeThreadReferenceCopyTarget === null) return;
     await copyThreadReference(activeThreadReferenceCopyTarget);
   };
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
   const projectCollectionScope = useUiStateStore((store) => store.projectCollectionScope);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);

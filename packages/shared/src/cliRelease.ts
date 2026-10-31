@@ -104,10 +104,6 @@ export function cliReleaseIndexPageUrl(page: number): string {
   return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
 }
 
-export function cliReleaseTagUrl(version: string): string {
-  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases/tags/v${encodeURIComponent(version)}`;
-}
-
 export function cliReleaseMigrationsUrl(version: string): string {
   return `https://raw.githubusercontent.com/${CLI_RELEASE_REPOSITORY}/v${encodeURIComponent(version)}/apps/server/src/persistence/Migrations.ts`;
 }

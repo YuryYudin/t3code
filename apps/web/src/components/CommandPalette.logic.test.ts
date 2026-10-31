@@ -6,15 +6,12 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import type { Project, Thread } from "../types";
+import type { Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
   newThreadNoProjectIndex,
-  buildBrowseGroups,
   buildNewWindowActionItem,
-  buildCommandPaletteProjectMetadata,
   buildCommandPaletteRows,
-  buildProjectActionItems,
   buildNestedSearchItems,
   resolveCommandPaletteProject,
   buildThreadActionItems,

@@ -39,27 +39,20 @@ describe("npmReleaseAtom", () => {
         Response.json([{ tag_name: `v${version}`, draft: false, prerelease: false }]),
       )
       .mockImplementationOnce(
-        async () =>
-          new Response(
-            '[71, "Earlier", Migration0071],\n[72, "Latest", Migration0072],',
-          ),
+        async () => new Response('[71, "Earlier", Migration0071],\n[72, "Latest", Migration0072],'),
       );
 
     const result = await settledRelease();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const requests = fetchMock.mock.calls.map(
-      (call) => new Request(call[0] ?? "", call[1]),
-    );
+    const requests = fetchMock.mock.calls.map((call) => new Request(call[0] ?? "", call[1]));
     expect(requests[0]?.url).toBe(
       "https://api.github.com/repos/YuryYudin/t3code/releases?per_page=100&page=1",
     );
     expect(requests[1]?.url).toBe(
       `https://raw.githubusercontent.com/YuryYudin/t3code/v${version}/apps/server/src/persistence/Migrations.ts`,
     );
-    expect(
-      requests.every((request) => request.headers.get("traceparent") === null),
-    ).toBe(true);
+    expect(requests.every((request) => request.headers.get("traceparent") === null)).toBe(true);
     expect(AsyncResult.getOrElse(result, () => null)).toEqual({
       version,
       databaseMigration: 72,
