@@ -613,9 +613,9 @@ describe("EnvironmentRegistry", () => {
         );
         yield* Effect.gen(function* () {
           const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-          yield* registry.registerPlatform(
+          yield* registry.reconcilePlatform([
             new PrimaryConnectionRegistration({ target: SECOND_TARGET }),
-          );
+          ]);
           yield* registry.start;
           yield* awaitConnectionState(
             registry,

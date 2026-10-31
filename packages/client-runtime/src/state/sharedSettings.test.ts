@@ -156,6 +156,7 @@ describe("pickSharedServerSettings", () => {
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
       "snoozeLimitedThreads",
+      "snoozePresets",
       "sourceControlWritingStyle",
       "textGenerationModelSelection",
     ]);
@@ -223,13 +224,7 @@ describe("filterSharedServerPatch", () => {
         sidebarAutoSettleAfterDays: 7,
       };
       expect(
-        filterSharedServerPatch(
-          patch,
-          restartCapabilities,
-          settings,
-          settings,
-          targetIsSource,
-        ),
+        filterSharedServerPatch(patch, restartCapabilities, settings, settings, targetIsSource),
       ).toEqual({
         ...(targetIsSource
           ? { textGenerationModelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection }
@@ -267,9 +262,7 @@ describe("filterSharedServerPatch", () => {
           [instanceId]: { ...instance, driver: ProviderDriverKind.make("codex"), enabled: true },
         },
       };
-      expect(
-        filterSharedServerPatch(patch, restartCapabilities, settings, sourceSettings),
-      ).toEqual(
+      expect(filterSharedServerPatch(patch, restartCapabilities, settings, sourceSettings)).toEqual(
         availability === "enabled" ? patch : { sidebarAutoSettleAfterDays: 7 },
       );
     },

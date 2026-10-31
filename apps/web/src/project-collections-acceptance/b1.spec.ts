@@ -30,6 +30,7 @@ function initialState(): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    sidebarProjectScopeKeys: [],
     projectCollectionScope: { kind: "all" },
     projectCollectionsPreferredReferenceEnvironmentId: null,
     threadLastVisitedAtById: {},

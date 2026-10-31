@@ -139,6 +139,7 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
   }),
 }));
 vi.mock("../settings/appearance/AppearancePreferencesProvider", () => ({
+  useAndroidFloatingTabs: () => false,
   useAppearancePreferences: () => ({
     appearance: { baseFontSize: 16 },
     materialYouStyleLayoutActive: false,
