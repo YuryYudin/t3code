@@ -153,11 +153,14 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected New Window menu item to have a click handler.");
       }
 
-      // Closing a window must stay reachable on every platform, and only
-      // non-darwin keeps Quit in this menu.
+      const closeWindow = fileMenu.submenu.find((item) => item.label === "Close Window");
+      assert.isDefined(closeWindow);
+      assert.isFunction(closeWindow.click);
+      assert.isUndefined(closeWindow.accelerator);
+      // Only non-darwin keeps Quit in this menu.
       assert.deepEqual(
         fileMenu.submenu.flatMap((item) => (item.role === undefined ? [] : [item.role])),
-        ["close", "quit"],
+        ["quit"],
       );
 
       newWindow.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
