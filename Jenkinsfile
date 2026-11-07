@@ -401,7 +401,7 @@ def runQuality(String slug, String candidateRef) {
                 corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
                 corepack pnpm run test:project-collections-acceptance
                 corepack pnpm exec vp test run packages/client-runtime/src/state/projectGrouping.test.ts
-                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts
+                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts apps/web/src/terminalUiStateStore.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/rightPanelStore.test.ts
                 corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
                 corepack pnpm exec vp test run packages/shared/src/cliRelease.test.ts apps/server/src/cli/update.test.ts apps/server/src/cloud/pinnedRuntime.test.ts apps/server/src/cloud/selfUpdate.test.ts scripts/install.test.ts apps/web/src/state/cliRelease.test.ts
                 corepack pnpm run test:fork-release-acceptance

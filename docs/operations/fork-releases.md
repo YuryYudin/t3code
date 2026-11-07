@@ -78,7 +78,7 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 - controller and durable state: `built-in` on kubuntu;
 - Linux x64: `linux` (`ggnode*`);
 - macOS arm64 and cross-built x64: `macos` (`mbook`);
-- Windows x64: `pockeo-windows-3`, the provisioned member of the `pockeo-windows` pool. `pockeo-windows-1` lacked Python 3 and Visual Studio C++ prerequisites during the 2026-09-30 nightly build. Do not widen the selection until other workers pass the Windows preflight;
+- Windows x64: `pockeo-windows-1 || pockeo-windows-3`, the workers with the Python, Visual Studio C++ toolset, SDK, and Spectre prerequisites required by the Windows preflight;
 - Android arm64 APK: `ggnode2`, the same node that compiles the mobile native compatibility check, using its provisioned Java and Android SDK.
 
 macOS packaging needs at least 8 GiB of free space. Below 12 GiB, Jenkins prunes regenerable pnpm and pip download caches before installing dependencies; if space remains insufficient, it stops before packaging.
