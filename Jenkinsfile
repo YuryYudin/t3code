@@ -425,7 +425,7 @@ def runQuality(String slug, String candidateRef) {
 
 def checkMobileNative(String slug, String candidateRef, String observed) {
     def passed = true
-    node('ggnode2') {
+    node('ggnode1 || ggnode2') {
         stage("${slug}: Android native compatibility") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             // Native transitives and patches can change without a mobile manifest edit.
@@ -479,7 +479,7 @@ def buildWindows(String slug, String candidateRef, String version) {
 def buildAndroid(String slug, String candidateRef, String version) {
     // SHA-256 of the t3code-android-keystore certificate; Android only accepts updates signed by it.
     def releaseCertSha256 = '5c2ddb47261f35bac585e6b1561db8fd86499288ba7c459c9ff6a09ade9937e0'
-    node('ggnode2') {
+    node('ggnode1 || ggnode2') {
         stage("${slug}: Android arm64 APK") {
             try {
                 checkoutCandidate("candidate-${slug}", candidateRef)
