@@ -406,7 +406,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.planModeEnabled === "boolean") {
     preferences.planModeEnabled = parsed.planModeEnabled;
   }
-  }
   if (typeof parsed.workingShelfEnabled === "boolean") {
     preferences.workingShelfEnabled = parsed.workingShelfEnabled;
   }

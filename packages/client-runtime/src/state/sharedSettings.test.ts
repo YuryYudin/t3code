@@ -285,7 +285,7 @@ describe("filterSharedServerPatch", () => {
 });
 
 describe("findSharedSettingsMismatches", () => {
-  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 30 };
 
   it("leaves collection drift to the dedicated mismatch state machine", () => {
     const collectionPrimary = { ...primarySettings, projectCollections: workCollections };
