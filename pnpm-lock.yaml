@@ -400,9 +400,6 @@ importers:
       '@shadcn/lint':
         specifier: 0.1.5
         version: 0.1.5
-      '@t3tools/scripts':
-        specifier: workspace:*
-        version: link:scripts
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4

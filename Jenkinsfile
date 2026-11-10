@@ -398,7 +398,7 @@ def runQuality(String slug, String candidateRef) {
                 set -euo pipefail
                 exec > >(tee .fork-quality.log) 2>&1
                 node scripts/fork-release.ts verify-bootstrap
-                corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
+                corepack pnpm exec vp run --filter ./scripts typecheck
                 corepack pnpm run test:project-collections-acceptance
                 corepack pnpm exec vp test run packages/client-runtime/src/state/projectGrouping.test.ts
                 corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts apps/web/src/terminalUiStateStore.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/rightPanelStore.test.ts
