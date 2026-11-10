@@ -2,6 +2,9 @@
   "name": "@t3tools/scripts",
   "private": true,
   "type": "module",
+  "bin": {
+    "tsc": "./tsc.mjs"
+  },
   "scripts": {
     "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../vite.config.ts --dir ."
