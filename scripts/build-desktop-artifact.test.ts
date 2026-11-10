@@ -1864,9 +1864,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it.effect("rejects a Windows payload that regresses above the file-count budget", () =>
+  it.effect("allows the native/cache payload footprint while enforcing the file-count budget", () =>
     Effect.scoped(
       Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
         const error = yield* validateWindowsPackagedPayload({
           stageDistDir: fixture.stageDistDir,
@@ -1879,8 +1881,29 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.instanceOf(error, WindowsPackagedPayloadValidationError);
         assert.equal(error.reason, "file-limit-exceeded");
         assert.isAbove(error.fileCount ?? 0, 2);
+
+        const cacheDir = path.join(fixture.packagedAppDir, "resources/server-compile-cache");
+        yield* fs.makeDirectory(cacheDir, { recursive: true });
+        for (let index = error.fileCount ?? 0; index < 92; index++) {
+          yield* fs.writeFileString(path.join(cacheDir, `chunk-${index}`), "cache");
+        }
+        const validate = validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        });
+        assert.equal((yield* validate).fileCount, 92);
+
+        for (let index = 92; index < 129; index++) {
+          yield* fs.writeFileString(path.join(cacheDir, `chunk-${index}`), "cache");
+        }
+        const overBudget = yield* validate.pipe(Effect.flip);
+        assert.instanceOf(overBudget, WindowsPackagedPayloadValidationError);
+        assert.equal(overBudget.reason, "file-limit-exceeded");
+        assert.equal(overBudget.fileCount, 129);
       }),
-    ),
+    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 
   it.effect("rejects a sidecar whose extracted server bundle cannot resolve", () =>
