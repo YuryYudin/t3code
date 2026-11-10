@@ -33,9 +33,14 @@ describe("buildHomeListFilterMenuItems", () => {
       ],
     });
     if (!projectMenu || !("items" in projectMenu)) throw new Error("Expected project submenu");
+    const allProjects = projectMenu.items[0];
+    const website = projectMenu.items[2];
+    if (!allProjects || "items" in allProjects || !website || "items" in website) {
+      throw new Error("Expected project actions");
+    }
 
-    projectMenu.items[0]?.onPress();
-    projectMenu.items[2]?.onPress();
+    allProjects.onPress();
+    website.onPress();
     expect(onProjectChange).toHaveBeenNthCalledWith(1, null);
     expect(onProjectChange).toHaveBeenNthCalledWith(2, "environment-1:project-2");
   });

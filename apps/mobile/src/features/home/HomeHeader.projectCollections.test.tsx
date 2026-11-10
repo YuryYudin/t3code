@@ -13,6 +13,9 @@ vi.mock("react-native", () => ({
   Text: "native-text",
   View: "native-view",
 }));
+vi.mock("expo-constants", () => ({
+  default: { expoConfig: { extra: { appVariant: "development" } } },
+}));
 vi.mock("@react-navigation/elements", async () => {
   const React = await import("react");
   return { HeaderHeightContext: React.createContext(0) };
@@ -50,6 +53,9 @@ vi.mock("../layout/workspace/WorkspaceBrandTitle", () => ({
 }));
 vi.mock("../layout/workspace/WorkspaceTabsContext", () => ({
   useWorkspaceTabs: () => null,
+}));
+vi.mock("../layout/workspace/brand-header-options", () => ({
+  getConnectionAwareBrandHeaderOptions: () => ({}),
 }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "native-header-options" }));
 vi.mock("../layout/workspace/workspace-list-header-items", () => ({
@@ -165,7 +171,8 @@ describe("workspace list header project collections", () => {
     });
 
     const projects = items.find((item) => item.id === "project");
-    expect(projects && "items" in projects ? projects.items[0]?.selected : undefined).toBe(false);
+    const allProjects = projects && "items" in projects ? projects.items[0] : undefined;
+    expect(allProjects && !("items" in allProjects) ? allProjects.selected : undefined).toBe(false);
   });
 
   it("leaves iOS header ownership to the workspace while retaining the collection strip", () => {
