@@ -68,6 +68,7 @@
     "@coderabbitai/config": "1.2.0",
     "@effect/tsgo": "0.67.1",
     "@shadcn/lint": "0.1.5",
+    "@t3tools/scripts": "workspace:*",
     "@types/node": "catalog:",
     "knip": "6.34.0",
     "vite-plus": "catalog:"
