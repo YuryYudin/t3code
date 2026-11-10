@@ -48,7 +48,9 @@ vi.mock("react-native", () => ({
     },
   },
   Pressable: "native-pressable",
+  ScrollView: "native-scroll-view",
   StyleSheet: { hairlineWidth: 1, create: (styles: unknown) => styles },
+  Text: "native-text",
   TextInput: "native-text-input",
   View: "native-view",
   useWindowDimensions: () => ({ width: 820, height: 1180, fontScale: 1, scale: 2 }),
@@ -244,6 +246,9 @@ vi.mock("../../components/ui/Menu", async () => {
 });
 vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
+vi.mock("../../components/ProjectCollectionIcon", () => ({
+  ProjectCollectionIcon: "project-collection-icon",
+}));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
 vi.mock("../../native/NativeScrollViewMarker", async () => {
@@ -337,8 +342,8 @@ vi.mock("../home/WorkspaceConnectionTitle", () => ({
 }));
 vi.mock("./sidebar-header-actions", () => ({ SidebarHeaderActions: "sidebar-header-actions" }));
 vi.mock("./sidebar-filter-button", () => ({ SidebarFilterButton: "sidebar-filter-button" }));
-vi.mock("./sidebar-navigation-shell", () => ({
-  SidebarNavigationShell: ({ children }: { readonly children?: unknown }) => children,
+vi.mock("../layout/workspace/WorkspaceSidebarColumn", () => ({
+  WorkspaceSidebarColumn: ({ children }: { readonly children?: unknown }) => children,
 }));
 vi.mock("./thread-list-items", () => ({
   PendingTaskListRow: "pending-row",
@@ -475,6 +480,35 @@ function filterMenu(): { readonly props: ReactTestInstance["props"] } {
   return renderer!.root.findByType("control-pill-menu" as never);
 }
 
+interface NativeMenuItem {
+  readonly label: string;
+  readonly state?: "on" | "off";
+  readonly items?: ReadonlyArray<NativeMenuItem>;
+  readonly onPress?: () => void;
+}
+
+function filterMenuItems(): ReadonlyArray<NativeMenuItem> {
+  const headerItems = renderer!.root
+    .findByType("stack-options" as never)
+    .props.options.unstable_headerRightItems() as ReadonlyArray<{
+    readonly accessibilityLabel: string;
+    readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
+  }>;
+  return headerItems.find((item) => item.accessibilityLabel === "Filter threads")!.menu!.items;
+}
+
+function findMenuItem(
+  items: ReadonlyArray<NativeMenuItem>,
+  label: string,
+): NativeMenuItem | undefined {
+  for (const item of items) {
+    if (item.label === label) return item;
+    const nested = item.items === undefined ? undefined : findMenuItem(item.items, label);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
+}
+
 function visibleThreadTitles(): string[] {
   return renderer!.root
     .findByType("legend-list" as never)
@@ -507,31 +541,7 @@ describe("ThreadNavigationSidebar project collections", () => {
       renderer = create(<ThreadNavigationSidebar {...props} />);
     });
 
-    type NativeMenuItem = {
-      readonly label: string;
-      readonly items?: ReadonlyArray<NativeMenuItem>;
-      readonly onPress?: () => void;
-    };
-    const headerItems = renderer!.root
-      .findByType("stack-options" as never)
-      .props.options.unstable_headerRightItems() as ReadonlyArray<{
-      readonly accessibilityLabel: string;
-      readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
-    }>;
-    const filterItems = headerItems.find((item) => item.accessibilityLabel === "Filter threads")!
-      .menu!.items;
-    const findItem = (
-      items: ReadonlyArray<NativeMenuItem>,
-      label: string,
-    ): NativeMenuItem | undefined => {
-      for (const item of items) {
-        if (item.label === label) return item;
-        const nested = item.items === undefined ? undefined : findItem(item.items, label);
-        if (nested !== undefined) return nested;
-      }
-      return undefined;
-    };
-    const work = findItem(filterItems, "Work (1)");
+    const work = findMenuItem(filterMenuItems(), "Work (1)");
 
     expect(work).toBeDefined();
     act(() => work!.onPress?.());

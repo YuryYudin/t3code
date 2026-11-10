@@ -65,12 +65,12 @@ describe("buildHomeListFilterMenuItems", () => {
       ],
     });
     if (!projectMenu || !("items" in projectMenu)) throw new Error("Expected project submenu");
-
     const allProjects = projectMenu.items[0];
     const website = projectMenu.items[2];
-    if (!allProjects || !("onPress" in allProjects) || !website || !("onPress" in website)) {
-      throw new Error("Expected actionable project menu items");
+    if (!allProjects || "items" in allProjects || !website || "items" in website) {
+      throw new Error("Expected project actions");
     }
+
     allProjects.onPress();
     website.onPress();
     expect(onProjectChange).toHaveBeenNthCalledWith(1, null);
