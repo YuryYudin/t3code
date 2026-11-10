@@ -2,6 +2,9 @@
   "name": "@t3tools/scripts",
   "private": true,
   "type": "module",
+  "bin": {
+    "tsc": "./tsc.mjs"
+  },
   "scripts": {
     "typecheck": "effect-tsgo tsrs --noEmit",
     "scenarios": "E2E_TELEMETRY_DISABLED=1 e2e run",
