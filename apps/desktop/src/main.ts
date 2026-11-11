@@ -140,7 +140,11 @@ const layerElectron = Layer.mergeAll(
   ElectronTheme.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
-  DesktopIpc.layer(Electron.ipcMain),
+);
+
+const layerDesktopAppWindows = DesktopAppWindowRegistry.layer;
+const layerDesktopIpc = DesktopIpc.layer(Electron.ipcMain).pipe(
+  Layer.provideMerge(layerDesktopAppWindows),
 );
 
 const layerDesktopFoundation = Layer.mergeAll(
@@ -154,7 +158,7 @@ const layerDesktopFoundation = Layer.mergeAll(
   DesktopConnectionCatalogStore.layer.pipe(Layer.provideMerge(DesktopSavedEnvironments.layer)),
   DesktopAssets.layer,
   DesktopObservability.layer,
-  DesktopAppWindowRegistry.layer,
+  layerDesktopIpc,
   DesktopRendererHistory.layer,
 ).pipe(Layer.provideMerge(layerDesktopEnvironment));
 
