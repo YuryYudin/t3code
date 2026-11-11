@@ -32,7 +32,6 @@ const runtime = vi.hoisted(() => ({
 }));
 const atoms = vi.hoisted(() => ({
   preferences: Symbol("preferences"),
-  serverConfigs: Symbol("serverConfigs"),
   listEnvironments: Symbol("listEnvironments"),
 }));
 
@@ -46,7 +45,9 @@ vi.mock("react-native", () => ({
     },
   },
   Pressable: "native-pressable",
+  ScrollView: "native-scroll-view",
   StyleSheet: { hairlineWidth: 1, create: (styles: unknown) => styles },
+  Text: "native-text",
   TextInput: "native-text-input",
   View: "native-view",
   useWindowDimensions: () => ({ width: 820, height: 1180, fontScale: 1, scale: 2 }),
@@ -54,6 +55,10 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
+vi.mock("@react-navigation/elements", async () => {
+  const React = await import("react");
+  return { HeaderHeightContext: React.createContext(0) };
+});
 vi.mock("react-native-gesture-handler", () => ({
   Gesture: { Native: () => ({}) },
   GestureDetector: ({ children }: { readonly children?: ReactNode }) => children,
@@ -90,8 +95,7 @@ vi.mock("../../state/preferences", () => ({
   mobilePreferencesAtom: atoms.preferences,
   updateMobilePreferencesAtom: Symbol("updateMobilePreferencesAtom"),
 }));
-vi.mock("../../state/server", () => ({
-  environmentServerConfigsAtom: atoms.serverConfigs,
+vi.mock("../../state/presentation", () => ({
   threadListEnvironmentsAtom: atoms.listEnvironments,
 }));
 vi.mock("../../state/entities", () => ({
@@ -111,6 +115,9 @@ vi.mock("../../state/use-pending-new-tasks", () => ({
   usePendingNewTasks: () => runtime.pendingTasks,
 }));
 vi.mock("../../state/use-thread-outbox", () => ({ useQueuedThreadKeys: () => new Set() }));
+vi.mock("../../state/thread-pr-demand", () => ({
+  ThreadPrDemandProvider: ({ children }: { readonly children?: ReactNode }) => children,
+}));
 vi.mock("../../state/olderSettledShelf", () => ({
   useOlderSettledShelf: () => ({
     environments: new Map(),
@@ -146,9 +153,6 @@ vi.mock("../settings/appearance/AppearancePreferencesProvider", () => ({
     themeVariables: { "--color-screen": "black", "--color-foreground-muted": "gray" },
   }),
 }));
-vi.mock("../workspace/useSelectWorkspaceDetail", () => ({
-  useSelectWorkspaceDetail: () => vi.fn(),
-}));
 vi.mock("../home/home-list-options", () => ({
   hasCustomHomeListOptions: () => false,
   PROJECT_SORT_OPTIONS: [],
@@ -183,6 +187,9 @@ vi.mock("../home/usePendingTaskListActions", () => ({
     confirmDeletePendingTask: runtime.confirmDeletePendingTask,
   }),
 }));
+vi.mock("../layout/workspace/useSelectWorkspaceDetail", () => ({
+  useSelectWorkspaceDetail: () => vi.fn(),
+}));
 vi.mock("../home/useThreadListActions", () => ({
   useThreadListActions: () => ({
     archiveThread: vi.fn(),
@@ -213,15 +220,22 @@ vi.mock("../../components/ui/Menu", async () => {
 });
 vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
+vi.mock("../../components/ProjectCollectionIcon", () => ({
+  ProjectCollectionIcon: "project-collection-icon",
+}));
 vi.mock("../../components/CompactBrandTitle", () => ({ CompactBrandTitle: "compact-brand" }));
 vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "stack-options" }));
+vi.mock("../../native/NativeScrollViewMarker", async () => {
+  const React = await import("react");
+  return {
+    NativeScrollView: (props: Record<string, unknown>) =>
+      React.createElement("native-scroll-view", props, props.children as ReactNode),
+  };
+});
 vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: false }));
 vi.mock("../../native/native-layout-metrics", () => ({
   useNativeLayoutMetrics: () => null,
   useNativeColumnLayoutMetrics: () => null,
-}));
-vi.mock("../../native/NativeScrollViewMarker", () => ({
-  NativeScrollView: "native-scroll-view",
 }));
 vi.mock("../../components/ui/useToolbarLayout", () => ({
   useToolbarLayout: () => ({ height: 48, paddingTop: 0, paddingBottom: 0 }),
@@ -229,6 +243,9 @@ vi.mock("../../components/ui/useToolbarLayout", () => ({
 vi.mock("../home/ThreadUndoNotice", () => ({ ThreadUndoNotice: "thread-undo-notice" }));
 vi.mock("../home/WorkspaceConnectionTitle", () => ({
   WorkspaceConnectionTitle: "workspace-connection-title",
+  getConnectionAwareBrandHeaderOptions: () => ({}),
+}));
+vi.mock("../layout/workspace/brand-header-options", () => ({
   getConnectionAwareBrandHeaderOptions: () => ({}),
 }));
 // Upstream routes the whole Android chrome through this toolbar, which pulls in
@@ -242,8 +259,8 @@ vi.mock("../home/ThreadListToolbar", async () => {
 });
 vi.mock("./sidebar-header-actions", () => ({ SidebarHeaderActions: "sidebar-header-actions" }));
 vi.mock("./sidebar-filter-button", () => ({ SidebarFilterButton: "sidebar-filter-button" }));
-vi.mock("./sidebar-navigation-shell", () => ({
-  SidebarNavigationShell: ({ children }: { readonly children?: unknown }) => children,
+vi.mock("../layout/workspace/WorkspaceSidebarColumn", () => ({
+  WorkspaceSidebarColumn: ({ children }: { readonly children?: unknown }) => children,
 }));
 vi.mock("./thread-list-items", () => ({
   PendingTaskListRow: "pending-row",
@@ -368,16 +385,41 @@ const props = {
 
 let renderer: ReactTestRenderer | undefined;
 
-// Android routes the list filter menu through the Material toolbar; every other
-// platform keeps it on the control pill. Both carry the same action list.
-function filterMenu(): { readonly props: ReactTestInstance["props"] } {
-  const toolbar = renderer!.root.findAllByType("material-thread-list-toolbar" as never)[0];
-  if (toolbar !== undefined) {
-    return {
-      props: { actions: toolbar.props.filterActions, onPressAction: toolbar.props.onFilterAction },
-    };
+interface NativeMenuItem {
+  readonly label: string;
+  readonly state?: "on" | "off";
+  readonly items?: ReadonlyArray<NativeMenuItem>;
+  readonly onPress?: () => void;
+}
+
+function filterMenuItems(): ReadonlyArray<NativeMenuItem> {
+  const headerItems = renderer!.root
+    .findByType("stack-options" as never)
+    .props.options.unstable_headerRightItems() as ReadonlyArray<{
+    readonly accessibilityLabel: string;
+    readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
+  }>;
+  return headerItems.find((item) => item.accessibilityLabel === "Filter threads")!.menu!.items;
+}
+
+function findMenuItem(
+  items: ReadonlyArray<NativeMenuItem>,
+  label: string,
+): NativeMenuItem | undefined {
+  for (const item of items) {
+    if (item.label === label) return item;
+    const nested = item.items === undefined ? undefined : findMenuItem(item.items, label);
+    if (nested !== undefined) return nested;
   }
-  return renderer!.root.findByType("control-pill-menu" as never);
+  return undefined;
+}
+
+function addMenu(): { readonly props: ReactTestInstance["props"] } {
+  return renderer!.root
+    .findAllByType("control-pill-menu" as never)
+    .find((menu) =>
+      menu.props.actions.some((action: { id: string }) => action.id === "add:project"),
+    )!;
 }
 
 function visibleThreadTitles(): string[] {
@@ -410,31 +452,7 @@ describe("ThreadNavigationSidebar project collections", () => {
       renderer = create(<ThreadNavigationSidebar {...props} />);
     });
 
-    type NativeMenuItem = {
-      readonly label: string;
-      readonly items?: ReadonlyArray<NativeMenuItem>;
-      readonly onPress?: () => void;
-    };
-    const headerItems = renderer!.root
-      .findByType("stack-options" as never)
-      .props.options.unstable_headerRightItems() as ReadonlyArray<{
-      readonly accessibilityLabel: string;
-      readonly menu?: { readonly items: ReadonlyArray<NativeMenuItem> };
-    }>;
-    const filterItems = headerItems.find((item) => item.accessibilityLabel === "Filter threads")!
-      .menu!.items;
-    const findItem = (
-      items: ReadonlyArray<NativeMenuItem>,
-      label: string,
-    ): NativeMenuItem | undefined => {
-      for (const item of items) {
-        if (item.label === label) return item;
-        const nested = item.items === undefined ? undefined : findItem(item.items, label);
-        if (nested !== undefined) return nested;
-      }
-      return undefined;
-    };
-    const work = findItem(filterItems, "Work (1)");
+    const work = findMenuItem(filterMenuItems(), "Work (1)");
 
     expect(work).toBeDefined();
     act(() => work!.onPress?.());
@@ -447,29 +465,22 @@ describe("ThreadNavigationSidebar project collections", () => {
     act(() => {
       renderer = create(<ThreadNavigationSidebar {...props} />);
     });
-    const menu = filterMenu();
-    const collectionMenu = menu.props.actions.find(
-      (action: { id: string }) => action.id === "collection-scope",
-    );
-    expect(collectionMenu.subactions.map((action: { title: string }) => action.title)).toEqual([
+    const collectionMenu = findMenuItem(filterMenuItems(), "Collections");
+    expect(collectionMenu!.items!.map((action) => action.label)).toEqual([
       "All projects (2)",
       "Work (1)",
       "Unfiled (1)",
     ]);
 
-    act(() =>
-      menu.props.onPressAction({
-        nativeEvent: { event: `collection-scope:collection:${WORK_ID}` },
-      }),
-    );
+    act(() => findMenuItem(collectionMenu!.items!, "Work (1)")!.onPress?.());
     expect(runtime.savePreferences).toHaveBeenCalledWith({
       projectCollectionScope: { kind: "collection", collectionId: WORK_ID },
     });
     expect(visibleThreadTitles()).toEqual(["work"]);
 
-    act(() => menu.props.onPressAction({ nativeEvent: { event: "add:project" } }));
+    act(() => addMenu().props.onPressAction({ nativeEvent: { event: "add:project" } }));
     expect(props.onStartNewProject).toHaveBeenCalledOnce();
-    act(() => menu.props.onPressAction({ nativeEvent: { event: "add:manage" } }));
+    act(() => addMenu().props.onPressAction({ nativeEvent: { event: "add:manage" } }));
     expect(renderer!.root.findByType("project-collections-sheet" as never).props.projects).toEqual([
       { projectKey: WORK_KEY, label: "work", workspaceCount: 1 },
       { projectKey: PERSONAL_KEY, label: "personal", workspaceCount: 1 },
@@ -488,11 +499,9 @@ describe("ThreadNavigationSidebar project collections", () => {
     act(() => {
       renderer = create(<ThreadNavigationSidebar {...props} />);
     });
-    const actions = filterMenu().props.actions;
-    expect(actions.some((action: { id: string }) => action.id === "collection-scope")).toBe(false);
-    expect(actions.find((action: { id: string }) => action.id === "add").subactions).toEqual([
-      { id: "add:project", title: "New project" },
-    ]);
+    expect(findMenuItem(filterMenuItems(), "Collections")).toBeUndefined();
+    const addActions = addMenu().props.actions;
+    expect(addActions).toEqual([{ id: "add:project", title: "New project" }]);
     expect(renderer!.root.findAllByType("project-collections-sheet" as never)).toEqual([]);
   });
 
@@ -516,15 +525,7 @@ describe("ThreadNavigationSidebar project collections", () => {
     act(() => renderer!.update(<ThreadNavigationSidebar {...props} />));
 
     expect(runtime.savePreferences).not.toHaveBeenCalled();
-    const actions = filterMenu().props.actions;
-    const collectionMenu = actions.find(
-      (action: { id: string }) => action.id === "collection-scope",
-    );
-    expect(
-      collectionMenu.subactions.find(
-        (action: { id: string }) => action.id === `collection-scope:collection:${WORK_ID}`,
-      ).state,
-    ).toBe("on");
+    expect(findMenuItem(filterMenuItems(), "Work (1)")!.state).toBe("on");
     expect(visibleThreadTitles()).toEqual(["work"]);
   });
 
@@ -555,24 +556,21 @@ describe("ThreadNavigationSidebar project collections", () => {
       renderer = create(<ThreadNavigationSidebar {...props} />);
     });
 
-    const menu = filterMenu();
-    const projectMenu = menu.props.actions.find(
-      (action: { id: string }) => action.id === "project",
-    );
-    expect(projectMenu.subactions.map((action: { title: string }) => action.title)).toEqual([
+    const projectMenu = findMenuItem(filterMenuItems(), "Project");
+    expect(projectMenu!.items!.map((action) => action.label)).toEqual([
       "All projects",
       "work",
       "personal",
     ]);
     expect(visibleThreadTitles()).toEqual(["work"]);
 
-    act(() => menu.props.onPressAction({ nativeEvent: { event: `project:${PERSONAL_KEY}` } }));
+    act(() => findMenuItem(projectMenu!.items!, "personal")!.onPress?.());
     expect(runtime.savePreferences).toHaveBeenLastCalledWith({
       projectCollectionScope: { kind: "project", projectKey: PERSONAL_KEY },
     });
     expect(visibleThreadTitles()).toEqual(["personal"]);
 
-    act(() => menu.props.onPressAction({ nativeEvent: { event: "add:manage" } }));
+    act(() => addMenu().props.onPressAction({ nativeEvent: { event: "add:manage" } }));
     expect(renderer!.root.findByType("project-collections-sheet" as never).props.projects).toEqual([
       { projectKey: REMOTE_KEY, label: "remote", workspaceCount: 1 },
       { projectKey: WORK_KEY, label: "work", workspaceCount: 1 },

@@ -1,5 +1,5 @@
 import { act } from "../../test/rendererAct";
-import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
   ProjectCollectionId,
   ProjectCollectionProjectKey,

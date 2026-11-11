@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { buildHomeListFilterMenu } from "./home-list-filter-menu";
+import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
 
-describe("buildHomeListFilterMenu", () => {
+describe("buildHomeListFilterMenuItems", () => {
   it("adds a project scope submenu that selects and clears the same scope as the chips", () => {
     const onProjectChange = vi.fn();
-    const menu = buildHomeListFilterMenu({
+    const items = buildHomeListFilterMenuItems({
       environments: [],
       projects: [
         { key: "environment-1:project-1", label: "Codething" },
@@ -23,22 +23,24 @@ describe("buildHomeListFilterMenu", () => {
       onManageProjectCollections: vi.fn(),
     });
 
-    const projectMenu = menu.items.find(
-      (item) => item.type === "submenu" && item.title === "Project",
-    );
-    expect(menu.items.some((item) => item.title === "Settings")).toBe(false);
+    const projectMenu = items.find((item) => item.title === "Project");
+    expect(items.some((item) => item.title === "Settings")).toBe(false);
     expect(projectMenu).toMatchObject({
-      type: "submenu",
       items: [
-        { title: "All projects", state: "off" },
-        { title: "Codething", state: "on" },
-        { title: "Website", state: "off" },
+        { title: "All projects", selected: false },
+        { title: "Codething", selected: true },
+        { title: "Website", selected: false },
       ],
     });
-    if (projectMenu?.type !== "submenu") throw new Error("Expected project submenu");
+    if (!projectMenu || !("items" in projectMenu)) throw new Error("Expected project submenu");
+    const allProjects = projectMenu.items[0];
+    const website = projectMenu.items[2];
+    if (!allProjects || "items" in allProjects || !website || "items" in website) {
+      throw new Error("Expected project actions");
+    }
 
-    projectMenu.items[0]?.onPress();
-    projectMenu.items[2]?.onPress();
+    allProjects.onPress();
+    website.onPress();
     expect(onProjectChange).toHaveBeenNthCalledWith(1, null);
     expect(onProjectChange).toHaveBeenNthCalledWith(2, "environment-1:project-2");
   });

@@ -1,11 +1,11 @@
 import { act } from "../../test/rendererAct";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
-  SourceControlProviderKind,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import {

@@ -8,7 +8,8 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
 import { ProjectCollectionIcon } from "../../components/ProjectCollectionIcon";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
-import type { HomeHeaderProps } from "./HomeHeader.types";
+import type { ProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
+import type { MobileProjectCollectionsModel } from "./mobileProjectCollections";
 import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
 
 /**
@@ -16,7 +17,17 @@ import { mobileProjectCollectionScopeKey } from "./mobileProjectCollections";
  * menu. Rendered under the navigation bar by both the iOS and the Android home
  * headers, which upstream keeps in separate platform files.
  */
-export function ProjectCollectionScopeStrip(props: HomeHeaderProps) {
+export interface ProjectCollectionScopeStripProps {
+  readonly projectCollectionScope: ProjectCollectionScope;
+  readonly projectCollectionScopeOptions: MobileProjectCollectionsModel["scopeOptions"];
+  readonly projectCollectionsAvailable: boolean;
+  readonly canManageProjectCollections: boolean;
+  readonly onProjectCollectionScopeChange: (scope: ProjectCollectionScope) => void;
+  readonly onManageProjectCollections: () => void;
+  readonly onStartNewProject: () => void;
+}
+
+export function ProjectCollectionScopeStrip(props: ProjectCollectionScopeStripProps) {
   const insets = useSafeAreaInsets();
   const navigationHeaderHeight = useContext(HeaderHeightContext);
   const addActions = useMemo<MenuAction[]>(

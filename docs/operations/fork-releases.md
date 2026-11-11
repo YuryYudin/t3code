@@ -1,6 +1,6 @@
 # Fork releases
 
-The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. Independently, when a new upstream stable release appears, the same build prepares the stable candidate, builds the complete desktop matrix, advances fork `main`, and publishes a stable fork release.
+The `YuryYudin/t3code` Jenkins multibranch job follows upstream stable releases while continuously testing development updates from upstream `main`. Its nightly schedule validates and promotes a non-release candidate to `integration/upstream-main`. When a new upstream stable release appears, the build prepares and publishes that stable candidate before development integration, so development failures or queue delays cannot consume its time budget. It builds the complete desktop matrix and advances fork `main` only after verification.
 
 GitHub Actions is disabled for this fork at the repository level; Jenkins owns CI and releases. This setting survives upstream workflow changes. Verify it with `gh api repos/YuryYudin/t3code/actions/permissions`; restore it with `gh api --method PUT repos/YuryYudin/t3code/actions/permissions -F enabled=false` if Actions has been enabled again.
 
@@ -11,7 +11,7 @@ Use **Build with Parameters** for these manual actions:
 
 - `sync-upstream` immediately merges current upstream `main` into the persistent integration branch, tests all platforms, and advances only `integration/upstream-main`. An optional `SOURCE_REF` selects a reviewed fork source branch commit; the default remains stable fork `main`.
 
-For an explicitly requested release base, set `EXPECTED_UPSTREAM_VERSION` to its official version, such as `0.1.2`. If another stable release appears before a retry resolves its plan, Jenkins stops before candidate preparation instead of silently changing the requested base. Scheduled builds leave this empty and continue following the latest official stable release.
+For an explicitly requested release base, set `EXPECTED_UPSTREAM_VERSION` to its official version, such as `0.1.5`. Manual out-of-cycle runs fetch and validate that exact published stable release, even if a newer one appears before a retry. Drafts and prereleases are rejected. Scheduled builds leave this empty and continue following the latest official stable release.
 
 `apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.
 
@@ -78,12 +78,12 @@ Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, 
 - controller and durable state: `built-in` on kubuntu;
 - Linux x64: `linux` (`ggnode*`);
 - macOS arm64 and cross-built x64: `macos` (`mbook`);
-- Windows x64: `pockeo-windows-3`, the provisioned member of the `pockeo-windows` pool. `pockeo-windows-1` lacked Python 3 and Visual Studio C++ prerequisites during the 2026-09-30 nightly build. Do not widen the selection until other workers pass the Windows preflight;
-- Android arm64 APK: `ggnode2`, the same node that compiles the mobile native compatibility check, using its provisioned Java and Android SDK.
+- Windows x64: `pockeo-windows-1 || pockeo-windows-3`, the workers with the Python, Visual Studio C++ toolset, SDK, and Spectre prerequisites required by the Windows preflight;
+- Android arm64 APK and native compatibility: `ggnode1 || ggnode2`, using their provisioned Java and Android SDK at `$HOME/Android/Sdk`.
 
 macOS packaging needs at least 8 GiB of free space. Below 12 GiB, Jenkins prunes regenerable pnpm and pip download caches before installing dependencies; if space remains insufficient, it stops before packaging.
 
-Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. The Jenkins account does not need sudo after that provisioning step.
+Install `libsecret-1-dev`, `pkg-config`, ImageMagick, and `clang-15` once on every Linux agent. The pipeline selects Clang 15 for Electron native modules without changing the host defaults. Windows packaging uses `pockeo-windows-1` or `pockeo-windows-3`. Both need Python 3 and the Visual Studio SDK, C++ toolset, and Spectre libraries from the [Windows prerequisites](development.md#windows-installer-prerequisites); other Windows CI workers do not have the full release toolchain. The pipeline also searches `C:\Tools\T3Python`, allowing the backup worker to use a dedicated Python installation without changing its system PATH. The Jenkins account does not need sudo after that provisioning step.
 
 Create `/var/lib/jenkins/t3code-fork-release` on kubuntu, owned and writable only by Jenkins, and include it in controller backups. It holds the durable incident, repair, lock, and verification journals plus validated Git rerere resolutions. It contains no credentials.
 

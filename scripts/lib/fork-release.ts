@@ -122,15 +122,22 @@ export function firstForkVersion(upstreamVersion: string): string {
   return `${normalized}-1`;
 }
 
-export function parseUpstreamStableRelease(release: {
-  readonly tag_name: string;
-  readonly draft: boolean;
-  readonly prerelease: boolean;
-}): { tag: string; version: string } {
+export function parseUpstreamStableRelease(
+  release: {
+    readonly tag_name: string;
+    readonly draft: boolean;
+    readonly prerelease: boolean;
+  },
+  expectedVersion?: string,
+): { tag: string; version: string } {
   if (release.draft !== false || release.prerelease !== false) {
     throw new Error("Expected an official published upstream stable release.");
   }
-  return { tag: release.tag_name, version: normalizeStableVersion(release.tag_name) };
+  const version = normalizeStableVersion(release.tag_name);
+  if (expectedVersion !== undefined && version !== normalizeStableVersion(expectedVersion)) {
+    throw new Error(`Expected upstream ${expectedVersion}, but the release is ${version}.`);
+  }
+  return { tag: release.tag_name, version };
 }
 
 export function allocateForkVersion(input: {

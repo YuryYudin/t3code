@@ -127,10 +127,7 @@ export interface SharedSettingsEnvironment {
     | undefined;
 }
 
-/**
- * Callers must pass the real loaded settings, never a default fallback, or
- * "apply to all" would push defaults over real values.
- */
+/** Callers pass loaded settings so applying shared preferences never overwrites real values. */
 export function findSharedSettingsMismatches(input: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly primarySettings: ServerSettings | null;

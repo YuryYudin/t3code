@@ -1,4 +1,7 @@
-import { derivePhysicalProjectKey } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  derivePhysicalProjectKey,
+  pickableProjectGroups,
+} from "@t3tools/client-runtime/state/project-grouping";
 import {
   deriveProjectCollectionCounts,
   deriveProjectCollectionProjectKey,
@@ -90,7 +93,7 @@ export function buildMobileProjectCollectionsModel(input: {
     projectGroupingMode: input.projectGroupingMode,
   });
   const orderedScopes = sortHomeProjectScopes({
-    scopes: homeScopes,
+    scopes: pickableProjectGroups(homeScopes),
     threads: input.threads,
     pendingTasks: input.pendingTasks,
     projectSortOrder: input.projectSortOrder,

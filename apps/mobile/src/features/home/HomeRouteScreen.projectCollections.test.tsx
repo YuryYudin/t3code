@@ -101,12 +101,13 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
 vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
   useAdaptiveWorkspaceLayout: () => ({
     layout: { usesSplitView: runtime.usesSplitView },
-    panes: { primarySidebarVisible: false },
+    primarySidebarSearchQuery: "",
+    setPrimarySidebarSearchQuery: vi.fn(),
     startNewTask: runtime.startNewTask,
   }),
 }));
-vi.mock("../layout/WorkspaceEmptyDetail", () => ({
-  WorkspaceEmptyDetail: "workspace-empty-detail",
+vi.mock("../layout/workspace/WorkspaceListEmptyDetail", () => ({
+  WorkspaceListEmptyDetail: "workspace-empty-detail",
 }));
 vi.mock("../../components/ui/AndroidScreenHeader", () => ({
   AndroidScreenHeader: "android-screen-header",
@@ -115,9 +116,27 @@ vi.mock("../updates/app-updates", () => ({
   checkForAppUpdateOnLaunch: vi.fn(),
   startAppUpdateForegroundRecheck: vi.fn(),
 }));
-vi.mock("./AndroidHomeFab", () => ({
-  AndroidHomeFabLayout: ({ children }: { readonly children?: unknown }) => children,
-}));
+vi.mock("./AndroidHomeFab", async () => {
+  const React = await import("react");
+  return {
+    AndroidHomeFabLayout: ({
+      children,
+      onStartNewTask,
+    }: {
+      readonly children?: unknown;
+      readonly onStartNewTask: () => void;
+    }) =>
+      React.createElement(
+        React.Fragment,
+        null,
+        children as ReactNode,
+        React.createElement("native-button", {
+          accessibilityLabel: "New task",
+          onPress: onStartNewTask,
+        }),
+      ),
+  };
+});
 vi.mock("./home-list-options", () => ({
   useHomeListOptions: () => ({
     options: {
@@ -162,25 +181,53 @@ vi.mock("./useThreadListActions", () => ({
 vi.mock("./WorkspaceConnectionTitle", () => ({
   getConnectionAwareBrandHeaderOptions: () => ({}),
 }));
-vi.mock("./HomeHeader", async () => {
+vi.mock("../layout/workspace/WorkspaceListHeader", async () => {
   const React = await import("react");
   return {
-    HomeHeader: (props: Record<string, unknown>) =>
+    WorkspaceListHeader: (props: {
+      readonly collectionStrip: {
+        readonly canManageProjectCollections: boolean;
+        readonly onManageProjectCollections: () => void;
+        readonly onStartNewProject: () => void;
+      };
+      readonly filter: {
+        readonly items: ReadonlyArray<{
+          readonly id: string;
+          readonly items: ReadonlyArray<{
+            readonly id: string;
+            readonly onPress: () => void;
+            readonly title: string;
+          }>;
+        }>;
+      };
+    }) =>
       React.createElement(
         "home-header",
-        props,
+        {
+          ...props,
+          ...props.collectionStrip,
+          projects:
+            props.filter.items
+              .find((item: { id: string }) => item.id === "project")
+              ?.items.slice(1)
+              .map((item: { id: string; title: string }) => ({
+                key: item.id.slice("project:".length),
+                label: item.title,
+              })) ?? [],
+          onProjectChange: (projectKey: string) =>
+            props.filter.items
+              .find((item: { id: string }) => item.id === "project")
+              ?.items.find((item: { id: string }) => item.id === `project:${projectKey}`)
+              ?.onPress(),
+        },
         React.createElement("native-button", {
           accessibilityLabel: "New project",
-          onPress: props.onStartNewProject,
+          onPress: props.collectionStrip.onStartNewProject,
         }),
-        React.createElement("native-button", {
-          accessibilityLabel: "New task",
-          onPress: props.onStartNewTask,
-        }),
-        props.canManageProjectCollections
+        props.collectionStrip.canManageProjectCollections
           ? React.createElement("native-button", {
               accessibilityLabel: "Manage collections",
-              onPress: props.onManageProjectCollections,
+              onPress: props.collectionStrip.onManageProjectCollections,
             })
           : null,
       ),

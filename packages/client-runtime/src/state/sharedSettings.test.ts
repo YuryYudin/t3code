@@ -183,6 +183,14 @@ describe("pickSharedServerSettings", () => {
 });
 
 describe("filterSharedServerPatch", () => {
+  it("holds the restart preference until the target's capabilities load", () => {
+    const patch = { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 };
+    expect(filterSharedServerPatch(patch, undefined)).toEqual({ sidebarAutoSettleAfterDays: 7 });
+    expect(filterSharedServerPatch(patch, restartCapabilities, DEFAULT_SERVER_SETTINGS)).toEqual(
+      patch,
+    );
+  });
+
   it("cannot pass collection documents into generic shared fanout", () => {
     expect(
       filterSharedServerPatch(
@@ -190,14 +198,6 @@ describe("filterSharedServerPatch", () => {
         restartCapabilities,
       ),
     ).toEqual({ sidebarAutoSettleAfterDays: 7 });
-  });
-
-  it("holds the restart preference until the target's config loads", () => {
-    const patch = { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 };
-    expect(filterSharedServerPatch(patch, undefined)).toEqual({ sidebarAutoSettleAfterDays: 7 });
-    expect(filterSharedServerPatch(patch, restartCapabilities, DEFAULT_SERVER_SETTINGS)).toEqual(
-      patch,
-    );
   });
 
   it.each([true, false])(
@@ -267,9 +267,25 @@ describe("filterSharedServerPatch", () => {
       );
     },
   );
+
+  it.each([undefined, {}, { threadRestartContinuation: false }])(
+    "omits only the unsupported restart preference with capabilities %j",
+    (capabilities) => {
+      expect(
+        filterSharedServerPatch(
+          { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 },
+          capabilities,
+        ),
+      ).toEqual({ sidebarAutoSettleAfterDays: 7 });
+      expect(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, capabilities)).not.toHaveProperty(
+        "continueThreadsAfterServerUpdate",
+      );
+    },
+  );
 });
+
 describe("findSharedSettingsMismatches", () => {
-  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 30 };
 
   it("leaves collection drift to the dedicated mismatch state machine", () => {
     const collectionPrimary = { ...primarySettings, projectCollections: workCollections };

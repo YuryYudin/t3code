@@ -1,21 +1,16 @@
-import type { ProjectCollectionScopeOption } from "@t3tools/client-runtime/state/project-collections";
 import { ProjectCollectionId, ProjectCollectionProjectKey } from "@t3tools/contracts";
+import type { ProjectCollectionScopeOption } from "@t3tools/client-runtime/state/project-collections";
 import type { ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const runtime = vi.hoisted(() => ({ os: "android" }));
-
 vi.mock("react-native", () => ({
-  Platform: {
-    get OS() {
-      return runtime.os;
-    },
-  },
+  BackHandler: { addEventListener: () => ({ remove: () => {} }) },
+  Keyboard: { dismiss: vi.fn(), isVisible: () => false },
+  Platform: { OS: "android" },
   Pressable: "native-pressable",
   ScrollView: "native-scroll-view",
   Text: "native-text",
-  TextInput: "native-text-input",
   View: "native-view",
 }));
 vi.mock("expo-constants", () => ({
@@ -25,22 +20,12 @@ vi.mock("@react-navigation/elements", async () => {
   const React = await import("react");
   return { HeaderHeightContext: React.createContext(0) };
 });
+vi.mock("@react-navigation/native", () => ({
+  useNavigation: () => ({ getState: () => null }),
+  useNavigationState: () => true,
+}));
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 12, right: 0, bottom: 0, left: 0 }),
-}));
-// Upstream's iOS HomeHeader now reads navigation and the adaptive layout directly; both
-// otherwise pull the real react-native package in through node_modules, which ships
-// Flow-only syntax vitest cannot parse.
-vi.mock("@react-navigation/native", () => ({
-  useNavigation: () => ({ addListener: () => () => {} }),
-}));
-vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
-  useAdaptiveWorkspaceLayout: () => ({
-    layout: { usesSplitView: false },
-    panes: { primarySidebarVisible: false, auxiliaryPaneVisible: false },
-    togglePrimarySidebar: () => {},
-    toggleAuxiliaryPane: () => {},
-  }),
 }));
 vi.mock("../../components/ui/Menu", async () => {
   const React = await import("react");
@@ -49,67 +34,38 @@ vi.mock("../../components/ui/Menu", async () => {
       React.createElement("control-pill-menu", props, props.children as ReactNode),
   };
 });
+vi.mock("../../components/ui/AppBar", async () => {
+  const React = await import("react");
+  return {
+    AppBar: (props: Record<string, unknown>) => React.createElement("workspace-app-bar", props),
+  };
+});
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
 vi.mock("../../components/ProjectCollectionIcon", () => ({
   ProjectCollectionIcon: "project-collection-icon",
 }));
-vi.mock("../../components/T3Wordmark", () => ({ T3Wordmark: "t3-wordmark" }));
-vi.mock("../../native/StackHeader", async () => {
-  const React = await import("react");
-  const component = (name: string) => (props: Record<string, unknown>) =>
-    React.createElement(name, props, props.children as ReactNode);
-  return {
-    NativeStackScreenOptions: component("native-stack-screen-options"),
-  };
-});
-vi.mock("../../components/ui/Toolbar", async () => {
-  const React = await import("react");
-  const component = (name: string) => (props: Record<string, unknown>) =>
-    React.createElement(name, props, props.children as ReactNode);
-  return {
-    Toolbar: Object.assign(component("native-header-toolbar"), {
-      Button: component("native-header-button"),
-      Label: component("native-header-label"),
-      Menu: component("native-header-menu"),
-      MenuAction: component("native-header-menu-action"),
-      Spacer: component("native-header-spacer"),
-    }),
-  };
-});
-vi.mock("../settings/appearance/AppearancePreferencesProvider", () => ({
-  useAppearancePreferences: () => ({ materialYouStyleLayoutActive: false }),
-}));
-vi.mock("../../lib/useUniwindTheme", () => ({
-  useUniwindTheme: () => ({ "--color-icon": "gray" }),
-}));
-vi.mock("../threads/use-thread-list-v2-enabled", () => ({
-  useThreadListV2Enabled: () => false,
-}));
 vi.mock("../keyboard/hardwareKeyboardCommands", () => ({ useHardwareKeyboardCommand: vi.fn() }));
-vi.mock("../layout/native-glass-header-items", () => ({
-  withNativeGlassHeaderItem: (item: unknown) => item,
+vi.mock("../../state/workspace", () => ({
+  useWorkspaceConnectionState: () => ({ hasConnections: true }),
 }));
-vi.mock("../layout/native-mail-search-toolbar", () => ({
-  createNativeMailSearchToolbarItem: (item: unknown) => item,
-  NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED: false,
+vi.mock("../layout/workspace/WorkspaceBrandTitle", () => ({
+  WorkspaceBrandTitle: "workspace-brand-title",
 }));
-vi.mock("./WorkspaceConnectionTitle", () => ({
-  WorkspaceConnectionTitle: "workspace-connection-title",
+vi.mock("../layout/workspace/WorkspaceTabsContext", () => ({
+  useWorkspaceTabs: () => null,
 }));
-// Upstream renders the whole Android chrome through this toolbar; stubbing it
-// keeps the assertions on the filter menu the header builds.
-vi.mock("./ThreadListToolbar", async () => {
-  const React = await import("react");
-  return {
-    ThreadListToolbar: (props: Record<string, unknown>) =>
-      React.createElement("material-thread-list-toolbar", props),
-  };
-});
+vi.mock("../layout/workspace/brand-header-options", () => ({
+  getConnectionAwareBrandHeaderOptions: () => ({}),
+}));
+vi.mock("../../native/StackHeader", () => ({ NativeStackScreenOptions: "native-header-options" }));
+vi.mock("../layout/workspace/workspace-list-header-items", () => ({
+  createWorkspaceListHeaderItems: () => [],
+}));
 
-// Upstream splits the header by platform file extension, so each variant has to
-// be imported directly rather than selected through `Platform.OS`.
-import { HomeHeader as AndroidHomeHeader } from "./HomeHeader.android";
-import { HomeHeader } from "./HomeHeader";
+import { ProjectCollectionScopeStrip } from "./ProjectCollectionScopeStrip";
+import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
+import { WorkspaceListHeader as AndroidWorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader.android";
+import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -132,31 +88,28 @@ const scopeOptions: ProjectCollectionScopeOption[] = [
 ];
 
 const callbacks = {
-  onSearchQueryChange: vi.fn(),
-  onEnvironmentChange: vi.fn(),
-  onProjectChange: vi.fn(),
   onProjectCollectionScopeChange: vi.fn(),
-  onProjectSortOrderChange: vi.fn(),
-  onThreadSortOrderChange: vi.fn(),
-  onOpenEnvironments: vi.fn(),
-  onOpenSettings: vi.fn(),
   onManageProjectCollections: vi.fn(),
-  onStartNewTask: vi.fn(),
   onStartNewProject: vi.fn(),
 };
-const props = {
-  environments: [],
-  projects: [{ key: PROJECT_KEY, label: "Work repo" }],
-  searchQuery: "",
-  selectedEnvironmentId: null,
-  selectedProjectKey: null,
+const collectionStrip = {
   projectCollectionScope: { kind: "all" as const },
   projectCollectionScopeOptions: scopeOptions,
   projectCollectionsAvailable: true,
   canManageProjectCollections: true,
-  projectSortOrder: "updated_at" as const,
-  threadSortOrder: "updated_at" as const,
   ...callbacks,
+};
+const headerProps = {
+  accessibilityLabel: "T3 Code, Threads",
+  onOpenEnvironments: vi.fn(),
+  search: {
+    value: "",
+    onChangeText: vi.fn(),
+    placeholder: "Search",
+    accessibilityLabel: "Search threads",
+  },
+  filter: { customized: false, items: [] },
+  collectionStrip,
 };
 
 let renderer: ReactTestRenderer | undefined;
@@ -164,14 +117,12 @@ let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
-  runtime.os = "android";
   for (const callback of Object.values(callbacks)) callback.mockReset();
 });
-
-describe("HomeHeader project collections", () => {
-  it("renders styled collection scopes and a distinct add menu on Android", () => {
+describe("workspace list header project collections", () => {
+  it("renders styled collection scopes and a distinct add menu", () => {
     act(() => {
-      renderer = create(<AndroidHomeHeader {...props} />);
+      renderer = create(<ProjectCollectionScopeStrip {...collectionStrip} />);
     });
 
     const workScope = renderer!.root.findByProps({ accessibilityLabel: "Show Work" });
@@ -181,76 +132,55 @@ describe("HomeHeader project collections", () => {
     act(() => workScope.props.onPress());
     expect(callbacks.onProjectCollectionScopeChange).toHaveBeenCalledWith(scopeOptions[1]!.scope);
 
-    const addMenu = renderer!.root
-      .findAllByType("control-pill-menu" as never)
-      .find((menu) =>
-        menu.props.actions.some((action: { id: string }) => action.id === "add:project"),
-      )!;
+    const addMenu = renderer!.root.findByType("control-pill-menu" as never);
     act(() => addMenu.props.onPressAction({ nativeEvent: { event: "add:project" } }));
-    expect(callbacks.onStartNewProject).toHaveBeenCalledOnce();
     act(() => addMenu.props.onPressAction({ nativeEvent: { event: "add:manage" } }));
+    expect(callbacks.onStartNewProject).toHaveBeenCalledOnce();
     expect(callbacks.onManageProjectCollections).toHaveBeenCalledOnce();
-
-    const toolbar = renderer!.root.findByType("material-thread-list-toolbar" as never);
-    expect(
-      toolbar.props.filterActions.some(
-        (action: { id: string }) => action.id === "collection-scope",
-      ),
-    ).toBe(true);
-    act(() =>
-      toolbar.props.onFilterAction({
-        nativeEvent: { event: `collection-scope:collection:${WORK_ID}` },
-      }),
-    );
-    expect(callbacks.onProjectCollectionScopeChange).toHaveBeenCalledTimes(2);
   });
 
-  it("renders the collection scope strip below the Material toolbar on Android", () => {
-    // Regression: with headerShown false, only the toolbar applies the
-    // status-bar inset. A strip rendered above it in the tree renders above
-    // it on screen too (plain flex flow, no absolute positioning here), so it
-    // sat under the status bar. Render order is the layout order.
+  it("renders the collection scope strip below the Android app bar", () => {
     act(() => {
-      renderer = create(<AndroidHomeHeader {...props} />);
+      renderer = create(<AndroidWorkspaceListHeader {...headerProps} />);
     });
 
     const tree = renderer!.toJSON();
     const topLevelNodes = Array.isArray(tree) ? tree : [tree];
-    const toolbarIndex = topLevelNodes.findIndex(
-      (node) => node?.type === "material-thread-list-toolbar",
-    );
+    const barIndex = topLevelNodes.findIndex((node) => node?.type === "workspace-app-bar");
     const stripIndex = topLevelNodes.findIndex(
       (node) => node?.props?.testID === "project-collection-scope-strip",
     );
-    expect(toolbarIndex).toBeGreaterThanOrEqual(0);
-    expect(stripIndex).toBeGreaterThan(toolbarIndex);
+    expect(barIndex).toBeGreaterThanOrEqual(0);
+    expect(stripIndex).toBeGreaterThan(barIndex);
   });
 
-  it("does not mark All projects selected for an Android collection scope", () => {
-    act(() => {
-      renderer = create(
-        <AndroidHomeHeader
-          {...props}
-          projectCollectionScope={{ kind: "collection", collectionId: WORK_ID }}
-        />,
-      );
+  it("does not mark All projects selected for a collection scope", () => {
+    const items = buildHomeListFilterMenuItems({
+      environments: [],
+      projects: [{ key: PROJECT_KEY, label: "Work repo" }],
+      selectedEnvironmentId: null,
+      selectedProjectKey: null,
+      projectCollectionScope: { kind: "collection", collectionId: WORK_ID },
+      projectCollectionScopeOptions: scopeOptions,
+      projectCollectionsAvailable: true,
+      canManageProjectCollections: true,
+      onEnvironmentChange: vi.fn(),
+      onProjectChange: vi.fn(),
+      onProjectCollectionScopeChange: vi.fn(),
+      onManageProjectCollections: vi.fn(),
     });
 
-    const toolbar = renderer!.root.findByType("material-thread-list-toolbar" as never);
-    const projectMenu = toolbar.props.filterActions.find(
-      (action: { id: string }) => action.id === "project",
-    );
-    expect(
-      projectMenu.subactions.find((action: { id: string }) => action.id === "project:all").state,
-    ).toBeUndefined();
+    const projects = items.find((item) => item.id === "project");
+    const allProjects = projects && "items" in projects ? projects.items[0] : undefined;
+    expect(allProjects && !("items" in allProjects) ? allProjects.selected : undefined).toBe(false);
   });
 
-  it("leaves iOS header ownership to the workspace sidebar", () => {
-    runtime.os = "ios";
+  it("leaves iOS header ownership to the workspace while retaining the collection strip", () => {
     act(() => {
-      renderer = create(<HomeHeader {...props} />);
+      renderer = create(<WorkspaceListHeader {...headerProps} />);
     });
 
-    expect(renderer!.toJSON()).toBeNull();
+    expect(renderer!.root.findAllByType("native-header-options" as never)).toHaveLength(0);
+    expect(renderer!.root.findByProps({ testID: "project-collection-scope-strip" })).toBeDefined();
   });
 });

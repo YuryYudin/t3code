@@ -67,7 +67,7 @@ export class DesktopAppWindowRegistry extends Context.Service<
   }
 >()("@t3tools/desktop/window/DesktopAppWindowRegistry") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.sync(() => {
   const records = new Map<number, MutableDesktopAppWindowRecord>();
   let sequence = 0;

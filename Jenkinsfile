@@ -387,22 +387,23 @@ def buildLinux(String slug, String candidateRef, String version) {
 }
 
 def runQuality(String slug, String candidateRef) {
+    def passed = false
     node('linux') {
         stage("${slug}: Feature + release gates") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             installWorkspace()
             sh 'git config --local status.showUntrackedFiles all; echo .fork-quality.log >> .git/info/exclude'
             try {
-            sh '''#!/usr/bin/env bash
+            passed = sh(returnStatus: true, script: '''#!/usr/bin/env bash
                 set -euo pipefail
                 exec > >(tee .fork-quality.log) 2>&1
                 node scripts/fork-release.ts verify-bootstrap
-                corepack pnpm exec tsc --noEmit -p scripts/tsconfig.json
+                corepack pnpm exec vp run --filter ./scripts typecheck
                 corepack pnpm run test:project-collections-acceptance
                 corepack pnpm exec vp test run packages/client-runtime/src/state/projectGrouping.test.ts
-                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts
+                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts apps/web/src/terminalUiStateStore.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/rightPanelStore.test.ts
                 corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
-                corepack pnpm exec vp test run packages/shared/src/cliRelease.test.ts apps/server/src/cli/update.test.ts apps/server/src/cloud/pinnedRuntime.test.ts apps/server/src/cloud/selfUpdate.test.ts scripts/install.test.ts apps/web/src/state/cliRelease.test.ts
+                corepack pnpm exec vp test run packages/shared/src/cliRelease.test.ts apps/server/src/cli/update.test.ts apps/server/src/cloud/pinnedRuntime.test.ts apps/server/src/cloud/selfUpdate.test.ts scripts/install.test.ts apps/web/src/state/npmRelease.test.ts apps/web/src/components/sidebar/updateEverything.logic.test.ts
                 corepack pnpm run test:fork-release-acceptance
                 corepack pnpm exec vp test run scripts/fork-integration.test.ts apps/desktop/src/window/DesktopWindow.test.ts apps/desktop/src/window/DesktopApplicationMenu.test.ts apps/desktop/src/ipc/methods/window.test.ts
                 if [[ -f apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts ]]; then
@@ -413,16 +414,18 @@ def runQuality(String slug, String candidateRef) {
                     corepack pnpm exec vp run --filter "./$project" typecheck
                 done
                 test -z "$(git status --porcelain)"
-            '''
+            ''') == 0
             } finally {
                 stash name: "quality-feedback-${slug}", includes: ".fork-quality.log", allowEmpty: true
             }
         }
     }
+    return passed
 }
 
 def checkMobileNative(String slug, String candidateRef, String observed) {
-    node('ggnode2') {
+    def passed = true
+    node('ggnode1 || ggnode2') {
         stage("${slug}: Android native compatibility") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             // Native transitives and patches can change without a mobile manifest edit.
@@ -434,7 +437,7 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
             withEnv(['EXPO_NO_DOTENV=1', 'EXPO_NO_GIT_STATUS=1', 'APP_VARIANT=development']) {
                 installWorkspace()
                 try {
-                sh '''#!/usr/bin/env bash
+                passed = sh(returnStatus: true, script: '''#!/usr/bin/env bash
                     set -euo pipefail
                     exec > >(tee .fork-quality.log) 2>&1
                     export ANDROID_HOME="$HOME/Android/Sdk"
@@ -444,22 +447,24 @@ def checkMobileNative(String slug, String candidateRef, String observed) {
                     corepack pnpm exec expo prebuild --clean --platform android --no-install
                     cd android
                     ./gradlew :app:assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
-                '''
+                ''') == 0
                 } finally {
                     stash name: "quality-feedback-${slug}", includes: '.fork-quality.log', allowEmpty: true
                 }
             }
         }
     }
+    return passed
 }
 
 def buildWindows(String slug, String candidateRef, String version) {
-    node('pockeo-windows-3') {
+    node('pockeo-windows-1 || pockeo-windows-3') {
         stage("${slug}: Windows x64 unsigned") {
             checkoutCandidate("candidate-${slug}", candidateRef)
             unstash "artifacts-linux-${slug}"
             withEnv([
                 'RUSTUP_TOOLCHAIN=stable',
+                'PATH+T3CODE_PYTHON=C:\\Tools\\T3Python',
                 'T3CODE_DESKTOP_UPDATE_REPOSITORY=YuryYudin/t3code',
             ]) {
                 installWorkspace()
@@ -474,7 +479,7 @@ def buildWindows(String slug, String candidateRef, String version) {
 def buildAndroid(String slug, String candidateRef, String version) {
     // SHA-256 of the t3code-android-keystore certificate; Android only accepts updates signed by it.
     def releaseCertSha256 = '5c2ddb47261f35bac585e6b1561db8fd86499288ba7c459c9ff6a09ade9937e0'
-    node('ggnode2') {
+    node('ggnode1 || ggnode2') {
         stage("${slug}: Android arm64 APK") {
             try {
                 checkoutCandidate("candidate-${slug}", candidateRef)
@@ -613,17 +618,14 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         failureClass = 'validation'
         def qualityPassed = false
         while (!qualityPassed) {
-            try {
-                runQuality(slug, candidateRef)
-                if (managed) {
-                    def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
-                    if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
-                    checkMobileNative(slug, candidateRef, observedMobile)
-                }
-                qualityPassed = true
-            } catch (qualityError) {
-                if (isUserAbort(qualityError)) throw qualityError
-                if (!managed) throw qualityError
+            qualityPassed = runQuality(slug, candidateRef)
+            if (qualityPassed && managed) {
+                def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
+                if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
+                qualityPassed = checkMobileNative(slug, candidateRef, observedMobile)
+            }
+            if (!qualityPassed) {
+                if (!managed) error('Candidate quality checks failed; see the gate log.')
                 requestIntegrationRepair(resolved, "quality-feedback-${slug}")
                 ensureIntegrationBundle(resolved, slug, candidateRef)
             }
@@ -724,7 +726,7 @@ pipeline {
         choice(name: 'ACTION', choices: ['auto', 'validate-only', 'out-of-cycle', 'apple-account-check', 'sync-upstream'], description: 'Scheduled tracking, read-only validation, a stable release, an Apple check, or integration-only synchronization.')
         string(name: 'UPSTREAM_REF', defaultValue: '', description: 'Exact upstream commit/tag; valid only for validate-only.')
         string(name: 'SOURCE_REF', defaultValue: '', description: 'Full fork source SHA or HEAD for out-of-cycle or sync-upstream; leave empty to use main.')
-        string(name: 'EXPECTED_UPSTREAM_VERSION', defaultValue: '', description: 'For out-of-cycle releases, require this official stable version (for example 0.1.2); stop if latest has changed.')
+        string(name: 'EXPECTED_UPSTREAM_VERSION', defaultValue: '', description: 'For out-of-cycle releases, select this exact official stable release (for example 0.1.5); leave empty to follow latest.')
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Run every build and verification gate without remote mutation or incidents.')
     }
 
@@ -778,10 +780,11 @@ pipeline {
                             nightly = readResolvedPlan('.fork-release-nightly.json')
                             if (!(params.ACTION in ['validate-only', 'sync-upstream'])) {
                                 def stableMode = params.ACTION == 'out-of-cycle' ? 'out-of-cycle-release' : 'automatic-stable-release'
-                                sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
+                                def versionArg = params.EXPECTED_UPSTREAM_VERSION ? "--upstream-version ${params.EXPECTED_UPSTREAM_VERSION}" : ''
+                                sh "node scripts/fork-release.ts resolve --action ${params.ACTION} --mode ${stableMode} ${sourceArg} ${versionArg} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\" --dry-run ${params.DRY_RUN} > .fork-release-stable.json"
                                 stable = readResolvedPlan('.fork-release-stable.json')
                                 if (params.EXPECTED_UPSTREAM_VERSION && stable.target.version != params.EXPECTED_UPSTREAM_VERSION) {
-                                    error("Expected upstream ${params.EXPECTED_UPSTREAM_VERSION}, but latest is ${stable.target.version}; refusing to change the release base.")
+                                    error("Expected upstream ${params.EXPECTED_UPSTREAM_VERSION}, but resolved ${stable.target.version}; refusing to change the release base.")
                                 }
                             }
                         }
@@ -795,15 +798,16 @@ pipeline {
                     } else if (stable.firstRelease) {
                         runCandidate(stable, 'automatic-stable-release', true)
                     } else {
-                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
-                            runCandidate(nightly, 'nightly-integration', false)
-                        }
+                        // Release the known stable target before development work can consume the build timeout.
                         if (stable.releaseRequired) {
                             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
                                 runCandidate(stable, 'automatic-stable-release', true)
                             }
                         } else {
                             echo 'No new upstream stable release requires a fork release.'
+                        }
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+                            runCandidate(nightly, 'nightly-integration', false)
                         }
                     }
                     }

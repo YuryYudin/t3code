@@ -1,11 +1,11 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
 import {
+  SourceControlProviderKind,
   EnvironmentId,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
-  SourceControlProviderKind,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
 import {

@@ -1,9 +1,9 @@
 import {
   EnvironmentId,
+  SourceControlProviderKind,
   ProjectCollectionId,
   ProjectCollectionProjectKey,
   ProjectId,
-  SourceControlProviderKind,
   ThreadId,
   type ProjectCollectionsDocument,
   type SidebarProjectGroupingMode,

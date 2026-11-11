@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   cliArchiveTarCommand,
+  cliReleaseDatabaseMigration,
   cliReleaseDownloadBaseUrl,
   cliReleaseIndexPageUrl,
+  cliReleaseMigrationsUrl,
   newestCliReleaseVersion,
   parseChecksums,
 } from "./cliRelease.ts";
@@ -19,7 +21,20 @@ describe("cliRelease", () => {
     expect(cliReleaseDownloadBaseUrl("0.1.1-2", "https://mirror.example/t3/")).toBe(
       "https://mirror.example/t3/v0.1.1-2",
     );
+    expect(cliReleaseMigrationsUrl("0.1.1-2")).toBe(
+      "https://raw.githubusercontent.com/YuryYudin/t3code/v0.1.1-2/apps/server/src/persistence/Migrations.ts",
+    );
   });
+
+  it("reads the latest migration id from a tagged server manifest", () => {
+    expect(
+      cliReleaseDatabaseMigration(
+        ['  [71, "Earlier", Migration0071],', '[72, "Latest", Migration0072],'].join("\n"),
+      ),
+    ).toBe(72);
+    expect(cliReleaseDatabaseMigration("export const migrationManifest = [];")).toBeUndefined();
+  });
+
   it("parses sha256sum output including binary-mode markers", () => {
     const checksums = parseChecksums(
       [
