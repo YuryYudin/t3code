@@ -71,7 +71,6 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
-  SquareArrowOutUpRightIcon,
   MonitorIcon,
   PinIcon,
   PinOffIcon,
@@ -1651,14 +1650,6 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
-
-  const newWindowActionItem = buildNewWindowActionItem({
-    scope: projectCollectionScope,
-    icon: <SquareArrowOutUpRightIcon className={ITEM_ICON_CLASS} />,
-  });
-  if (newWindowActionItem !== null) {
-    actionItems.push(newWindowActionItem);
-  }
 
   for (const direction of [1, -1] as const) {
     const title = direction === 1 ? "Focus Next Workspace Area" : "Focus Previous Workspace Area";

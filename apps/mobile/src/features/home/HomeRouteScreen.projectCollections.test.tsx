@@ -101,10 +101,10 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
 vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
   useAdaptiveWorkspaceLayout: () => ({
     layout: { usesSplitView: runtime.usesSplitView },
-    primarySidebarSearchQuery: "",
     setPrimarySidebarSearchQuery: vi.fn(),
     startNewTask: runtime.startNewTask,
   }),
+  useWorkspacePaneState: () => ({ primarySidebarSearchQuery: "" }),
 }));
 vi.mock("../layout/workspace/WorkspaceListEmptyDetail", () => ({
   WorkspaceListEmptyDetail: "workspace-empty-detail",

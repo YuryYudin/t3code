@@ -132,7 +132,6 @@ import {
   isUndeliveredMailboxSteer,
 } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
-import { planExternalAlertCommand } from "./ExternalAlert.ts";
 import {
   decideGuestMessageSend,
   guestShareAfterCancelledSend,

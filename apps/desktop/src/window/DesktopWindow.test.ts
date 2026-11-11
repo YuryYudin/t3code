@@ -282,6 +282,7 @@ function layerTest(input: {
   readonly destroyAll?: Effect.Effect<void>;
   readonly onWindowCreate?: Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
+  readonly copiedTexts?: string[];
   readonly onCopyText?: (text: string) => Effect.Effect<void>;
   readonly onPopupTemplate?: (input: ElectronMenu.ElectronMenuTemplateInput) => Effect.Effect<void>;
   readonly previewZoomReapplies?: number[];
@@ -432,7 +433,12 @@ function layerTest(input: {
               return true;
             }),
           openSystemSettings: () => Effect.succeed(true),
-          copyText: input.onCopyText ?? (() => Effect.void),
+          copyText:
+            input.onCopyText ??
+            ((text) =>
+              Effect.sync(() => {
+                input.copiedTexts?.push(text);
+              })),
         } satisfies ElectronShell.ElectronShell["Service"]),
         layerElectronTheme,
         layerElectronWindow,
