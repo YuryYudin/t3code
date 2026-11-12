@@ -1161,6 +1161,11 @@ export const make = Effect.gen(function* () {
       void runPromise(revealWhenReady);
     });
 
+    // Establish the first app window before its renderer calls in; peers must not replace it.
+    if (mainWindowId === null) {
+      mainWindowId = window.id;
+      yield* electronWindow.setMain(window);
+    }
     loadApplication();
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });
@@ -1220,8 +1225,10 @@ export const make = Effect.gen(function* () {
   const promoteToMain = Effect.fn("desktop.window.promoteToMain")(function* (
     window: Electron.BrowserWindow,
   ) {
-    mainWindowId = window.id;
-    yield* electronWindow.setMain(window);
+    if (mainWindowId !== window.id) {
+      mainWindowId = window.id;
+      yield* electronWindow.setMain(window);
+    }
     yield* logWindowInfo("main window created");
   });
 
