@@ -1046,8 +1046,11 @@ export const make = Effect.gen(function* () {
       void runPromise(revealWhenReady);
     });
 
-    // Desktop IPC only answers the main window, so register it before its renderer can call in.
-    yield* electronWindow.setMain(window);
+    // Desktop IPC only answers the main window, so register the first one before its renderer calls in.
+    if (mainWindowId === null) {
+      mainWindowId = window.id;
+      yield* electronWindow.setMain(window);
+    }
     loadApplication();
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });
@@ -1107,8 +1110,10 @@ export const make = Effect.gen(function* () {
   const promoteToMain = Effect.fn("desktop.window.promoteToMain")(function* (
     window: Electron.BrowserWindow,
   ) {
-    mainWindowId = window.id;
-    yield* electronWindow.setMain(window);
+    if (mainWindowId !== window.id) {
+      mainWindowId = window.id;
+      yield* electronWindow.setMain(window);
+    }
     yield* logWindowInfo("main window created");
   });
 

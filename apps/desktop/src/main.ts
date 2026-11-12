@@ -140,7 +140,9 @@ const layerElectron = Layer.mergeAll(
   ElectronTheme.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
-  DesktopIpc.layer(Electron.ipcMain).pipe(Layer.provide(ElectronWindow.layer)),
+  DesktopIpc.layer(Electron.ipcMain).pipe(
+    Layer.provide(Layer.mergeAll(ElectronWindow.layer, DesktopAppWindowRegistry.layer)),
+  ),
 );
 
 const layerDesktopFoundation = Layer.mergeAll(

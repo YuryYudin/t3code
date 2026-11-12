@@ -722,12 +722,12 @@ describe("DesktopWindow", () => {
         input: ElectronMenu.ElectronMenuTemplateInput;
         focusedContents: unknown;
       }>();
-      const copiedTexts: string[] = [];
+      const copiedTexts = yield* Queue.unbounded<string>();
       const layer = layerTest({
         window: host.window,
         createCount: yield* Ref.make(0),
         mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
-        copiedTexts,
+        onCopyText: (text) => Queue.offer(copiedTexts, text).pipe(Effect.asVoid),
         onPopupTemplate: (input) =>
           Queue.offer(menus, { input, focusedContents }).pipe(Effect.asVoid),
       });
@@ -800,7 +800,7 @@ describe("DesktopWindow", () => {
           copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           copyLink.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           assert.deepEqual(contents.copyImageAt.mock.calls, [[12, 34]]);
-          assert.equal(copiedTexts.at(-1), "https://example.com/image.png");
+          assert.equal(yield* Queue.take(copiedTexts), "https://example.com/image.png");
 
           contents.isDestroyed.mockReturnValue(true);
           correction.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
