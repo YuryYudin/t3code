@@ -4,8 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   createForeignStateHandler,
-  mergeForeignEntries,
-  ownedEntryKeys,
+  mergeForeignRecord,
   subscribeStorageKey,
   type ForeignStateSync,
 } from "./lib/crossWindowStorage";
@@ -804,13 +803,14 @@ export const foreignTerminalUiStateSync: ForeignStateSync<TerminalUiPersistedSta
           .terminalUiStateByThreadKey ?? {},
     };
   },
-  merge: ({ local, incoming, baseline }) => ({
-    terminalUiStateByThreadKey: mergeForeignEntries(
+  merge: ({ local, incoming, baseline }) => {
+    const terminalUiStateByThreadKey = mergeForeignRecord(
       local.terminalUiStateByThreadKey,
       incoming.terminalUiStateByThreadKey,
-      ownedEntryKeys(local.terminalUiStateByThreadKey, baseline.terminalUiStateByThreadKey),
-    ),
-  }),
+      baseline.terminalUiStateByThreadKey,
+    );
+    return terminalUiStateByThreadKey === null ? null : { terminalUiStateByThreadKey };
+  },
   apply: (merged) => useTerminalUiStateStore.setState(merged),
 };
 

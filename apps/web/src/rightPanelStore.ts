@@ -9,8 +9,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import {
   createForeignStateHandler,
-  mergeForeignEntries,
-  ownedEntryKeys,
+  mergeForeignRecord,
   subscribeStorageKey,
   type ForeignStateSync,
 } from "./lib/crossWindowStorage";
@@ -1108,9 +1107,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       close: (ref) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
-            current.isOpen ? { ...current, isOpen: false } : current,
-          ),
+          userAction(state, scopedThreadKey(ref), (current) => {
+            if (!current.isOpen && current.maximized === undefined) return current;
+            // Leaving maximize here keeps closing one write for other windows.
+            const { maximized: _maximized, ...rest } = current;
+            return { ...rest, isOpen: false };
+          }),
         ),
       setMaximized: (ref, maximized) =>
         set((state) =>
@@ -1316,12 +1318,24 @@ export const foreignRightPanelStateSync: ForeignStateSync<RightPanelPersistedSta
       raw === null ? null : (JSON.parse(raw) as { state?: unknown }).state,
     ),
   merge: ({ local, incoming, baseline }) => {
-    const owned = new Set(ownedEntryKeys(local.byThreadKey, baseline.byThreadKey));
-    for (const threadKey of Object.keys(local.byThreadKey)) {
-      if (isPullRequestsPanelKey(threadKey)) owned.add(threadKey);
-    }
+    const sessionEntries = Object.entries(local.byThreadKey).filter(([threadKey]) =>
+      isPullRequestsPanelKey(threadKey),
+    );
+    const persisted =
+      sessionEntries.length === 0
+        ? local.byThreadKey
+        : Object.fromEntries(
+            Object.entries(local.byThreadKey).filter(
+              ([threadKey]) => !isPullRequestsPanelKey(threadKey),
+            ),
+          );
+    const byThreadKey = mergeForeignRecord(persisted, incoming.byThreadKey, baseline.byThreadKey);
+    if (byThreadKey === null) return null;
     return {
-      byThreadKey: mergeForeignEntries(local.byThreadKey, incoming.byThreadKey, owned),
+      byThreadKey:
+        sessionEntries.length === 0
+          ? byThreadKey
+          : { ...byThreadKey, ...Object.fromEntries(sessionEntries) },
     };
   },
   apply: (merged) => useRightPanelStore.setState(merged),
