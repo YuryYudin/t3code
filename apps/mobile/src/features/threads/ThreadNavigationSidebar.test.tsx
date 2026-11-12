@@ -33,6 +33,7 @@ const runtime = vi.hoisted(() => ({
 const atoms = vi.hoisted(() => ({
   preferences: Symbol("preferences"),
   listEnvironments: Symbol("listEnvironments"),
+  threads: Symbol("threads"),
 }));
 
 vi.mock("react-native", () => ({
@@ -77,19 +78,21 @@ vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: symbol) =>
     atom === atoms.preferences
       ? { _tag: "Success", value: { projectCollectionScope: runtime.projectCollectionScope } }
-      : atom === atoms.listEnvironments
-        ? {
-            providersByEnvironmentId: new Map(),
-            machineByEnvironmentId: new Map(),
-            settlementEnvironmentIds: new Set(),
-            snoozeEnvironmentIds: new Set(),
-            pinningEnvironmentIds: new Set(),
-            autoSettleOptOutEnvironmentIds: new Set(),
-            pinReorderEnvironmentIds: new Set(),
-            activeReorderEnvironmentIds: new Set(),
-            titleRegenerationEnvironmentIds: new Set(),
-          }
-        : new Map(),
+      : atom === atoms.threads
+        ? runtime.threads
+        : atom === atoms.listEnvironments
+          ? {
+              providersByEnvironmentId: new Map(),
+              machineByEnvironmentId: new Map(),
+              settlementEnvironmentIds: new Set(),
+              snoozeEnvironmentIds: new Set(),
+              pinningEnvironmentIds: new Set(),
+              autoSettleOptOutEnvironmentIds: new Set(),
+              pinReorderEnvironmentIds: new Set(),
+              activeReorderEnvironmentIds: new Set(),
+              titleRegenerationEnvironmentIds: new Set(),
+            }
+          : new Map(),
 }));
 vi.mock("../../state/preferences", () => ({
   mobilePreferencesAtom: atoms.preferences,
@@ -97,6 +100,9 @@ vi.mock("../../state/preferences", () => ({
 }));
 vi.mock("../../state/presentation", () => ({
   threadListEnvironmentsAtom: atoms.listEnvironments,
+}));
+vi.mock("../../state/threads", () => ({
+  steadyNavigationThreadShellsAtom: atoms.threads,
 }));
 vi.mock("../../state/entities", () => ({
   useProjects: () => runtime.projects,
@@ -221,6 +227,7 @@ vi.mock("../../components/ui/Menu", async () => {
 });
 vi.mock("../../components/ui/AppText", () => ({ AppText: "native-text" }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: "native-symbol" }));
+vi.mock("../../components/ui/Button", () => ({ Button: "native-button" }));
 vi.mock("../../components/ProjectCollectionIcon", () => ({
   ProjectCollectionIcon: "project-collection-icon",
 }));

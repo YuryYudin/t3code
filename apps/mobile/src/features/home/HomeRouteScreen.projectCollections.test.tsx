@@ -73,6 +73,7 @@ vi.mock("../../state/entities", () => ({
 }));
 vi.mock("../../state/threads", () => ({
   environmentThreadShells: { navigationThreadShellsAtom: Symbol("navigationThreadShellsAtom") },
+  steadyNavigationThreadShellsAtom: Symbol("steadyNavigationThreadShellsAtom"),
 }));
 vi.mock("../../state/use-pending-new-tasks", () => ({
   useLaunchingThreads: (threads: unknown) => threads,
