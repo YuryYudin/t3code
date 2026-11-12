@@ -74,7 +74,10 @@ vi.mock("../../state/entities", () => ({
 vi.mock("../../state/threads", () => ({
   environmentThreadShells: { navigationThreadShellsAtom: Symbol("navigationThreadShellsAtom") },
 }));
-vi.mock("../../state/use-pending-new-tasks", () => ({ usePendingNewTasks: () => [] }));
+vi.mock("../../state/use-pending-new-tasks", () => ({
+  useLaunchingThreads: (threads: unknown) => threads,
+  usePendingNewTasks: () => [],
+}));
 vi.mock("../../state/workspace", () => ({
   useWorkspaceState: () => ({
     environments: [{ environmentId: ENVIRONMENT_ID, connectionState: "connected" }],
@@ -101,10 +104,10 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
 vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
   useAdaptiveWorkspaceLayout: () => ({
     layout: { usesSplitView: runtime.usesSplitView },
-    primarySidebarSearchQuery: "",
     setPrimarySidebarSearchQuery: vi.fn(),
     startNewTask: runtime.startNewTask,
   }),
+  useWorkspacePaneState: () => ({ primarySidebarSearchQuery: "" }),
 }));
 vi.mock("../layout/workspace/WorkspaceListEmptyDetail", () => ({
   WorkspaceListEmptyDetail: "workspace-empty-detail",

@@ -112,6 +112,7 @@ vi.mock("../../state/queries", () => ({
 }));
 vi.mock("../../state/thread-order", () => ({ usePendingThreadOrder: () => null }));
 vi.mock("../../state/use-pending-new-tasks", () => ({
+  useLaunchingThreads: (threads: unknown) => threads,
   usePendingNewTasks: () => runtime.pendingTasks,
 }));
 vi.mock("../../state/use-thread-outbox", () => ({ useQueuedThreadKeys: () => new Set() }));
