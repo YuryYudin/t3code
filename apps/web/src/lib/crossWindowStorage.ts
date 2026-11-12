@@ -1,18 +1,7 @@
 /**
- * Cross-window localStorage reconciliation.
- *
- * Several client stores persist a whole blob under one localStorage key, so
- * two windows (desktop multi-window, or two same-origin browser tabs) editing
- * different threads used to overwrite each other: last writer wins. These
- * helpers let a store listen for foreign writes and fold them into its own
- * state instead of ignoring them.
- *
- * Ownership rule: a window owns a key whose current value is not the value it
- * last synced with storage — that is, any key it changed since its last
- * hydration or merge — and ownership ends once that merge result is synced
- * back. Ownership is therefore derived from a baseline snapshot rather than
- * tracked by instrumenting every store action; because stores update
- * immutably, "changed" is a value-reference comparison.
+ * Folds other windows' writes of a shared localStorage blob into this window.
+ * A window owns, and defends, keys it changed since it last synced; it writes
+ * back only then, because echoing every snapshot made 3+ windows loop forever.
  */
 
 export interface StorageEventLike {
@@ -30,21 +19,30 @@ function defaultStorageEventTarget(): StorageEventTargetLike | null {
   return window;
 }
 
+function defaultStorageRead(key: string): (() => string | null) | undefined {
+  if (typeof window === "undefined" || window.localStorage === undefined) return undefined;
+  return () => window.localStorage.getItem(key);
+}
+
 /**
- * Calls `listener` with the key's new raw value whenever another document
- * writes it. The browser never fires `storage` for the window that performed
- * the write, so this only ever reports foreign changes. A no-op (and an
- * unsubscribe that does nothing) outside a browser.
+ * Calls `listener` with the key's live value whenever another document writes
+ * it. Events queue, so an event's `newValue` may already be stale; `read`
+ * returns what storage holds now. A no-op outside a browser.
  */
 export function subscribeStorageKey(
   key: string,
   listener: (raw: string | null) => void,
   target: StorageEventTargetLike | null = defaultStorageEventTarget(),
+  read: (() => string | null) | undefined = target === null ? undefined : defaultStorageRead(key),
 ): () => void {
   if (target === null) return () => {};
   const handle = (event: StorageEventLike) => {
     // A null key is another document calling `storage.clear()`: everything went.
     if (event.key !== null && event.key !== key) return;
+    if (read) {
+      listener(read());
+      return;
+    }
     listener(event.key === null ? null : event.newValue);
   };
   target.addEventListener("storage", handle);
@@ -99,6 +97,61 @@ export function mergeForeignEntries<T>(
   return unchanged ? local : merged;
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => sameJson(value, right[index]))
+    );
+  }
+  // JSON drops undefined members, so a parsed snapshot never carries them.
+  const leftEntries = Object.entries(left).filter(([, value]) => value !== undefined);
+  const rightRecord = right as Record<string, unknown>;
+  return (
+    leftEntries.length ===
+      Object.values(rightRecord).filter((value) => value !== undefined).length &&
+    leftEntries.every(([key, value]) => sameJson(value, rightRecord[key]))
+  );
+}
+
+/**
+ * {@link mergeForeignEntries} for JSON entries, or null when storage already
+ * holds this window's entries, so nothing is written back. Entries compare by
+ * content: an entry rebuilt unchanged is not an edit worth defending.
+ */
+export function mergeForeignRecord<T>(
+  local: Record<string, T>,
+  incoming: Record<string, T>,
+  baseline: Record<string, T>,
+): Record<string, T> | null {
+  const incomingKeys = Object.keys(incoming);
+  let matchesLocal = incomingKeys.length === Object.keys(local).length;
+  const reconciled: Record<string, T> = {};
+  for (const key of incomingKeys) {
+    const value = incoming[key] as T;
+    if (key in local && sameJson(local[key], value)) {
+      reconciled[key] = local[key] as T;
+    } else {
+      reconciled[key] = value;
+      matchesLocal = false;
+    }
+  }
+  if (matchesLocal) return null;
+  const owned = new Set<string>();
+  for (const key of ownedEntryKeys(local, baseline)) {
+    if (!(key in local) || !(key in baseline) || !sameJson(local[key], baseline[key])) {
+      owned.add(key);
+    }
+  }
+  return mergeForeignEntries(local, reconciled, owned);
+}
+
 export interface ForeignStateSync<T> {
   /** The store's current view of the persisted shape. */
   readonly snapshot: () => T;
@@ -116,21 +169,22 @@ export interface ForeignStateSync<T> {
 }
 
 /**
- * Builds the foreign-write handler for one store. Kept separate from
- * {@link subscribeStorageKey} so tests can feed it raw storage values without
- * a DOM. Applying a merge that equals the local state is deliberate for stores
- * that defend owned keys: the resulting store write puts those keys back in
- * storage, which the other window then picks up.
+ * Builds one store's foreign-write handler; tests feed it raw values directly.
+ * Applying a merge equal to local state is deliberate: the store's write puts
+ * owned keys back in storage. A null merge means nothing to adopt or defend.
  */
 export function createForeignStateHandler<T>(
   sync: ForeignStateSync<T>,
 ): (raw: string | null) => void {
   let baseline = sync.snapshot();
   let lastRaw: string | null | undefined;
+  let lastLocal: T | undefined;
   return (raw) => {
-    if (raw === lastRaw) return;
-    lastRaw = raw;
     const local = sync.snapshot();
+    // Storage can return to a value seen before after this window changed
+    // state, so a repeat only counts when local state is also unchanged.
+    if (raw === lastRaw && local === lastLocal) return;
+    lastRaw = raw;
     let incoming: T;
     try {
       incoming = sync.parse(raw);
@@ -140,9 +194,11 @@ export function createForeignStateHandler<T>(
     const merged = sync.merge({ local, incoming, baseline });
     if (merged === null) {
       baseline = local;
+      lastLocal = local;
       return;
     }
     baseline = sync.acknowledge?.(incoming) ?? merged;
     sync.apply(merged);
+    lastLocal = sync.snapshot();
   };
 }
