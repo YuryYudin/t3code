@@ -137,6 +137,50 @@ it.layer(
       }),
     );
     it.effect.each([
+      { desktopAppUpdate: false, advertised: undefined },
+      { desktopAppUpdate: true, advertised: true },
+    ])(
+      "advertises desktop app updates only when the desktop can install them ($desktopAppUpdate)",
+      ({ desktopAppUpdate, advertised }) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const baseDir = yield* fs.makeTempDirectoryScoped();
+          const config = yield* makeServerConfig(baseDir);
+          yield* fs.makeDirectory(config.stateDir, { recursive: true });
+          const descriptor = yield* Effect.gen(function* () {
+            const environment = yield* ServerEnvironment.ServerEnvironment;
+            return yield* environment.getDescriptor;
+          }).pipe(
+            Effect.provide(
+              ServerEnvironment.layer.pipe(
+                Layer.provide(layerEmptySecretStore),
+                Layer.provide(
+                  ServerConfig.layer({
+                    ...config,
+                    mode: "desktop",
+                    desktopTelemetryControlFd: 5,
+                    desktopAppUpdate,
+                  }),
+                ),
+              ),
+            ),
+            Effect.provideService(HostProcess.Environment, {}),
+          );
+          const capabilities = descriptor.capabilities;
+          expect({
+            serverSelfUpdate: capabilities.serverSelfUpdate,
+            desktopAppUpdate: capabilities.desktopAppUpdate,
+            desktopAppChannelSwitch: capabilities.desktopAppChannelSwitch,
+            serverSelfUpdateProgress: capabilities.serverSelfUpdateProgress,
+          }).toEqual({
+            serverSelfUpdate: "desktop-managed",
+            desktopAppUpdate: advertised,
+            desktopAppChannelSwitch: advertised,
+            serverSelfUpdateProgress: advertised,
+          });
+        }),
+    );
+    it.effect.each([
       { platform: "darwin", architecture: "arm64", supported: true },
       { platform: "linux", architecture: "x64", supported: true },
       { platform: "linux", architecture: "x64", libc: "musl", supported: false },
@@ -328,19 +372,27 @@ it.layer(
             ),
           );
 
-        const withFd = yield* describeWith({ mode: "desktop", desktopTelemetryControlFd: 5 });
+        const withFd = yield* describeWith({
+          mode: "desktop",
+          desktopTelemetryControlFd: 5,
+          desktopAppUpdate: true,
+        });
         expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
         expect(withFd.capabilities.desktopAppUpdate).toBe(true);
         expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
         expect(withFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
-        const withoutFd = yield* describeWith({ mode: "desktop" });
+        const withoutFd = yield* describeWith({ mode: "desktop", desktopAppUpdate: true });
         expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
         expect(withoutFd.capabilities.desktopAppUpdate).toBeUndefined();
         expect(withoutFd.capabilities.serverSelfUpdateProgress).toBeUndefined();
         expect(withoutFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
-        const web = yield* describeWith({ mode: "web", desktopTelemetryControlFd: 5 });
+        const web = yield* describeWith({
+          mode: "web",
+          desktopTelemetryControlFd: 5,
+          desktopAppUpdate: true,
+        });
         expect(web.capabilities.desktopAppUpdate).toBeUndefined();
       }),
     );

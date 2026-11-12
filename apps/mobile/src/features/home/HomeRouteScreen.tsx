@@ -16,7 +16,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 
 import { useProjects } from "../../state/entities";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
-import { environmentThreadShells } from "../../state/threads";
+import { steadyNavigationThreadShellsAtom } from "../../state/threads";
 import { useLaunchingThreads, usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -75,7 +75,7 @@ function CompactHomeRouteScreen() {
   // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
   const threads = useLaunchingThreads(
-    useAtomValueWhileVisible(environmentThreadShells.navigationThreadShellsAtom, visible),
+    useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
   );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
