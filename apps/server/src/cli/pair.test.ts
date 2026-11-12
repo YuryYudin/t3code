@@ -570,23 +570,27 @@ describe("t3 pair", () => {
           });
           const spawner = ChildProcessSpawner.make((command) => {
             const { args } = command as unknown as { readonly args: ReadonlyArray<string> };
-            const serve = args[0] === "serve";
+            const rejectedServeTarget = args[0] === "serve" && args[1] !== "status";
             return Effect.succeed(
               ChildProcessSpawner.makeHandle({
                 pid: ChildProcessSpawner.ProcessId(1),
-                exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(serve ? 1 : 0)),
+                exitCode: Effect.succeed(
+                  ChildProcessSpawner.ExitCode(rejectedServeTarget ? 1 : 0),
+                ),
                 isRunning: Effect.succeed(false),
                 kill: () => Effect.void,
                 unref: Effect.succeed(Effect.void),
                 stdin: Sink.drain,
                 stdout: Stream.make(
                   new TextEncoder().encode(
-                    serve ? "" : '{"Self":{"DNSName":"pair-test.tail.ts.net."}}',
+                    args[0] === "status"
+                      ? '{"Self":{"DNSName":"pair-test.tail.ts.net."}}'
+                      : "{}",
                   ),
                 ),
                 stderr: Stream.make(
                   new TextEncoder().encode(
-                    serve
+                    rejectedServeTarget
                       ? "Warning: the MacOS extension doesn't support connecting to remote destinations from non-default route\n"
                       : "",
                   ),
