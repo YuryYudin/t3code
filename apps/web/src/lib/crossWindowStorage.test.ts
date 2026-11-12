@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   createForeignStateHandler,
   mergeForeignEntries,
+  mergeForeignRecord,
   ownedEntryKeys,
   subscribeStorageKey,
   type StorageEventLike,
@@ -62,6 +63,24 @@ describe("subscribeStorageKey", () => {
     expect(seen).toEqual([]);
   });
 
+  it("reports what storage holds now, not the queued event's older value", () => {
+    const { target, emit } = createTarget();
+    let stored = "newest";
+    const seen: (string | null)[] = [];
+    subscribeStorageKey(
+      "key",
+      (raw) => seen.push(raw),
+      target,
+      () => stored,
+    );
+
+    emit({ key: "key", newValue: "older" });
+    stored = "after-clear";
+    emit({ key: null, newValue: null });
+
+    expect(seen).toEqual(["newest", "after-clear"]);
+  });
+
   it("is a no-op without a browser event target", () => {
     const unsubscribe = subscribeStorageKey("key", () => {}, null);
     expect(() => unsubscribe()).not.toThrow();
@@ -105,6 +124,49 @@ describe("mergeForeignEntries", () => {
     const merged = mergeForeignEntries(local, { a: "one", b: "two" }, new Set(["a", "b"]));
 
     expect(merged).toBe(local);
+  });
+});
+
+describe("mergeForeignRecord", () => {
+  it("returns null when storage already holds this window's entries", () => {
+    const local = { a: { open: true, tabs: ["x"] }, b: { open: false, tabs: [] } };
+
+    expect(
+      mergeForeignRecord(
+        local,
+        { b: { tabs: [], open: false }, a: { tabs: ["x"], open: true } },
+        {},
+      ),
+    ).toBeNull();
+  });
+
+  it("defends an entry this window changed that storage does not have", () => {
+    const local = { a: { open: false } };
+    const baseline = { a: { open: true } };
+
+    expect(mergeForeignRecord(local, { a: { open: true } }, baseline)).toBe(local);
+    expect(mergeForeignRecord(local, {}, baseline)).toBe(local);
+  });
+
+  it("adopts storage over an entry only rebuilt with unchanged content", () => {
+    const baseline = { a: { open: true } };
+
+    expect(mergeForeignRecord({ a: { open: true } }, { a: { open: false } }, baseline)).toEqual({
+      a: { open: false },
+    });
+  });
+
+  it("adopts foreign changes and keeps local references for equal entries", () => {
+    const kept = { open: true };
+    const local = { kept, changed: { open: true } };
+    const merged = mergeForeignRecord(
+      local,
+      { kept: { open: true }, changed: { open: false }, added: { open: true } },
+      local,
+    );
+
+    expect(merged).toEqual({ kept, changed: { open: false }, added: { open: true } });
+    expect(merged?.kept).toBe(kept);
   });
 });
 
@@ -168,6 +230,15 @@ describe("createForeignStateHandler", () => {
     store.handler(JSON.stringify({ a: "theirs" }));
 
     expect(store.applied.length).toBe(1);
+  });
+
+  it("handles a repeated value again after this window changed state", () => {
+    const store = createFakeStore({});
+    store.handler(JSON.stringify({ a: "theirs" }));
+    store.write({ a: "mine" });
+    store.handler(JSON.stringify({ a: "theirs" }));
+
+    expect(store.applied.length).toBe(2);
   });
 
   it("skips unparseable foreign writes", () => {
