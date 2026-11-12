@@ -6,12 +6,25 @@ import { vi } from "vite-plus/test";
 
 vi.mock("electron", () => ({}));
 
-import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as DesktopAppWindowRegistry from "../window/DesktopAppWindowRegistry.ts";
 import * as DesktopIpc from "./DesktopIpc.ts";
 
 it.effect("answers only the main window's top frame", () =>
   Effect.gen(function* () {
     const mainFrame = {};
+    const mainWindow = {
+      id: 1,
+      isDestroyed: () => false,
+      isFocused: () => true,
+      on: () => undefined,
+      webContents: {
+        id: 1,
+        isDestroyed: () => false,
+        mainFrame,
+      },
+    } as unknown as Electron.BrowserWindow;
+    const appWindows = yield* DesktopAppWindowRegistry.make;
+    yield* appWindows.register(mainWindow, null);
     const invoke = new Map<string, DesktopIpc.DesktopIpcHandleListener>();
     const sync = new Map<string, DesktopIpc.DesktopIpcSyncListener>();
     const ipc = yield* DesktopIpc.DesktopIpc.pipe(
@@ -23,11 +36,10 @@ it.effect("answers only the main window's top frame", () =>
           on: (channel, listener) => void sync.set(channel, listener),
         }).pipe(
           Layer.provide(
-            Layer.mock(ElectronWindow.ElectronWindow, {
-              main: Effect.succeedSome({
-                webContents: { id: 1, mainFrame },
-              } as unknown as Electron.BrowserWindow),
-            }),
+            Layer.succeed(
+              DesktopAppWindowRegistry.DesktopAppWindowRegistry,
+              appWindows,
+            ),
           ),
         ),
       ),
