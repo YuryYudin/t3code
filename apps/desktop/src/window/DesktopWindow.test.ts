@@ -10,7 +10,6 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -728,12 +727,12 @@ describe("DesktopWindow", () => {
         input: ElectronMenu.ElectronMenuTemplateInput;
         focusedContents: unknown;
       }>();
-      const copiedTexts: string[] = [];
+      const copiedTexts = yield* Queue.unbounded<string>();
       const layer = layerTest({
         window: host.window,
         createCount: yield* Ref.make(0),
         mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
-        copiedTexts,
+        onCopyText: (text) => Queue.offer(copiedTexts, text).pipe(Effect.asVoid),
         onPopupTemplate: (input) =>
           Queue.offer(menus, { input, focusedContents }).pipe(Effect.asVoid),
       });
@@ -806,7 +805,7 @@ describe("DesktopWindow", () => {
           copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           copyLink.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
           assert.deepEqual(contents.copyImageAt.mock.calls, [[12, 34]]);
-          assert.equal(copiedTexts.at(-1), "https://example.com/image.png");
+          assert.equal(yield* Queue.take(copiedTexts), "https://example.com/image.png");
 
           contents.isDestroyed.mockReturnValue(true);
           correction.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
@@ -1967,13 +1966,14 @@ describe("DesktopWindow", () => {
         mainWindow,
         removedWindowRecords,
         windowRecordUpdates,
-        desktopState: Layer.succeed(DesktopState.DesktopState, {
-          backendReady,
-          quitting,
-          primaryBackendStartup: yield* SubscriptionRef.make<DesktopState.PrimaryBackendStartup>({
-            _tag: "Starting",
-          }),
-        }),
+        // Start from the real defaults so fields upstream adds keep compiling.
+        desktopState: Layer.effect(
+          DesktopState.DesktopState,
+          Effect.gen(function* () {
+            const defaults = yield* DesktopState.DesktopState;
+            return { ...defaults, backendReady, quitting };
+          }).pipe(Effect.provide(DesktopState.layer)),
+        ),
         desktopSettings: {
           ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
           mainWindowBounds: bounds,

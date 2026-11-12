@@ -497,6 +497,28 @@ describe("Jenkins release pipeline", () => {
     expect(pipeline).not.toContain("--wsl-prebuild");
   });
 
+  it("refetches upstream before preparing a candidate after stable assembly replaced the workspace", () => {
+    const pipeline = NodeFS.readFileSync(
+      NodePath.resolve(import.meta.dirname, "..", "Jenkinsfile"),
+      "utf8",
+    );
+    const body = (name: string) => {
+      const start = pipeline.indexOf(`def ${name}(`);
+      return pipeline.slice(start, pipeline.indexOf("\ndef ", start + 1));
+    };
+
+    expect(body("fetchUpstream")).toContain(
+      "git cat-file -e '${commit}^{commit}' 2>/dev/null || git fetch --no-tags upstream '${commit}'",
+    );
+    for (const name of ["prepareIntegration", "prepareCandidate"]) {
+      const prepare = body(name);
+      expect(prepare.indexOf("fetchUpstream(resolved.target.commit)"), name).toBeGreaterThan(-1);
+      expect(prepare.indexOf("fetchUpstream(resolved.target.commit)"), name).toBeLessThan(
+        prepare.search(/scripts\/fork-(integration|release)\.ts prepare/),
+      );
+    }
+  });
+
   it("builds the fork Android APK alongside the desktop matrix", () => {
     const pipeline = NodeFS.readFileSync(
       NodePath.resolve(import.meta.dirname, "..", "Jenkinsfile"),

@@ -7,8 +7,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import {
   createForeignStateHandler,
-  mergeForeignEntries,
-  ownedEntryKeys,
+  mergeForeignRecord,
   subscribeStorageKey,
   type ForeignStateSync,
 } from "./lib/crossWindowStorage";
@@ -268,18 +267,23 @@ export const foreignDiffPanelStateSync: ForeignStateSync<DiffPanelPersistedState
     return { byThreadKey, branchBaseRefByThreadKey };
   },
   parse: parseDiffPanelPersistedState,
-  merge: ({ local, incoming, baseline }) => ({
-    byThreadKey: mergeForeignEntries(
+  merge: ({ local, incoming, baseline }) => {
+    const byThreadKey = mergeForeignRecord(
       local.byThreadKey,
       incoming.byThreadKey,
-      ownedEntryKeys(local.byThreadKey, baseline.byThreadKey),
-    ),
-    branchBaseRefByThreadKey: mergeForeignEntries(
+      baseline.byThreadKey,
+    );
+    const branchBaseRefByThreadKey = mergeForeignRecord(
       local.branchBaseRefByThreadKey,
       incoming.branchBaseRefByThreadKey,
-      ownedEntryKeys(local.branchBaseRefByThreadKey, baseline.branchBaseRefByThreadKey),
-    ),
-  }),
+      baseline.branchBaseRefByThreadKey,
+    );
+    if (byThreadKey === null && branchBaseRefByThreadKey === null) return null;
+    return {
+      byThreadKey: byThreadKey ?? local.byThreadKey,
+      branchBaseRefByThreadKey: branchBaseRefByThreadKey ?? local.branchBaseRefByThreadKey,
+    };
+  },
   apply: (merged) => useDiffPanelStore.setState(merged),
 };
 

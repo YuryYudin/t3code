@@ -43,17 +43,27 @@ def installWorkspace() {
     }
 }
 
+// Stable assembly replaces the built-in workspace with its candidate, so every
+// step that reads upstream history fetches it again instead of trusting an
+// earlier stage. A target that is no longer on main is fetched by commit.
+def fetchUpstream(String commit = '') {
+    sh '''
+        git remote remove upstream 2>/dev/null || true
+        git remote add upstream https://github.com/pingdotgg/t3code.git
+        git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
+    '''
+    if (commit) {
+        sh "git cat-file -e '${commit}^{commit}' 2>/dev/null || git fetch --no-tags upstream '${commit}'"
+    }
+}
+
 def prepareCandidate(Map resolved, String slug) {
     def candidateRef = "refs/heads/fork-release/candidate-${slug}"
     node('built-in') {
         stage("${slug}: Prepare") {
             checkout scm
             sh 'git clean -fd'
-            sh '''
-                git remote remove upstream 2>/dev/null || true
-                git remote add upstream https://github.com/pingdotgg/t3code.git
-                git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
-            '''
+            fetchUpstream(resolved.target.commit)
             withCredentials([string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA')]) {
                 sh "node scripts/fork-release.ts prepare --target ${resolved.target.commit} --source ${resolved.candidateSourceSha} --candidate-ref ${candidateRef} --first-release ${resolved.firstRelease} --bootstrap-source-sha \"\$BOOTSTRAP_SOURCE_SHA\""
             }
@@ -117,6 +127,7 @@ def prepareIntegration(Map resolved, String slug) {
     node('built-in') {
         checkout scm
         sh 'git clean -fd'
+        fetchUpstream(resolved.target.commit)
         sshagent(credentials: ['github-pockeo-ssh']) {
             sh "git fetch origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/integration/upstream-main:refs/remotes/origin/integration/upstream-main'"
         }
@@ -762,11 +773,7 @@ pipeline {
                     node('built-in') {
                         checkout scm
                         sh 'git clean -ffdx'
-                        sh '''
-                            git remote remove upstream 2>/dev/null || true
-                            git remote add upstream https://github.com/pingdotgg/t3code.git
-                            git fetch --prune --no-tags upstream '+refs/heads/main:refs/remotes/upstream/main'
-                        '''
+                        fetchUpstream()
                         installWorkspace()
                         withCredentials([
                             string(credentialsId: 'github-release-token', variable: 'GITHUB_TOKEN'),

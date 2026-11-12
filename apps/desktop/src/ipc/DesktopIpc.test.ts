@@ -34,7 +34,10 @@ it.effect("answers only registered application windows' top frames", () =>
           on: (channel, listener) => void sync.set(channel, listener),
         }).pipe(
           Layer.provide(
-            Layer.succeed(DesktopAppWindowRegistry.DesktopAppWindowRegistry, appWindows),
+            Layer.succeed(
+              DesktopAppWindowRegistry.DesktopAppWindowRegistry,
+              appWindows,
+            ),
           ),
         ),
       ),
