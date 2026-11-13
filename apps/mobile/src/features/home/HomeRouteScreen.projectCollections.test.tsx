@@ -159,6 +159,7 @@ vi.mock("./home-thread-navigation", () => ({
   useHomeThreadRouteSelection: () => runtime.selectThreadRoute,
 }));
 vi.mock("./home-route-visibility", () => ({
+  runWhenHomeCovered: (action: () => void) => action(),
   useHomeRouteVisible: () => true,
   useAtomValueWhileVisible: () => runtime.threads,
 }));

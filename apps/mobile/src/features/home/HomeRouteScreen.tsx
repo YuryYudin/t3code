@@ -27,7 +27,11 @@ import {
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { useHomeListOptions } from "./home-list-options";
-import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
+import {
+  runWhenHomeCovered,
+  useAtomValueWhileVisible,
+  useHomeRouteVisible,
+} from "./home-route-visibility";
 import {
   buildMobileProjectCollectionsModel,
   mobileProjectCollectionScopeKey,
@@ -68,7 +72,7 @@ function SplitHomeRouteScreen() {
 }
 
 function CompactHomeRouteScreen() {
-  const { setPrimarySidebarSearchQuery, startNewTask } = useAdaptiveWorkspaceLayout();
+  const { layout, setPrimarySidebarSearchQuery, startNewTask } = useAdaptiveWorkspaceLayout();
   const { primarySidebarSearchQuery } = useWorkspacePaneState();
   const selectDetail = useSelectWorkspaceDetail();
   const projects = useProjects();
@@ -92,17 +96,25 @@ function CompactHomeRouteScreen() {
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
     else setLocalSearchQuery(query);
   };
+  // Split layouts keep the query; only the stacked layout opens the thread over the list.
+  // Android's search field keeps its own open state, which a cleared query would leave open.
+  const clearsSearchOnOpen = Platform.OS !== "android" && !layout.usesSplitView;
+  const selectThreadRoute = useCallback(
+    (params: ReactNavigation.RootParamList["Thread"]) => {
+      if (searchQuery !== "" && clearsSearchOnOpen && workspace) {
+        runWhenHomeCovered(() => workspace.cancelSearch("threads"));
+      }
+      selectDetail({ name: "Thread", params });
+    },
+    [clearsSearchOnOpen, searchQuery, selectDetail, workspace],
+  );
   const handleSelectThread = useCallback(
     (thread: EnvironmentThreadShell) =>
-      selectDetail({
-        name: "Thread",
-        params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+      selectThreadRoute({
+        environmentId: String(thread.environmentId),
+        threadId: String(thread.id),
       }),
-    [selectDetail],
-  );
-  const selectThreadRoute = useCallback(
-    (params: ReactNavigation.RootParamList["Thread"]) => selectDetail({ name: "Thread", params }),
-    [selectDetail],
+    [selectThreadRoute],
   );
   const [projectCollectionsOpen, setProjectCollectionsOpen] = useState(false);
   const [scopeOverride, setScopeOverride] = useState<ProjectCollectionScope | null>(null);
@@ -331,6 +343,7 @@ function CompactHomeRouteScreen() {
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
           threads={projectCollectionModel.visibleThreads}
+          visible={visible}
         />
         <Modal
           animationType="slide"
