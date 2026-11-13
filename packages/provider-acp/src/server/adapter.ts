@@ -1013,6 +1013,25 @@ function makeProviderThread(input: {
   };
 }
 
+function appendToolContentText(content: unknown, text: string): unknown[] {
+  const next: unknown[] = Array.isArray(content) ? [...content] : [];
+  const last = unknownRecord(next.at(-1));
+  const lastContent = unknownRecord(last?.content);
+  if (
+    last?.type === "content" &&
+    lastContent?.type === "text" &&
+    typeof lastContent.text === "string"
+  ) {
+    next[next.length - 1] = {
+      ...last,
+      content: { ...lastContent, text: `${lastContent.text}${text}` },
+    };
+  } else {
+    next.push({ type: "content", content: { type: "text", text } });
+  }
+  return next;
+}
+
 function acpMcpToolCallOutput(rawOutput: unknown): unknown {
   const record = unknownRecord(rawOutput);
   if (record === undefined) return rawOutput;
@@ -3130,26 +3149,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (toolCall.content.type !== "content") return;
             const text = acpContentBlockDisplayText(toolCall.content.content);
             if (text === undefined || text.length === 0) return;
-            const content: unknown[] = Array.isArray(previous?.data.content)
-              ? [...previous.data.content]
-              : [];
-            const last = unknownRecord(content.at(-1));
-            const lastContent = unknownRecord(last?.content);
-            if (
-              last?.type === "content" &&
-              lastContent?.type === "text" &&
-              typeof lastContent.text === "string"
-            ) {
-              content[content.length - 1] = {
-                ...last,
-                content: { ...lastContent, text: `${lastContent.text}${text}` },
-              };
-            } else {
-              content.push({ type: "content", content: { type: "text", text } });
-            }
             toolCall = {
               toolCallId: toolCall.toolCallId,
-              data: { content },
+              data: { content: appendToolContentText(previous?.data.content, text) },
             };
           }
           const merged = mergeToolCallState(previous, toolCall);
@@ -4973,10 +4975,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 ? ("completed" as const)
                 : ("failed" as const);
           const embeddedToolCallIds = toolCallIdsByAgentTerminalId.get(terminalKey);
-          const projectedToolCallIds =
-            embeddedToolCallIds === undefined || embeddedToolCallIds.size === 0
-              ? [`acp-agent-terminal:${update.terminalId}`]
-              : [...embeddedToolCallIds];
+          const linked = embeddedToolCallIds !== undefined && embeddedToolCallIds.size > 0;
+          const projectedToolCallIds = linked
+            ? [...embeddedToolCallIds]
+            : [`acp-agent-terminal:${update.terminalId}`];
           const output = next.output.slice(-MAX_AGENT_TERMINAL_OUTPUT_CHARS);
           for (const toolCallId of projectedToolCallIds) {
             const existing = context.tools.get(toolCallId);
@@ -4995,7 +4997,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               setToolOutputText(
                 {
                   ...seeded,
-                  status,
+                  // An agent-reported tool owns its status; terminal state only drives the synthetic one.
+                  status: (linked ? existing?.status : undefined) ?? status,
                   ...(next.command === undefined ? {} : { command: next.command }),
                 },
                 output,
@@ -5582,7 +5585,24 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   status: "inProgress" as const,
                   data: { toolCallId: update.toolCallId },
                 };
-                yield* emitTool(context, appendToolOutputText(previous, text));
+                // Text chunks extend the content list so a later content replacement still shows.
+                yield* emitTool(
+                  context,
+                  update.content.type === "content" && previous.data.rawOutput === undefined
+                    ? {
+                        ...previous,
+                        data: {
+                          ...previous.data,
+                          content: appendToolContentText(previous.data.content, text),
+                        },
+                      }
+                    : previous.data.rawOutput === undefined
+                      ? setToolOutputText(
+                          previous,
+                          `${textFromUnknown(previous.data.content) ?? ""}${text}`,
+                        )
+                      : appendToolOutputText(previous, text),
+                );
               }
               break;
             }

@@ -1,8 +1,8 @@
 import { Debouncer } from "@tanstack/react-pacer";
 import {
   EnvironmentId as EnvironmentIdSchema,
+  PullRequestMergeMethod,
   type EnvironmentId,
-  type PullRequestMergeMethod,
 } from "@t3tools/contracts";
 import {
   ALL_PROJECTS_COLLECTION_SCOPE,
@@ -140,6 +140,8 @@ function isPersistedEnvironmentId(value: unknown): value is EnvironmentId {
   );
 }
 
+const isPullRequestMergeMethod = Schema.is(PullRequestMergeMethod);
+
 function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object") {
     return {};
@@ -153,10 +155,6 @@ function sanitizeTimestampRecord(value: unknown): Record<string, string> {
         Number.isFinite(Date.parse(entry[1])),
     ),
   );
-}
-
-function isPullRequestMergeMethod(value: unknown): value is PullRequestMergeMethod {
-  return value === "merge" || value === "squash" || value === "rebase";
 }
 
 export function parsePersistedState(parsed: PersistedUiState): UiState {
