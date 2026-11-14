@@ -1,14 +1,14 @@
-// Fork distribution profile (T3CODE_MOBILE_DISTRIBUTION=fork), kept out of
-// app.config.ts so the upstream file only gains call sites when the fork is
-// replayed onto upstream. A fork binary installs beside the Play Store app and
-// must never take an upstream OTA: fork JS is native-compatible with upstream
-// fingerprints, so an upstream update would silently replace it. app.config.ts
-// therefore disables expo-updates and drops upstream's EAS linkage.
+// Kept out of app.config.ts so upstream replays only gain call sites. A fork binary must never
+// take an upstream OTA: its JS is native-compatible with upstream fingerprints, so an update would
+// silently replace it. app.config.ts therefore disables expo-updates for fork builds.
 
 export type ForkAppVariant = "development" | "preview" | "production";
 
 export const FORK_IDENTIFIER = "com.tapnetix.t3code";
 export const FORK_RELEASE_SIGNING_PLUGIN = "./plugins/withAndroidReleaseSigning.cjs";
+// expo-observe's native module throws at startup without an EAS project ID. Fork builds have no
+// EAS project; with no relay, crash reports stay off and nothing is sent under this ID.
+const FORK_EAS_PROJECT_ID = "00000000-0000-0000-0000-000000000000";
 
 // Matches scripts/lib/fork-release.ts' FORK_VERSION: a stable fork version is
 // the upstream MAJOR.MINOR.PATCH plus a 1-based fork revision suffix.
@@ -28,22 +28,14 @@ export interface ForkDistributionOverrides {
   readonly androidPackage: string;
   readonly iosBundleIdentifier: string;
   readonly signingPlugin: string;
+  readonly easProjectId: string;
   readonly androidVersionName?: string;
   readonly androidVersionCode?: number;
 }
 
-/**
- * Maps a fork release version to an Android versionName/versionCode pair.
- *
- * - A stable fork version `MAJOR.MINOR.PATCH-N` (N >= 1) gets a monotonic
- *   versionCode: `((MAJOR*1000 + MINOR)*1000 + PATCH)*100 + N`. This keeps
- *   versionCode increasing both across upstream version bumps and across
- *   fork revisions on the same base, so Android always treats a later
- *   release as an update.
- * - An integration/nightly version `MAJOR.MINOR.PATCH-nightly.<build>` gets
- *   versionCode 1, since these builds are never published or installed as
- *   updates over each other.
- */
+// Stable `MAJOR.MINOR.PATCH-N` maps to ((MAJOR*1000 + MINOR)*1000 + PATCH)*100 + N, so versionCode
+// rises across upstream bumps and fork revisions alike. Nightlies get 1: they are never installed
+// over each other.
 function resolveAndroidVersion(forkVersion: string): { versionName: string; versionCode: number } {
   const nightlyMatch = NIGHTLY_FORK_VERSION.exec(forkVersion);
   if (nightlyMatch) {
@@ -88,19 +80,8 @@ function resolveAndroidVersion(forkVersion: string): { versionName: string; vers
   return { versionName: forkVersion, versionCode };
 }
 
-/**
- * Resolves the fork distribution env value into config overrides.
- *
- * - `undefined` (or `""`) returns `null`: today's upstream behavior, unchanged.
- * - `"fork"` returns the fork overrides, and requires `appVariant === "production"`.
- * - Any other non-empty value throws, since a typo should fail loudly rather
- *   than silently ship an unbranded build.
- *
- * `forkVersionEnvValue` is the optional `T3CODE_MOBILE_FORK_VERSION` env var.
- * It's only meaningful with the fork distribution: it throws if set without
- * `distributionEnvValue === "fork"`. See `resolveAndroidVersion` for the
- * versionName/versionCode mapping.
- */
+// Unset returns null (upstream behavior); "fork" requires APP_VARIANT=production; anything else
+// throws so a typo can't ship an unbranded build. A fork version without "fork" also throws.
 export function resolveForkDistribution(
   distributionEnvValue: string | undefined,
   appVariant: ForkAppVariant,
@@ -136,6 +117,7 @@ export function resolveForkDistribution(
     androidPackage: FORK_IDENTIFIER,
     iosBundleIdentifier: FORK_IDENTIFIER,
     signingPlugin: FORK_RELEASE_SIGNING_PLUGIN,
+    easProjectId: FORK_EAS_PROJECT_ID,
     ...(androidVersion
       ? {
           androidVersionName: androidVersion.versionName,
