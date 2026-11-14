@@ -6,16 +6,20 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    T3CODE_MOBILE_DISTRIBUTION: process.env.T3CODE_MOBILE_DISTRIBUTION,
+  }),
 }));
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function loadConfig(variant: string | undefined) {
+async function loadConfig(variant: string | undefined, distribution?: string) {
   vi.resetModules();
   vi.stubEnv("APP_VARIANT", variant);
+  vi.stubEnv("T3CODE_MOBILE_DISTRIBUTION", distribution);
   return (await import("./app.config.ts")).default;
 }
 
@@ -44,4 +48,16 @@ it.each([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
+});
+
+it.each([
+  [undefined, "d763fcb8-d37c-41ea-a773-b54a0ab4a454"],
+  ["fork", "00000000-0000-0000-0000-000000000000"],
+])("gives expo-observe a project ID for distribution %j", async (distribution, projectId) => {
+  // expo-observe's native module throws on startup without one, so the app never loads.
+  const config = await loadConfig("production", distribution);
+  expect(config.extra?.eas).toEqual({
+    projectId,
+    observe: { endpointUrl: "https://observe.invalid" },
+  });
 });
