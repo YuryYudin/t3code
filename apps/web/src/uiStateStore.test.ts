@@ -2,7 +2,6 @@ import {
   DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
   EnvironmentId,
   ProjectCollectionId,
-  ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import { sanitizeProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
@@ -477,7 +476,7 @@ describe("uiStateStore persistence", () => {
     }
   });
 
-  it("drops the temporary expanded-only migration fallback when rewriting state", () => {
+  it("drops removed fields while preserving the expanded-only migration fallback", () => {
     const migrated = parsePersistedState({
       expandedProjectCwds: ["/repo/a"],
     });
@@ -487,7 +486,7 @@ describe("uiStateStore persistence", () => {
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
-    expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(true);
+    expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(false);
     expect(persisted).not.toHaveProperty("threadPanelOpen");
   });
 });
