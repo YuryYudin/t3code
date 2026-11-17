@@ -109,6 +109,7 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => runtime.threads,
 }));
 vi.mock("../../state/threads", () => ({
+  environmentThreadShells: { quietThreadShellsAtom: atoms.steadyThreads },
   steadyNavigationThreadShellsAtom: atoms.steadyThreads,
 }));
 vi.mock("../../state/queries", () => ({
