@@ -334,6 +334,14 @@ describe("release asset gate", () => {
 
   it("requires the complete four-target matrix and merged manifests", () => {
     expect(() => requiredReleaseAssets(assets, "0.0.41-1")).not.toThrow();
+    const withAppImage = (appImage: string) =>
+      assets.map((name) => (name.endsWith(".AppImage") ? appImage : name));
+    expect(() =>
+      requiredReleaseAssets(withAppImage("T3-Code-x86_64.AppImage"), "0.0.41-1"),
+    ).not.toThrow();
+    for (const appImage of ["T3-Code-arm64.AppImage", "T3-Code-0.0.99-1-x86_64.AppImage"]) {
+      expect(() => requiredReleaseAssets(withAppImage(appImage), "0.0.41-1")).toThrow(/Linux x64/);
+    }
     expect(() =>
       requiredReleaseAssets(
         assets.filter((name) => !name.endsWith(".AppImage")),

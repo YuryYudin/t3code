@@ -379,9 +379,10 @@ export function requiredReleaseAssets(names: ReadonlyArray<string>, version: str
     [
       "Linux x64 AppImage",
       (name) =>
-        name.includes(versionToken) &&
-        (name.includes("x64") || name.includes("x86_64")) &&
-        name.endsWith(".appimage"),
+        name === "t3-code-x86_64.appimage" ||
+        (name.includes(versionToken) &&
+          (name.includes("x64") || name.includes("x86_64")) &&
+          name.endsWith(".appimage")),
     ],
     [
       "Windows x64 NSIS",
