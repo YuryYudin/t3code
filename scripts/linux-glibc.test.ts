@@ -1,9 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off - Exercises the packaging filesystem and readelf.
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import * as NodeUtil from "node:util";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import afterPack from "./linux-after-pack.ts";
 import { parseGlibcNeeds, scanGlibcNeeds } from "./linux-glibc.ts";
@@ -62,12 +64,27 @@ it.each(["GLIBC_PRIVATE", "GLIBC_ABI_UNKNOWN"])("rejects unhandled requirement %
 // Minimal ELF64 with a linked string table and a version NEEDS section, for both release CPUs.
 function elfFixture(machine: number, version: string): Buffer {
   const strings = Buffer.from(`\0libc.so.6\0GLIBC_${version}\0`);
-  const names = Buffer.from("\0.shstrtab\0.dynstr\0.gnu.version_r\0");
+  const names = Buffer.from(
+    "\0.shstrtab\0.dynstr\0.gnu.version_r\0.debug_abbrev\0.debug_info\0.debug_str\0",
+  );
+  const abbrev = Buffer.from([1, 0x11, 0, 0xb0, 0x42, 0x0e, 0x1b, 0x0e, 0xb1, 0x42, 0x07, 0, 0, 0]);
+  const dwoName = Buffer.from("t3-missing-debug-info.dwo\0");
+  const debugStrings = Buffer.concat([dwoName, Buffer.from(".\0")]);
+  const debugInfo = Buffer.alloc(28);
+  debugInfo.writeUInt32LE(debugInfo.length - 4);
+  debugInfo.writeUInt16LE(4, 4);
+  debugInfo[10] = 8;
+  debugInfo[11] = 1;
+  debugInfo.writeUInt32LE(dwoName.length, 16);
+  debugInfo.writeBigUInt64LE(1n, 20);
   const stringsOffset = 64;
   const namesOffset = stringsOffset + strings.length;
   const needsOffset = namesOffset + names.length;
-  const sectionsOffset = needsOffset + 32;
-  const elf = Buffer.alloc(sectionsOffset + 4 * 64);
+  const abbrevOffset = needsOffset + 32;
+  const debugInfoOffset = abbrevOffset + abbrev.length;
+  const debugStringsOffset = debugInfoOffset + debugInfo.length;
+  const sectionsOffset = debugStringsOffset + debugStrings.length;
+  const elf = Buffer.alloc(sectionsOffset + 7 * 64);
   Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]).copy(elf);
   elf.writeUInt16LE(3, 16);
   elf.writeUInt16LE(machine, 18);
@@ -75,10 +92,13 @@ function elfFixture(machine: number, version: string): Buffer {
   elf.writeBigUInt64LE(BigInt(sectionsOffset), 40);
   elf.writeUInt16LE(64, 52);
   elf.writeUInt16LE(64, 58);
-  elf.writeUInt16LE(4, 60);
+  elf.writeUInt16LE(7, 60);
   elf.writeUInt16LE(1, 62);
   strings.copy(elf, stringsOffset);
   names.copy(elf, namesOffset);
+  abbrev.copy(elf, abbrevOffset);
+  debugInfo.copy(elf, debugInfoOffset);
+  debugStrings.copy(elf, debugStringsOffset);
   elf.writeUInt16LE(1, needsOffset);
   elf.writeUInt16LE(1, needsOffset + 2);
   elf.writeUInt32LE(1, needsOffset + 4);
@@ -89,6 +109,9 @@ function elfFixture(machine: number, version: string): Buffer {
     [1, 1, 3, namesOffset, names.length, 0],
     [2, 11, 3, stringsOffset, strings.length, 0],
     [3, 19, 0x6ffffffe, needsOffset, 32, 2],
+    [4, names.indexOf(".debug_abbrev"), 1, abbrevOffset, abbrev.length, 0],
+    [5, names.indexOf(".debug_info"), 1, debugInfoOffset, debugInfo.length, 0],
+    [6, names.indexOf(".debug_str"), 1, debugStringsOffset, debugStrings.length, 0],
   ] as const) {
     const section = sectionsOffset + index * 64;
     elf.writeUInt32LE(name, section);
@@ -108,6 +131,20 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("packaged ELF s
     async (machine) => {
       const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-glibc-"));
       try {
+        const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)("/bin/sh", [
+          "-c",
+          "command -v readelf",
+        ]);
+        const bin = NodePath.join(root, "bin");
+        await NodeFSP.mkdir(bin);
+        // Binutils builds differ in whether following separate debug files is enabled by default.
+        await NodeFSP.writeFile(
+          NodePath.join(bin, "readelf"),
+          '#!/bin/sh\nexec "$T3_TEST_READELF" --debug-dump=follow-links "$@"\n',
+          { mode: 0o755 },
+        );
+        vi.stubEnv("T3_TEST_READELF", stdout.trim());
+        vi.stubEnv("PATH", `${bin}${NodePath.delimiter}${process.env.PATH ?? ""}`);
         const app = NodePath.join(root, "app");
         const native = NodePath.join(app, "resources/app.asar.unpacked/node_modules/addon");
         await NodeFSP.mkdir(native, { recursive: true });
@@ -129,6 +166,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("packaged ELF s
         await NodeFSP.writeFile(NodePath.join(native, "helper"), Buffer.from("\x7fELFbroken"));
         await expect(scanGlibcNeeds(app)).rejects.toThrow(/helper/);
       } finally {
+        vi.unstubAllEnvs();
         await NodeFSP.rm(root, { recursive: true, force: true });
       }
     },
