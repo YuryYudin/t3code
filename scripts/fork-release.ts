@@ -346,7 +346,8 @@ function replayCommit(
     const unresolved = git(["diff", "--name-only", "--diff-filter=U"]);
     if (unresolved) throw new Error(`Infrastructure replay still has conflicts: ${unresolved}.`);
   } else if (git(["diff", "--cached", "--name-only", "--", "pnpm-lock.yaml"])) {
-    // A hunk that applied cleanly can still pin a patch hash the target has since changed.
+    // A hunk that applied cleanly can still name a patch hash the target has since dropped.
+    git(["checkout", "HEAD", "--", "pnpm-lock.yaml"]);
     run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"]);
     git(["add", "--", "pnpm-lock.yaml"]);
   }

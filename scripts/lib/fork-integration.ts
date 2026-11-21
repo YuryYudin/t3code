@@ -275,15 +275,14 @@ export class Integration {
   }
   private reconcileLockfile(state: IntegrationState, conflicts: string[]): string[] {
     const lockfile = "pnpm-lock.yaml";
-    if (conflicts.length === 1 && conflicts[0] === lockfile) {
-      integrationGit(state.checkout, ["checkout", "--ours", "--", lockfile]);
-    } else if (
-      conflicts.length > 0 ||
-      !integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", lockfile])
-    ) {
-      return conflicts;
-    }
-    // A hunk that applied cleanly can still pin a patch hash the other side has since changed.
+    const conflicted = conflicts.length === 1 && conflicts[0] === lockfile;
+    const applied =
+      conflicts.length === 0 &&
+      integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", lockfile]) !== "";
+    if (!conflicted && !applied) return conflicts;
+    // Generated hunks cannot be merged line by line: one that applies cleanly can still name a
+    // patch hash the other side dropped. Keep our graph and add the incoming manifests to it.
+    integrationGit(state.checkout, ["checkout", "HEAD", "--", lockfile]);
     this.regenerateLockfile(state.checkout);
     integrationGit(state.checkout, ["add", "--", lockfile]);
     return unresolved(state.checkout);

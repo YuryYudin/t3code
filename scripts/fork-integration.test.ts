@@ -477,12 +477,16 @@ describe("stable candidate repair", () => {
       { source, target, observed: ZERO_SHA },
       NodePath.join(f.root, "workers"),
       "stable",
-      (checkout) =>
-        NodeFS.writeFileSync(NodePath.join(checkout, "pnpm-lock.yaml"), "regenerated\n"),
+      (checkout) => {
+        const lockfile = NodePath.join(checkout, "pnpm-lock.yaml");
+        NodeFS.writeFileSync(lockfile, `${NodeFS.readFileSync(lockfile, "utf8")}regenerated\n`);
+      },
     );
     const state = stable.prepare(f.repo);
     expect(state.status).toBe("prepared");
-    expect(integrationGit(state.checkout, ["show", "HEAD:pnpm-lock.yaml"])).toBe("regenerated");
+    expect(integrationGit(state.checkout, ["show", "HEAD:pnpm-lock.yaml"])).toBe(
+      "dependency: 1\npatch_hash: old\nregenerated",
+    );
   });
 
   it("continues through independent replay conflicts and reserves quality repairs", () => {
