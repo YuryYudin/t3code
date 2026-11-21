@@ -462,6 +462,29 @@ describe("stable candidate repair", () => {
     changed.assertCandidate();
   });
 
+  it("regenerates a lockfile hunk that replays without a conflict", () => {
+    const f = fixture();
+    f.git(["checkout", "--detach", f.base]);
+    const base = f.commit("pnpm-lock.yaml", "dependency: 1\npatch_hash: old\n");
+    const source = f.commit(
+      "pnpm-lock.yaml",
+      "dependency: 1\npatch_hash: old\nfork-dependency: 1\n",
+    );
+    f.git(["checkout", "--detach", base]);
+    const target = f.commit("patches/dependency.patch", "changed upstream patch\n");
+    const stable = new Integration(
+      f.stateDir,
+      { source, target, observed: ZERO_SHA },
+      NodePath.join(f.root, "workers"),
+      "stable",
+      (checkout) =>
+        NodeFS.writeFileSync(NodePath.join(checkout, "pnpm-lock.yaml"), "regenerated\n"),
+    );
+    const state = stable.prepare(f.repo);
+    expect(state.status).toBe("prepared");
+    expect(integrationGit(state.checkout, ["show", "HEAD:pnpm-lock.yaml"])).toBe("regenerated");
+  });
+
   it("continues through independent replay conflicts and reserves quality repairs", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);

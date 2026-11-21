@@ -74,6 +74,9 @@ function run(command: string, args: ReadonlyArray<string>, cwd?: string): string
     );
   return result.stdout.trim();
 }
+function regenerateLockfileWithPnpm(checkout: string): void {
+  run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], checkout);
+}
 export function integrationGit(cwd: string, args: ReadonlyArray<string>): string {
   return run("git", ["-c", `safe.directory=${cwd}`, ...args], cwd);
 }
@@ -132,12 +135,15 @@ export class Integration {
   readonly stateDir: string;
   readonly inputs: IntegrationInputs;
   readonly kind: "integration" | "stable";
+  private readonly regenerateLockfile: (checkout: string) => void;
   constructor(
     stateDir: string,
     inputs: IntegrationInputs,
     workspaceRoot?: string,
     kind: "integration" | "stable" = "integration",
+    regenerateLockfile: (checkout: string) => void = regenerateLockfileWithPnpm,
   ) {
+    this.regenerateLockfile = regenerateLockfile;
     this.stateDir = stateDir;
     this.inputs = inputs;
     this.kind = kind;
@@ -261,17 +267,26 @@ export class Integration {
         if (result.status !== 0 && !NodeFS.existsSync(mergeHead))
           throw new Error(`Integration merge failed: ${result.stderr || result.stdout}`);
       }
-      let conflicts = this.resolveAutomationConflicts(state);
-      if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml") {
-        integrationGit(state.checkout, ["checkout", "--ours", "--", "pnpm-lock.yaml"]);
-        run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], state.checkout);
-        integrationGit(state.checkout, ["add", "--", "pnpm-lock.yaml"]);
-        conflicts = unresolved(state.checkout);
-      }
+      const conflicts = this.reconcileLockfile(state, this.resolveAutomationConflicts(state));
       if (conflicts.length) return this.save({ ...state, status: "needs-repair", conflicts });
       state = this.commitMerge(state);
     }
     return this.save({ ...state, status: "prepared", merging: undefined });
+  }
+  private reconcileLockfile(state: IntegrationState, conflicts: string[]): string[] {
+    const lockfile = "pnpm-lock.yaml";
+    if (conflicts.length === 1 && conflicts[0] === lockfile) {
+      integrationGit(state.checkout, ["checkout", "--ours", "--", lockfile]);
+    } else if (
+      conflicts.length > 0 ||
+      !integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", lockfile])
+    ) {
+      return conflicts;
+    }
+    // A hunk that applied cleanly can still pin a patch hash the other side has since changed.
+    this.regenerateLockfile(state.checkout);
+    integrationGit(state.checkout, ["add", "--", lockfile]);
+    return unresolved(state.checkout);
   }
   private resolveAutomationConflicts(state: IntegrationState): string[] {
     // Historical automation revisions do not override the reviewed frozen source,
@@ -312,13 +327,7 @@ export class Integration {
         )
           throw new Error(`Stable replay failed: ${result.stderr || result.stdout}`);
       }
-      let conflicts = this.resolveAutomationConflicts(state);
-      if (conflicts.length === 1 && conflicts[0] === "pnpm-lock.yaml") {
-        integrationGit(state.checkout, ["checkout", "--ours", "--", "pnpm-lock.yaml"]);
-        run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], state.checkout);
-        integrationGit(state.checkout, ["add", "--", "pnpm-lock.yaml"]);
-        conflicts = unresolved(state.checkout);
-      }
+      const conflicts = this.reconcileLockfile(state, this.resolveAutomationConflicts(state));
       if (conflicts.length) return this.save({ ...state, status: "needs-repair", conflicts });
       state = this.commitStable(state);
     }
