@@ -573,7 +573,9 @@ describe("EnvironmentRegistry", () => {
           {
             catalogChanges: Stream.fromQueue(events),
             authenticate: (credential) =>
-              Option.isSome(credential) && credential.value.token === repaired.token
+              Option.isSome(credential) &&
+              "token" in credential.value &&
+              credential.value.token === repaired.token
                 ? Effect.void
                 : Effect.fail(
                     new ConnectionBlockedError({
