@@ -15,6 +15,17 @@ import {
 } from "@t3tools/client-runtime/state/project-collections-sync";
 import { expect, test, vi } from "vite-plus/test";
 
+vi.mock("../../../mobile/node_modules/react-native/index.js", () => ({
+  ActivityIndicator: "ActivityIndicator",
+  Platform: {
+    OS: "web",
+    select: <T>(options: { web?: T; default?: T }) => options.web ?? options.default,
+  },
+  StyleSheet: { create: <T>(styles: T) => styles },
+  TurboModuleRegistry: { get: () => null },
+  View: "View",
+}));
+
 const referenceId = EnvironmentId.make("environment-reference");
 const secondaryId = EnvironmentId.make("environment-secondary");
 const returningId = EnvironmentId.make("environment-returning");

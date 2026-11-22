@@ -10,7 +10,18 @@ import {
   ProjectId,
   type ProjectCollectionsDocument,
 } from "@t3tools/contracts";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
+
+vi.mock("../../../mobile/node_modules/react-native/index.js", () => ({
+  ActivityIndicator: "ActivityIndicator",
+  Platform: {
+    OS: "web",
+    select: <T>(options: { web?: T; default?: T }) => options.web ?? options.default,
+  },
+  StyleSheet: { create: <T>(styles: T) => styles },
+  TurboModuleRegistry: { get: () => null },
+  View: "View",
+}));
 
 const environmentId = EnvironmentId.make("phone");
 const workId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
