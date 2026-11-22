@@ -489,6 +489,43 @@ describe("stable candidate repair", () => {
     );
   });
 
+  it("regenerates the lockfile of a replayed commit whose other files needed a repair", () => {
+    const f = fixture();
+    const write = (files: Record<string, string>, message: string) => {
+      for (const [file, text] of Object.entries(files)) {
+        NodeFS.mkdirSync(NodePath.dirname(NodePath.join(f.repo, file)), { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(f.repo, file), text);
+      }
+      f.git(["add", "--all"]);
+      f.git(["commit", "-m", message]);
+      return f.git(["rev-parse", "HEAD"]);
+    };
+    f.git(["checkout", "--detach", f.base]);
+    const base = write({ "pnpm-lock.yaml": "dependency: 1\n" }, "Base lockfile");
+    const source = write(
+      { "pnpm-lock.yaml": "dependency: 1\nfork-dependency: 1\n", "feature.txt": "fork\n" },
+      "Fork change",
+    );
+    f.git(["checkout", "--detach", base]);
+    const target = write({ "feature.txt": "upstream\n" }, "Upstream change");
+    const stable = new Integration(
+      f.stateDir,
+      { source, target, observed: ZERO_SHA },
+      NodePath.join(f.root, "workers"),
+      "stable",
+      (checkout) => {
+        const lockfile = NodePath.join(checkout, "pnpm-lock.yaml");
+        NodeFS.writeFileSync(lockfile, `${NodeFS.readFileSync(lockfile, "utf8")}regenerated\n`);
+      },
+    );
+    expect(stable.prepare(f.repo).conflicts).toEqual(["feature.txt"]);
+    stable.request();
+    const repaired = f.repair(stable);
+    expect(integrationGit(repaired.checkout, ["show", "HEAD:pnpm-lock.yaml"])).toBe(
+      "dependency: 1\nregenerated",
+    );
+  });
+
   it("continues through independent replay conflicts and reserves quality repairs", () => {
     const f = fixture();
     f.git(["checkout", "--detach", f.source]);

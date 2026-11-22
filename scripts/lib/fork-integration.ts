@@ -74,6 +74,7 @@ function run(command: string, args: ReadonlyArray<string>, cwd?: string): string
     );
   return result.stdout.trim();
 }
+const LOCKFILE = "pnpm-lock.yaml";
 function regenerateLockfileWithPnpm(checkout: string): void {
   run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], checkout);
 }
@@ -274,18 +275,20 @@ export class Integration {
     return this.save({ ...state, status: "prepared", merging: undefined });
   }
   private reconcileLockfile(state: IntegrationState, conflicts: string[]): string[] {
-    const lockfile = "pnpm-lock.yaml";
-    const conflicted = conflicts.length === 1 && conflicts[0] === lockfile;
-    const applied =
-      conflicts.length === 0 &&
-      integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", lockfile]) !== "";
-    if (!conflicted && !applied) return conflicts;
-    // Generated hunks cannot be merged line by line: one that applies cleanly can still name a
-    // patch hash the other side dropped. Keep our graph and add the incoming manifests to it.
-    integrationGit(state.checkout, ["checkout", "HEAD", "--", lockfile]);
-    this.regenerateLockfile(state.checkout);
-    integrationGit(state.checkout, ["add", "--", lockfile]);
+    if (conflicts.length !== 1 || conflicts[0] !== LOCKFILE) return conflicts;
+    this.regenerateLockfileFromTarget(state);
     return unresolved(state.checkout);
+  }
+  // Generated hunks cannot be merged line by line: one that applies cleanly can still name a patch
+  // hash the target dropped. Start from the target's graph and add the staged manifests to it.
+  private regenerateLockfileFromTarget(state: IntegrationState): void {
+    integrationGit(state.checkout, ["checkout", state.inputs.target, "--", LOCKFILE]);
+    this.regenerateLockfile(state.checkout);
+    integrationGit(state.checkout, ["add", "--", LOCKFILE]);
+  }
+  private reconcileStagedLockfile(state: IntegrationState): void {
+    if (integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", LOCKFILE]))
+      this.regenerateLockfileFromTarget(state);
   }
   private resolveAutomationConflicts(state: IntegrationState): string[] {
     // Historical automation revisions do not override the reviewed frozen source,
@@ -335,6 +338,7 @@ export class Integration {
   private commitStable(state: IntegrationState): IntegrationState {
     const replay = state.replay;
     if (!replay?.pending) throw new Error("Missing stable replay patch.");
+    this.reconcileStagedLockfile(state);
     integrationGit(state.checkout, [
       "diff",
       "--cached",
@@ -410,6 +414,7 @@ export class Integration {
     const mergeHead = integrationGit(state.checkout, ["rev-parse", "MERGE_HEAD"]);
     if (mergeHead !== state.inputs[state.merging])
       throw new Error("Repair changed the merge target.");
+    this.reconcileStagedLockfile(state);
     integrationGit(state.checkout, [
       "diff",
       "--cached",
