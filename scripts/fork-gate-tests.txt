@@ -42,3 +42,22 @@ apps/web/src/project-collections-acceptance/b7.spec.ts
 apps/web/src/project-collections-acceptance/c1.spec.ts
 apps/web/src/project-collections-acceptance/c2.spec.ts
 packages/client-runtime/src/state/projectGrouping.test.ts
+
+# Multiple windows and cross-window sync
+apps/web/src/windowScope.test.ts
+apps/web/src/lib/crossWindowStorage.test.ts
+apps/web/src/composerDraftStore.test.ts
+apps/web/src/terminalUiStateStore.test.ts
+apps/web/src/diffPanelStore.test.ts
+apps/web/src/rightPanelStore.test.ts
+apps/web/src/components/CommandPalette.logic.test.ts
+apps/web/src/connection/storage.test.ts
+packages/client-runtime/src/connection/registry.test.ts
+apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
+apps/desktop/src/window/DesktopWindow.test.ts
+apps/desktop/src/window/DesktopAppWindowRegistry.test.ts
+apps/desktop/src/window/DesktopApplicationMenu.test.ts
+apps/desktop/src/window/RemoteRequestHeaders.test.ts
+apps/desktop/src/ipc/methods/window.test.ts
+apps/desktop/src/ipc/methods/snapShot.test.ts
+apps/desktop/src/settings/DesktopAppSettings.test.ts

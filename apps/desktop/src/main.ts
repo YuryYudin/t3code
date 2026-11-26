@@ -76,6 +76,7 @@ import * as BrowserSession from "./preview/BrowserSession.ts";
 import * as DesktopBrowserHost from "./preview/DesktopBrowserHost.ts";
 import * as LoopbackTunnel from "./preview/LoopbackTunnel.ts";
 import * as PreviewManager from "./preview/Manager.ts";
+import * as DesktopAppWindowRegistry from "./window/DesktopAppWindowRegistry.ts";
 import * as PreviewPasskeys from "./preview/Passkeys.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
@@ -141,7 +142,9 @@ const layerElectron = Layer.mergeAll(
   ElectronTheme.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
-  DesktopIpc.layer(Electron.ipcMain).pipe(Layer.provide(ElectronWindow.layer)),
+  DesktopIpc.layer(Electron.ipcMain).pipe(
+    Layer.provide(Layer.mergeAll(ElectronWindow.layer, DesktopAppWindowRegistry.layer)),
+  ),
 );
 
 const layerDesktopFoundation = Layer.mergeAll(
@@ -156,6 +159,7 @@ const layerDesktopFoundation = Layer.mergeAll(
   DesktopAssets.layer,
   DesktopPrimaryPaste.layer,
   DesktopObservability.layer,
+  DesktopAppWindowRegistry.layer,
   DesktopRendererHistory.layer,
   AppleSpeech.layer,
 ).pipe(Layer.provideMerge(layerDesktopEnvironment));

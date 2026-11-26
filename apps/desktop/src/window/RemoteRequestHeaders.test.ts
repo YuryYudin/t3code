@@ -183,4 +183,17 @@ describe("RemoteRequestHeaders", () => {
       }),
     );
   });
+
+  it("strips for every listed app window and still skips other webContents", () => {
+    const policy = { ...packagedPolicy, appWebContentsIds: new Set([42, 77]) };
+    const request = (webContentsId: number) => ({
+      url: "https://remote.example.com/api/test",
+      webContentsId,
+      frame: { parent: null },
+      requestHeaders: { Origin: "t3code://app", "Sec-Fetch-Site": "cross-site" },
+    });
+
+    assert.deepEqual(stripDesktopOriginHeaders(policy, request(77)), {});
+    assert.isUndefined(stripDesktopOriginHeaders(policy, request(99)));
+  });
 });

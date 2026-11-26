@@ -8,6 +8,12 @@ import { msg } from "gt-react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import {
+  createForeignStateHandler,
+  mergeForeignRecord,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
 import { useClosedViewStore } from "./closedViewStore";
 import { m } from "./i18n/messages";
 import { resolveStorage } from "./lib/storage";
@@ -1295,9 +1301,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       close: (ref) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
-            current.isOpen ? { ...current, isOpen: false } : current,
-          ),
+          userAction(state, scopedThreadKey(ref), (current) => {
+            if (!current.isOpen && current.maximized === undefined) return current;
+            // Leaving maximize here keeps closing one write for other windows.
+            const { maximized: _maximized, ...rest } = current;
+            return { ...rest, isOpen: false };
+          }),
         ),
       setMaximized: (ref, maximized) =>
         set((state) =>
@@ -1485,3 +1494,45 @@ export function selectSelectedRightPanelSurface(
   const state = selectThreadRightPanelState(byThreadKey, ref);
   return state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null;
 }
+
+interface RightPanelPersistedState {
+  byThreadKey: Record<string, ThreadRightPanelState>;
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * fold a foreign window's write into this window without a DOM. The
+ * shared pull-request panel is session state this window never persists, so it
+ * is protected from a foreign snapshot that (correctly) omits it.
+ */
+export const foreignRightPanelStateSync: ForeignStateSync<RightPanelPersistedState> = {
+  snapshot: () => ({ byThreadKey: useRightPanelStore.getState().byThreadKey }),
+  parse: (raw) =>
+    migratePersistedRightPanelState(
+      raw === null ? null : (JSON.parse(raw) as { state?: unknown }).state,
+    ),
+  merge: ({ local, incoming, baseline }) => {
+    const sessionEntries = Object.entries(local.byThreadKey).filter(([threadKey]) =>
+      isPullRequestsPanelKey(threadKey),
+    );
+    const persisted =
+      sessionEntries.length === 0
+        ? local.byThreadKey
+        : Object.fromEntries(
+            Object.entries(local.byThreadKey).filter(
+              ([threadKey]) => !isPullRequestsPanelKey(threadKey),
+            ),
+          );
+    const byThreadKey = mergeForeignRecord(persisted, incoming.byThreadKey, baseline.byThreadKey);
+    if (byThreadKey === null) return null;
+    return {
+      byThreadKey:
+        sessionEntries.length === 0
+          ? byThreadKey
+          : { ...byThreadKey, ...Object.fromEntries(sessionEntries) },
+    };
+  },
+  apply: (merged) => useRightPanelStore.setState(merged),
+};
+
+subscribeStorageKey(RIGHT_PANEL_STORAGE_KEY, createForeignStateHandler(foreignRightPanelStateSync));

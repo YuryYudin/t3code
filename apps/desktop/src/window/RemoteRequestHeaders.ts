@@ -8,6 +8,8 @@ const REMOTE_REQUEST_URL_PATTERNS = ["http://*/*", "https://*/*", "ws://*/*", "w
 export interface MainWindowRequestHeaderPolicy {
   readonly desktopOrigin: string;
   readonly mainWebContentsId: number;
+  /** Further app windows whose requests get the same treatment as the main window's. */
+  readonly appWebContentsIds?: ReadonlySet<number> | undefined;
   readonly clerkFrontendApiHostname?: string | undefined;
   readonly devServerOrigin?: string | undefined;
   readonly isDevelopment: boolean;
@@ -92,7 +94,13 @@ export function stripDesktopOriginHeaders(
   policy: MainWindowRequestHeaderPolicy,
   details: MainWindowRequestHeaderDetails,
 ): Record<string, string> | undefined {
-  if (details.webContentsId !== policy.mainWebContentsId) return undefined;
+  if (
+    details.webContentsId === undefined ||
+    (details.webContentsId !== policy.mainWebContentsId &&
+      !policy.appWebContentsIds?.has(details.webContentsId))
+  ) {
+    return undefined;
+  }
   if (isSubframe(details)) return undefined;
   if (!hasExactDesktopOriginHeader(details.requestHeaders, policy.desktopOrigin)) {
     return undefined;

@@ -10,7 +10,19 @@ import {
 } from "@t3tools/client-runtime/state/project-collections";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
-import { sanitizePersistedProjectCollectionScope } from "./windowScope";
+import {
+  createForeignStateHandler,
+  subscribeStorageKey,
+  type ForeignStateSync,
+} from "./lib/crossWindowStorage";
+import {
+  publishWindowScope,
+  readLaunchScopeParam,
+  readWindowScope,
+  resolveInitialProjectCollectionScope,
+  sanitizePersistedProjectCollectionScope,
+  writeWindowScope,
+} from "./windowScope";
 import { normalizeProjectPathForComparison } from "@t3tools/client-runtime/state/projects";
 
 export const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
@@ -213,6 +225,43 @@ function readPersistedState(): UiState {
   } catch {
     return initialState;
   }
+}
+
+/**
+ * Per-window scope beats the shared localStorage default: this window's own
+ * sessionStorage memory wins (so a reload keeps what the user picked), then
+ * the `?scope=` a desktop window was launched with, then the last scope any
+ * window selected.
+ */
+export function applyInitialWindowScope(
+  state: UiState,
+  input: {
+    readonly launch: ProjectCollectionScope | null;
+    readonly session: ProjectCollectionScope | null;
+  },
+): UiState {
+  return setProjectCollectionScope(
+    state,
+    resolveInitialProjectCollectionScope({
+      launch: input.launch,
+      session: input.session,
+      persisted: state.projectCollectionScope,
+    }),
+  );
+}
+
+function hydrateInitialState(): UiState {
+  const persisted = readPersistedState();
+  if (typeof window === "undefined") {
+    return persisted;
+  }
+  const launch = readLaunchScopeParam(window.location?.search);
+  const session = readWindowScope();
+  if (session === null && launch !== null) {
+    // The launch URL is consumed once; from here the window owns its scope.
+    writeWindowScope(launch);
+  }
+  return applyInitialWindowScope(persisted, { launch, session });
 }
 
 export function persistState(state: UiState): void {
@@ -495,7 +544,7 @@ interface UiStateStore extends UiState {
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
-  ...readPersistedState(),
+  ...hydrateInitialState(),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
@@ -504,7 +553,10 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
-  setProjectCollectionScope: (scope) => set((state) => setProjectCollectionScope(state, scope)),
+  setProjectCollectionScope: (scope) => {
+    publishWindowScope(scope);
+    set((state) => setProjectCollectionScope(state, scope));
+  },
   setProjectCollectionsPreferredReferenceEnvironmentId: (environmentId) =>
     set((state) => setProjectCollectionsPreferredReferenceEnvironmentId(state, environmentId)),
   setSidebarProjectScopeKeys: (projectKeys) =>
@@ -519,6 +571,90 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
+
+function recordsEqual<T>(
+  left: Record<string, T>,
+  right: Record<string, T>,
+  valuesEqual: (left: T, right: T) => boolean = Object.is,
+): boolean {
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => key in right && valuesEqual(left[key] as T, right[key] as T))
+  );
+}
+
+/** Union of both windows' visits, keeping the later timestamp per thread. */
+function mergeThreadLastVisitedAt(
+  local: Record<string, string>,
+  incoming: Record<string, string>,
+): Record<string, string> {
+  let merged: Record<string, string> | null = null;
+  for (const [threadId, visitedAt] of Object.entries(incoming)) {
+    const current = local[threadId];
+    if (current !== undefined && Date.parse(current) >= Date.parse(visitedAt)) continue;
+    merged ??= { ...local };
+    merged[threadId] = visitedAt;
+  }
+  return merged ?? local;
+}
+
+/**
+ * Folds another window's persisted ui state into this one. Shared preferences
+ * take the incoming value (the other window wrote them last), thread visits
+ * union by latest timestamp, and the per-window sidebar scope is never taken
+ * from storage. Returns `local` unchanged when the foreign write carries
+ * nothing new, so merging cannot bounce a persist write back and forth.
+ */
+export function mergeForeignUiState(local: UiState, incoming: UiState): UiState {
+  const threadLastVisitedAtById = mergeThreadLastVisitedAt(
+    local.threadLastVisitedAtById,
+    incoming.threadLastVisitedAtById,
+  );
+  const unchanged =
+    threadLastVisitedAtById === local.threadLastVisitedAtById &&
+    local.defaultAdvertisedEndpointKey === incoming.defaultAdvertisedEndpointKey &&
+    local.pullRequestMergeMethod === incoming.pullRequestMergeMethod &&
+    local.projectCollectionsPreferredReferenceEnvironmentId ===
+      incoming.projectCollectionsPreferredReferenceEnvironmentId &&
+    recordsEqual(local.projectExpandedById, incoming.projectExpandedById) &&
+    local.projectOrder.length === incoming.projectOrder.length &&
+    local.projectOrder.every((projectId, index) => projectId === incoming.projectOrder[index]);
+  if (unchanged) {
+    return local;
+  }
+  return {
+    ...local,
+    projectExpandedById: incoming.projectExpandedById,
+    projectOrder: incoming.projectOrder,
+    threadLastVisitedAtById,
+    defaultAdvertisedEndpointKey: incoming.defaultAdvertisedEndpointKey,
+    pullRequestMergeMethod: incoming.pullRequestMergeMethod,
+    projectCollectionsPreferredReferenceEnvironmentId:
+      incoming.projectCollectionsPreferredReferenceEnvironmentId,
+    // Per-window: another window's scope must never move this window's sidebar.
+    projectCollectionScope: local.projectCollectionScope,
+    sidebarProjectScopeKey: local.sidebarProjectScopeKey,
+    sidebarProjectScopeKeys: local.sidebarProjectScopeKeys,
+  };
+}
+
+/**
+ * Exported for tests: build a handler with {@link createForeignStateHandler} to
+ * drive foreign writes of {@link PERSISTED_STATE_KEY} without a DOM.
+ */
+export const foreignUiStateSync: ForeignStateSync<UiState> = {
+  snapshot: () => useUiStateStore.getState(),
+  parse: (raw) =>
+    raw === null ? initialState : parsePersistedState(JSON.parse(raw) as PersistedUiState),
+  merge: ({ local, incoming }) => {
+    const merged = mergeForeignUiState(local, incoming);
+    return merged === local ? null : merged;
+  },
+  apply: (merged) => useUiStateStore.setState(merged),
+};
+
+subscribeStorageKey(PERSISTED_STATE_KEY, createForeignStateHandler(foreignUiStateSync));
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("beforeunload", () => {
