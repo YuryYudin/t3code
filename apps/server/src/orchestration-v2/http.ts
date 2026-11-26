@@ -32,6 +32,10 @@ import {
   OLDER_THREAD_USER_TURN_LIMIT,
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import {
+  dispatchMaintenanceCommand,
+  maintenanceCommandRequiredScopes,
+} from "./MaintenanceDispatch.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import {
   loadShellUnlessResumable,
@@ -185,6 +189,21 @@ export const layer = HttpApiBuilder.group(
     );
 
     return handlers
+      .handle(
+        "dispatchMaintenance",
+        Effect.fn("environment.orchestration.dispatchExternalAlert")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          for (const scope of maintenanceCommandRequiredScopes(args.payload)) {
+            yield* requireEnvironmentScope(scope);
+          }
+          return yield* dispatchMaintenanceCommand(args.payload).pipe(
+            Effect.map((result) => ({ sequence: result.sequence })),
+            Effect.catch((cause) =>
+              failEnvironmentInternal("orchestration_dispatch_failed", cause),
+            ),
+          );
+        }),
+      )
       .handle(
         "shellSnapshot",
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {

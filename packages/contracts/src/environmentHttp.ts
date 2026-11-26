@@ -74,13 +74,16 @@ import {
 import { PeerLinkClientPairingCredential, PeerLinkClientPairingRequest } from "./peerLink.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
+  OrchestrationV2DispatchCommandResult,
   OrchestrationV2ShellHttpSnapshot,
   OrchestrationV2ShellResumable,
   OrchestrationV2ThreadBoundedSnapshot,
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadHistoryPage,
   OrchestrationV2ThreadTranscript,
+  ThreadExternalAlertUpsertCommand,
 } from "./orchestrationV2.ts";
+import { MaintenanceCommand } from "./maintenanceCommand.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
   PullRequestDiffInput,
@@ -151,6 +154,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "connect_device_revoke_failed",
   "project_snapshot_failed",
   "project_mutation_failed",
+  "orchestration_dispatch_failed",
   "orchestration_snapshot_failed",
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
@@ -769,8 +773,20 @@ const EnvironmentOrchestrationThreadHistoryErrors = [
   EnvironmentResourceNotFoundError,
   EnvironmentInternalError,
 ] as const;
+const EnvironmentOrchestrationDispatchErrors = [
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
 
 class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
+  .add(
+    HttpApiEndpoint.post("dispatchMaintenance", "/api/orchestration/dispatch", {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Union([ThreadExternalAlertUpsertCommand, MaintenanceCommand]),
+      success: OrchestrationV2DispatchCommandResult,
+      error: EnvironmentOrchestrationDispatchErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
   .add(
     HttpApiEndpoint.get("shellSnapshot", "/api/orchestration/shell", {
       headers: OrchestrationProtocolHeaders,

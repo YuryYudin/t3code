@@ -81,3 +81,12 @@ apps/mobile/app.config.test.ts
 apps/mobile/forkDistribution.test.ts
 apps/mobile/plugins/withAndroidReleaseSigning.test.mjs
 apps/mobile/plugins/withAndroidPinnedFbjni.test.mjs
+
+# Maintenance dispatch and external alerts
+apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts
+apps/server/src/orchestration-v2/decider.externalAlert.test.ts
+apps/server/src/orchestration/decider.externalAlert.test.ts
+apps/server/src/orchestration-v2/http.test.ts
+apps/server/src/cli/auth.test.ts
+packages/contracts/src/orchestration.externalAlert.test.ts
+packages/contracts/src/orchestrationV2.test.ts

@@ -154,6 +154,13 @@ const serveOrchestrationHttp = (
         },
       ],
     });
+    const routeContext =
+      getThreadSnapshot === undefined
+        ? services
+        : Context.add(services, ThreadManagementService.ThreadManagementService, {
+            ...Context.get(services, ThreadManagementService.ThreadManagementService),
+            getThreadSnapshot,
+          });
     const routes = HttpApiBuilder.layer(TranscriptTestApi).pipe(
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(
@@ -175,23 +182,16 @@ const serveOrchestrationHttp = (
           ),
         ),
       ),
-      Layer.provide(
-        Layer.succeedContext(
-          getThreadSnapshot === undefined
-            ? services
-            : Context.add(services, ThreadManagementService.ThreadManagementService, {
-                ...Context.get(services, ThreadManagementService.ThreadManagementService),
-                getThreadSnapshot,
-              }),
-        ),
-      ),
+      Layer.provide(Layer.succeedContext(routeContext)),
       Layer.provide(Layer.mock(ProjectEnrichmentService)({})),
       Layer.provide(HttpPlatform.layer),
       Layer.provide(Etag.layerWeak),
       Layer.provide(NodeServices.layer),
     );
-    const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-    yield* Effect.addFinalizer(() => Effect.promise(dispose));
+    const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
+    yield* Effect.addFinalizer(() => Effect.promise(web.dispose));
+    // The fork's maintenance route needs request-time services the routes layer leaves open.
+    const handler = (request: Request) => web.handler(request, routeContext);
     return { services, eventSink, handler };
   });
 
