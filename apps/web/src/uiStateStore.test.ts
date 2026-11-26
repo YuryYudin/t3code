@@ -1,4 +1,10 @@
-import { ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+  EnvironmentId,
+  ProjectCollectionId,
+  ThreadId,
+} from "@t3tools/contracts";
+import { sanitizeProjectCollectionScope } from "@t3tools/client-runtime/state/project-collections";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -11,7 +17,11 @@ import {
   persistState,
   reorderProjects,
   resolveProjectExpanded,
+  setDefaultAdvertisedEndpointKey,
+  setProjectCollectionScope,
+  setProjectCollectionsPreferredReferenceEnvironmentId,
   setProjectExpanded,
+  setSidebarProjectScopeKey,
   type UiState,
 } from "./uiStateStore";
 
@@ -19,6 +29,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
+    sidebarProjectScopeKey: null,
+    projectCollectionScope: { kind: "all" },
+    projectCollectionsPreferredReferenceEnvironmentId: null,
     sidebarProjectScopeKeys: [],
     threadLastVisitedAtById: {},
     defaultAdvertisedEndpointKey: null,
@@ -91,6 +104,71 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.projectOrder).toEqual([keyB, keyC, keyALocal, keyARemote]);
   });
+
+  it("does not reorder missing or identical groups", () => {
+    const currentOrder = ["env-local:proj-a", "env-local:proj-b"];
+    const state = makeUiState();
+
+    expect(reorderProjects(state, currentOrder, ["env-local:missing"], ["env-local:proj-b"])).toBe(
+      state,
+    );
+    expect(reorderProjects(state, currentOrder, ["env-local:proj-a"], ["env-local:proj-a"])).toBe(
+      state,
+    );
+  });
+
+  it("stores the endpoint preference by stable key", () => {
+    const next = setDefaultAdvertisedEndpointKey(makeUiState(), "desktop-core:lan:http");
+
+    expect(next.defaultAdvertisedEndpointKey).toBe("desktop-core:lan:http");
+    expect(setDefaultAdvertisedEndpointKey(next, "desktop-core:lan:http")).toBe(next);
+    expect(setDefaultAdvertisedEndpointKey(next, "")).toMatchObject({
+      defaultAdvertisedEndpointKey: null,
+    });
+  });
+
+  it("stores the sidebar project scope and resets it to all projects", () => {
+    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code");
+
+    expect(scoped.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
+    expect(setSidebarProjectScopeKey(scoped, "github.com/pingdotgg/t3code")).toBe(scoped);
+    expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
+    expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
+  });
+
+  it("stores each collection scope discriminant and the preferred reference immutably", () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const referenceId = EnvironmentId.make("environment-a");
+    const collectionScope = { kind: "collection", collectionId } as const;
+    const projectScope = { kind: "project", projectKey: "repository:acme/work" } as const;
+
+    const withCollection = setProjectCollectionScope(makeUiState(), collectionScope);
+    expect(withCollection.projectCollectionScope).toEqual(collectionScope);
+    expect(setProjectCollectionScope(withCollection, collectionScope)).toBe(withCollection);
+    expect(
+      setProjectCollectionScope(withCollection, { kind: "unfiled" }).projectCollectionScope,
+    ).toEqual({ kind: "unfiled" });
+    expect(setProjectCollectionScope(withCollection, projectScope)).toMatchObject({
+      projectCollectionScope: projectScope,
+      sidebarProjectScopeKey: projectScope.projectKey,
+    });
+    expect(
+      setProjectCollectionScope(withCollection, { kind: "all" }).projectCollectionScope,
+    ).toEqual({ kind: "all" });
+
+    const withReference = setProjectCollectionsPreferredReferenceEnvironmentId(
+      withCollection,
+      referenceId,
+    );
+    expect(withReference.projectCollectionsPreferredReferenceEnvironmentId).toBe(referenceId);
+    expect(setProjectCollectionsPreferredReferenceEnvironmentId(withReference, referenceId)).toBe(
+      withReference,
+    );
+    expect(
+      setProjectCollectionsPreferredReferenceEnvironmentId(withReference, null)
+        .projectCollectionsPreferredReferenceEnvironmentId,
+    ).toBeNull();
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -117,8 +195,55 @@ describe("parsePersistedState", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "all" },
+      projectCollectionsPreferredReferenceEnvironmentId: null,
       sidebarProjectScopeKeys: [],
       pullRequestMergeMethod: "merge",
+    });
+  });
+
+  it("sanitizes malformed local collection state and composes with stale-scope fallback", () => {
+    const malformed = parsePersistedState({
+      projectCollectionScope: { kind: "collection", collectionId: "" },
+      projectCollectionsPreferredReferenceEnvironmentId: "  ",
+    } as PersistedUiState);
+    expect(malformed.projectCollectionScope).toEqual({ kind: "all" });
+    expect(malformed.projectCollectionsPreferredReferenceEnvironmentId).toBeNull();
+    expect(
+      parsePersistedState({
+        projectCollectionScope: { kind: "project", projectKey: " repository:acme/work " },
+      }).projectCollectionScope,
+    ).toEqual({ kind: "all" });
+
+    const stale = parsePersistedState({
+      projectCollectionScope: {
+        kind: "collection",
+        collectionId: "c65373e8-36f4-4eca-8b3a-5d8edf14c9cb",
+      },
+    } as PersistedUiState);
+    expect(
+      sanitizeProjectCollectionScope(
+        DEFAULT_PROJECT_COLLECTIONS_DOCUMENT,
+        stale.projectCollectionScope,
+      ),
+    ).toEqual({ kind: "all" });
+  });
+
+  it("migrates the previous project-only scope into the discriminated scope", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "repository:acme/work" })
+        .projectCollectionScope,
+    ).toEqual({ kind: "project", projectKey: "repository:acme/work" });
+
+    expect(
+      parsePersistedState({
+        sidebarProjectScopeKey: "repository:acme/work",
+        projectCollectionScope: { kind: "unfiled" },
+      }),
+    ).toMatchObject({
+      sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "unfiled" },
     });
   });
 
@@ -205,6 +330,8 @@ describe("uiStateStore persistence", () => {
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKeys: [],
       sidebarProjectScopeKey: null,
+      projectCollectionScope: { kind: "all" },
+      projectCollectionsPreferredReferenceEnvironmentId: null,
       pullRequestMergeMethod: "merge",
     });
     expect(parsePersistedState(persisted)).toEqual({
@@ -253,5 +380,47 @@ describe("uiStateStore persistence", () => {
       parsePersistedState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" })
         .sidebarProjectScopeKeys,
     ).toEqual(["github.com/pingdotgg/t3code"]);
+  });
+
+  it("round-trips collection scope and preferred reference across reloads", () => {
+    const collectionId = ProjectCollectionId.make("c65373e8-36f4-4eca-8b3a-5d8edf14c9cb");
+    const referenceId = EnvironmentId.make("environment-a");
+    const scopes = [
+      { kind: "all" },
+      { kind: "collection", collectionId },
+      { kind: "unfiled" },
+      { kind: "project", projectKey: "repository:acme/work" },
+    ] as const;
+
+    for (const projectCollectionScope of scopes) {
+      persistState(
+        makeUiState({
+          projectCollectionScope,
+          projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+        }),
+      );
+
+      const persisted = JSON.parse(
+        localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+      ) as PersistedUiState;
+      expect(parsePersistedState(persisted)).toMatchObject({
+        projectCollectionScope,
+        projectCollectionsPreferredReferenceEnvironmentId: referenceId,
+      });
+    }
+  });
+
+  it("drops removed fields while preserving the expanded-only migration fallback", () => {
+    const migrated = parsePersistedState({
+      expandedProjectCwds: ["/repo/a"],
+    });
+
+    persistState(migrated);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(false);
+    expect(persisted).not.toHaveProperty("threadPanelOpen");
   });
 });

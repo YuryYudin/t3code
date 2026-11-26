@@ -664,7 +664,6 @@ function AdaptiveWorkspaceLayoutContent(
     }
     handleSelectThreadRoute(destination);
   };
-
   useHardwareKeyboardCommand("newTask", () => {
     handleStartNewTask();
     return true;

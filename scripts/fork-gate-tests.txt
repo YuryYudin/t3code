@@ -1,0 +1,44 @@
+# Fork test gate: the release pipeline runs every path below with `vp test run`.
+# Each fork feature lists the tests that guard it.
+
+# Collections
+packages/contracts/src/environment.test.ts
+packages/contracts/src/settings.test.ts
+packages/shared/src/serverSettings.test.ts
+packages/client-runtime/src/state/projectCollectionIdentity.test.ts
+packages/client-runtime/src/state/projectCollections.test.ts
+packages/client-runtime/src/state/projectCollectionsSync.test.ts
+packages/client-runtime/src/state/sharedSettings.test.ts
+apps/server/src/environment/ServerEnvironment.test.ts
+apps/server/src/serverSettings.test.ts
+apps/web/src/components/ProjectCollectionMoveMenu.test.tsx
+apps/web/src/components/ProjectCollectionsDialog.test.tsx
+apps/web/src/components/Sidebar.logic.test.ts
+apps/web/src/components/Sidebar.projectCollectionsDrag.test.ts
+apps/web/src/components/SidebarAddMenu.test.tsx
+apps/web/src/components/SidebarProjectCollections.test.tsx
+apps/web/src/components/settings/ProjectCollectionIconPickerDialog.test.tsx
+apps/web/src/hooks/useProjectCollections.test.ts
+apps/web/src/hooks/useSettings.test.ts
+apps/web/src/uiStateStore.test.ts
+apps/mobile/src/components/ProjectCollectionIcon.test.tsx
+apps/mobile/src/features/home/HomeHeader.projectCollections.test.tsx
+apps/mobile/src/features/home/HomeRouteScreen.projectCollections.test.tsx
+apps/mobile/src/features/home/homeThreadList.test.ts
+apps/mobile/src/features/home/mobileProjectCollections.test.ts
+apps/mobile/src/features/projects/ProjectCollectionsSheet.test.tsx
+apps/mobile/src/features/projects/useProjectCollections.test.ts
+apps/mobile/src/features/settings/ProjectCollectionsSettingsSection.test.tsx
+apps/mobile/src/features/settings/SettingsRouteScreen.logic.test.ts
+apps/mobile/src/features/threads/ThreadNavigationSidebar.test.tsx
+apps/mobile/src/lib/storage.test.ts
+apps/web/src/project-collections-acceptance/a4.spec.ts
+apps/web/src/project-collections-acceptance/a7.spec.ts
+apps/web/src/project-collections-acceptance/b1.spec.ts
+apps/web/src/project-collections-acceptance/b2.spec.ts
+apps/web/src/project-collections-acceptance/b3.spec.ts
+apps/web/src/project-collections-acceptance/b6.spec.ts
+apps/web/src/project-collections-acceptance/b7.spec.ts
+apps/web/src/project-collections-acceptance/c1.spec.ts
+apps/web/src/project-collections-acceptance/c2.spec.ts
+packages/client-runtime/src/state/projectGrouping.test.ts
