@@ -17,7 +17,7 @@ For an explicitly requested release base, set `EXPECTED_UPSTREAM_VERSION` to its
 `apple-account-check` is a diagnostic action: it checks notarization access using the existing Jenkins Apple API credentials without building, signing, submitting, publishing, or promoting. Stable releases also perform this check before their platform build matrix. Integration and `validate-only` build macOS artifacts without release signing or notarization, so Apple account availability cannot block source synchronization. These validation artifacts are archived in Jenkins and never published to the stable updater. Both paths verify the complete artifact set, manifests, and checksums.
 
 `DRY_RUN` builds and validates everything but never pushes, publishes, or reports incidents.
-Scheduled `auto` builds perform release work only on the `ops` job; a build started by branch indexing only registers the job and its parameters. To test a pipeline change, push it to a branch named `ops/<topic>` and run that job with `DRY_RUN=true`.
+Scheduled `auto` builds perform release work only on the `ops` job; a build started by branch indexing only registers the job and its parameters. To test a pipeline change, push it to a branch named `ops-<topic>` (Git cannot hold `ops/<topic>` next to `ops`) and run that job with `DRY_RUN=true`.
 
 Fetch upstream `main` with `--no-tags`. The release resolver fetches the selected official stable tag into `refs/upstream-tags/`; upstream movable aliases such as `android-nightly` must not share the fork's `refs/tags/` namespace. The desktop artifact tests load the checked-out workspace configuration before packaging so malformed build approvals fail in the repairable quality gate.
 
@@ -74,7 +74,7 @@ The existing maintainer login can read jobs, scan the multibranch project, and s
 
 ## One-time Jenkins setup
 
-Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, using `github-pockeo-ssh`, and discover only `ops` and `ops/*` (branch name filter). Product branches carry no Jenkinsfile. Keep orphaned branch jobs instead of pruning them, so old build logs stay available. The pipeline uses these labels and nodes:
+Create a GitHub multibranch Pipeline for `git@github.com:YuryYudin/t3code.git`, using `github-pockeo-ssh`, and discover only `ops` and `ops-*` (branch name filter). Product branches carry no Jenkinsfile. Keep orphaned branch jobs instead of pruning them, so old build logs stay available. The pipeline uses these labels and nodes:
 
 - controller and durable state: `built-in` on kubuntu;
 - Linux x64: `linux` (`ggnode*`);
