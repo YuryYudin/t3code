@@ -1,0 +1,586 @@
+{
+  "schemaVersion": 1,
+  "sourceRange": {
+    "baseExclusive": "b1e223e2b0d87124883b1410ab52dd6a1338e40d",
+    "headInclusive": "2212ded3ae78b255b22d8c1e709d239c2bb055e5"
+  },
+  "stableBase": {
+    "tag": "v0.0.40",
+    "commit": "09e8de9c655ae85410bf6b00446f272a01da81c7",
+    "tree": "a37eec09e807b2ed3f1bc5f39900033ec46b4cbf"
+  },
+  "patch": {
+    "path": "scripts/fork-release-bootstrap/collections-v0.0.40.patch",
+    "sha256": "b1aa114c12668ce45e377f9f3604d31d0feda2448c50943c6c5fbea5179f2c4c",
+    "resultTree": "2a76edf2b061e129cec7d448991ad9897ebf40c7"
+  },
+  "commit": {
+    "message": "feat: add project collections",
+    "authorName": "T3 Code Fork Release",
+    "authorEmail": "fork-release@tapnetix.com",
+    "timestamp": "2026-09-14T00:00:00Z"
+  },
+  "infrastructureReplayResolutions": [
+    {
+      "path": "apps/desktop/src/app/DesktopPreReadyPlatform.test.ts",
+      "resolution": "keep-target",
+      "invariant": "v0.0.40 predates the Linux desktop-entry test changed by release identity; keep its base test file while DesktopEnvironment and DesktopAppIdentity tests cover the stable identity on the bootstrap candidate"
+    }
+  ],
+  "paths": [
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/package.json",
+      "invariant": "AI1",
+      "resolvedBlob": "44ea39b71e260e7a5e4dc98e5d4a61987e61e3c9"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/components/ProjectCollectionIcon.test.tsx",
+      "sourceBlob": "902c4a4310f1d105b5eb74d07b66db8b3dbe0efe",
+      "resolvedBlob": "902c4a4310f1d105b5eb74d07b66db8b3dbe0efe"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/components/ProjectCollectionIcon.tsx",
+      "sourceBlob": "ff25488a31e81581febfe48a2112699d569070ae",
+      "resolvedBlob": "ff25488a31e81581febfe48a2112699d569070ae"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/home/HomeHeader.projectCollections.test.tsx",
+      "sourceBlob": "7d3a48494cf19766183ee13078372cf97539bfa1",
+      "resolvedBlob": "7d3a48494cf19766183ee13078372cf97539bfa1"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/src/features/home/HomeHeader.tsx",
+      "invariant": "AI2",
+      "resolvedBlob": "fc98ff5f2bac7dfcecbed9e7fed3fe90e6d2c1d9"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/home/HomeRouteScreen.projectCollections.test.tsx",
+      "sourceBlob": "018beaff22fe73b51d7953320f90cf55cd4c67b9",
+      "resolvedBlob": "018beaff22fe73b51d7953320f90cf55cd4c67b9"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/features/home/HomeRouteScreen.tsx",
+      "sourcePatchId": "b6da8b9e6ea43a92045ed8d88dba582706fb82dd",
+      "resolvedBlob": "c38b0f1847cac18d5ef4e7ac0a0aee53043ff3be"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/features/home/homeThreadList.test.ts",
+      "sourcePatchId": "813d45cda30585e6165134ac2e0fa1b9f7394c66",
+      "resolvedBlob": "4a5e8450e9a22757856379f676372eaab4630b33"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/features/home/homeThreadList.ts",
+      "sourcePatchId": "664be96f1035839974f70c20d7ee0e2dbd227c83",
+      "resolvedBlob": "173713da40ff49fd22623773de27dbdd85a1dec6"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/home/mobileProjectCollections.test.ts",
+      "sourceBlob": "bd6e9205da17277b4e39c5c6bd63f36f83ae0464",
+      "resolvedBlob": "bd6e9205da17277b4e39c5c6bd63f36f83ae0464"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/home/mobileProjectCollections.ts",
+      "sourceBlob": "da2ae48e2ae28fb5fee6f298e87c6ba870da9b21",
+      "resolvedBlob": "da2ae48e2ae28fb5fee6f298e87c6ba870da9b21"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx",
+      "sourcePatchId": "6d6c1e9f4367fafcc66bdccfa5abe77c0b21fa49",
+      "resolvedBlob": "cbc520bd35dbd6d43af36962f9f5b6e24f4f9565"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/projects/ProjectCollectionsSheet.test.tsx",
+      "sourceBlob": "7a37e1d106fe90bb9205eaa96fa9f20c7fd31c63",
+      "resolvedBlob": "7a37e1d106fe90bb9205eaa96fa9f20c7fd31c63"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/projects/ProjectCollectionsSheet.tsx",
+      "sourceBlob": "3bbbba6179fc5ac977033524831e701c8f5ef910",
+      "resolvedBlob": "3bbbba6179fc5ac977033524831e701c8f5ef910"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/projects/useProjectCollections.test.ts",
+      "sourceBlob": "92e2b9d4a767d9110e4c6f85507c2bb8dc5e1f99",
+      "resolvedBlob": "92e2b9d4a767d9110e4c6f85507c2bb8dc5e1f99"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/projects/useProjectCollections.ts",
+      "sourceBlob": "64b6422bc2b7d1f007dd07d871fa4f58b249dc29",
+      "resolvedBlob": "64b6422bc2b7d1f007dd07d871fa4f58b249dc29"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/settings/ProjectCollectionsSettingsSection.test.tsx",
+      "sourceBlob": "d6cf849e6c0a43f7345599dca01715148f3bf7c3",
+      "resolvedBlob": "d6cf849e6c0a43f7345599dca01715148f3bf7c3"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/settings/ProjectCollectionsSettingsSection.tsx",
+      "sourceBlob": "14e22b946da1518406f64a78cfbb9e0368b0a549",
+      "resolvedBlob": "14e22b946da1518406f64a78cfbb9e0368b0a549"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/src/features/settings/SettingsRouteScreen.logic.test.ts",
+      "invariant": "AI3",
+      "resolvedBlob": "9a98b3a86480d0ea68c48801e261a5248c023aae"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/src/features/settings/SettingsRouteScreen.logic.ts",
+      "invariant": "AI4",
+      "resolvedBlob": "c419eca7f3e8301d277fd8b62e9838fcd8938523"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/src/features/settings/SettingsRouteScreen.tsx",
+      "invariant": "AI5",
+      "resolvedBlob": "b24c32b36d450babf40f3e9b83d3386391294783"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/mobile/src/features/threads/ThreadNavigationSidebar.test.tsx",
+      "sourceBlob": "81b0b8520da132c6c26031f9822c110e0e2c8dac",
+      "resolvedBlob": "81b0b8520da132c6c26031f9822c110e0e2c8dac"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx",
+      "invariant": "AI6",
+      "resolvedBlob": "9316bf24c2cc2259b2cefc187729daef1117ce83"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/lib/storage.test.ts",
+      "sourcePatchId": "e91479b2bc85e0c5cae0de716b7422c50ec3111a",
+      "resolvedBlob": "1361db949e3f2304dd75b3abe3e8e22a06dd412c"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/mobile/src/persistence/mobile-preferences.ts",
+      "sourcePatchId": "7bdd4f007f71c51b4d48402804a32cbf1f5ff2b0",
+      "resolvedBlob": "8938e6f308e1a14cda2cd09a252216ebf85d4472"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/server/src/environment/ServerEnvironment.test.ts",
+      "sourcePatchId": "b12ea989bb0a5bd79c12addb21d4739718adc80e",
+      "resolvedBlob": "a630e2ea59e2347343c660e9a97d14e81bf73e09"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/server/src/environment/ServerEnvironment.ts",
+      "sourcePatchId": "03d07ca5946605e3d5e3440ed258b32d03960e72",
+      "resolvedBlob": "d954589053474b4b860fa2ee14cd68cf194866c9"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/server/src/serverSettings.test.ts",
+      "sourcePatchId": "5de5ee8b8872c4ce0310ffe14c3334e45c835264",
+      "resolvedBlob": "ebb9057b295534fe9ae4bcef0e87310593e34f29"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/server/src/serverSettings.ts",
+      "sourcePatchId": "e7bdb16eb12b933ac39573797a8569ec9c2b0d96",
+      "resolvedBlob": "a21cfcaa524169abd73240bb5347ffbb5e1c2f32"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/ProjectCollectionMoveMenu.test.tsx",
+      "sourceBlob": "d1034b05624d46de0f1571cb994581c2338c3f09",
+      "resolvedBlob": "d1034b05624d46de0f1571cb994581c2338c3f09"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/ProjectCollectionMoveMenu.tsx",
+      "sourceBlob": "d8142dd5d786df4fac7203da7a550743450bf63e",
+      "resolvedBlob": "d8142dd5d786df4fac7203da7a550743450bf63e"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/ProjectCollectionsDialog.test.tsx",
+      "sourceBlob": "d1a5d50261db60a9843a2955b76c790066b012b6",
+      "resolvedBlob": "d1a5d50261db60a9843a2955b76c790066b012b6"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/ProjectCollectionsDialog.tsx",
+      "sourceBlob": "99b6d7a848a65f8bdfcec618cc8d884fa55d25df",
+      "resolvedBlob": "99b6d7a848a65f8bdfcec618cc8d884fa55d25df"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/web/src/components/Sidebar.logic.test.ts",
+      "sourcePatchId": "f1f857b19bcd467414b1e3c263d9977c44ca8849",
+      "resolvedBlob": "b61efa204b207a19014d893585e50673e86d02c3"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/web/src/components/Sidebar.logic.ts",
+      "sourcePatchId": "e79274f01012d76ee7e4c87519b1df52b4002ce9",
+      "resolvedBlob": "e080452f0a37ed6ce5c2e5b0b7b9c48d7f379df2"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/Sidebar.projectCollectionsDrag.test.ts",
+      "sourceBlob": "e4cd91e4d6f4f7d049a51b0adf3f787ae7cb4bb6",
+      "resolvedBlob": "e4cd91e4d6f4f7d049a51b0adf3f787ae7cb4bb6"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/Sidebar.projectCollectionsDrag.ts",
+      "sourceBlob": "9beebd2c8c8371421c0d777b859a5c3205ad806b",
+      "resolvedBlob": "9beebd2c8c8371421c0d777b859a5c3205ad806b"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/web/src/components/Sidebar.tsx",
+      "invariant": "AI7",
+      "resolvedBlob": "7fdadcca3c26f032e3edb6934d74086f2fa3574c"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/SidebarAddMenu.test.tsx",
+      "sourceBlob": "59b8293a599f40637e85bf2addd0df62f4cffb8d",
+      "resolvedBlob": "59b8293a599f40637e85bf2addd0df62f4cffb8d"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/SidebarAddMenu.tsx",
+      "sourceBlob": "9d8a0766473f6581f302cc2087ed309edd56172f",
+      "resolvedBlob": "9d8a0766473f6581f302cc2087ed309edd56172f"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/SidebarProjectCollections.test.tsx",
+      "sourceBlob": "e5e79238234c9fe6c665588a9ad5856a410c2c3b",
+      "resolvedBlob": "e5e79238234c9fe6c665588a9ad5856a410c2c3b"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/SidebarProjectCollections.tsx",
+      "sourceBlob": "f4df3bed282a8aa47d40d7b8642c257a00cfc806",
+      "resolvedBlob": "de3eba6360d86be9666eff35d0cc6202ea58c80d"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/settings/ProjectCollectionIconPickerDialog.test.tsx",
+      "sourceBlob": "602122f551e50e9b3f04ec43c3dc912f7dd07f27",
+      "resolvedBlob": "602122f551e50e9b3f04ec43c3dc912f7dd07f27"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/components/settings/ProjectCollectionIconPickerDialog.tsx",
+      "sourceBlob": "7788c8ed312e9722315d99c5fd6a9d11d7ac81ca",
+      "resolvedBlob": "7788c8ed312e9722315d99c5fd6a9d11d7ac81ca"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/hooks/useProjectCollections.test.ts",
+      "sourceBlob": "db187edbc0e9f855691b7e2db01f98ebb12e7a29",
+      "resolvedBlob": "db187edbc0e9f855691b7e2db01f98ebb12e7a29"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/hooks/useProjectCollections.ts",
+      "sourceBlob": "29683952c1855ce574a53fc8eb69be9242bdd3d5",
+      "resolvedBlob": "29683952c1855ce574a53fc8eb69be9242bdd3d5"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/web/src/hooks/useSettings.test.ts",
+      "sourcePatchId": "39a2faac3c589de69aa377cb2e3df85e7463e22d",
+      "resolvedBlob": "c23dcc57c0bf48c73ad8beb6dd1b3425e584114e"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/web/src/hooks/useSettings.ts",
+      "sourcePatchId": "78304b2d3ee3e7153c036da52169b6526d7f1161",
+      "resolvedBlob": "d621778c5d0cec9244e9fe1bb94d819495bc9d34"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/a4.spec.ts",
+      "sourceBlob": "ea6b4684b1009629850f69cc191fb3ec98fc3c8f",
+      "resolvedBlob": "ea6b4684b1009629850f69cc191fb3ec98fc3c8f"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/a7.spec.ts",
+      "sourceBlob": "475693e7ae741d45a081e59a91b85121ca2e6b94",
+      "resolvedBlob": "475693e7ae741d45a081e59a91b85121ca2e6b94"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/b1.spec.ts",
+      "sourceBlob": "0b9b9798538fc6b08d284a195b4863084069b0e8",
+      "resolvedBlob": "b4ad30fb6cff29e654cc8d8a5e3df870de84b364"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/b2.spec.ts",
+      "sourceBlob": "7987b668d437ea64c5b7ebc9c596f310675cbe49",
+      "resolvedBlob": "7987b668d437ea64c5b7ebc9c596f310675cbe49"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/b3.spec.ts",
+      "sourceBlob": "2ed6d7b70d89588e25b254746aa94147e87894f5",
+      "resolvedBlob": "2ed6d7b70d89588e25b254746aa94147e87894f5"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/b6.spec.ts",
+      "sourceBlob": "d5b95ba6f2e3233e40c927d50f763f3b12d82d2e",
+      "resolvedBlob": "d5b95ba6f2e3233e40c927d50f763f3b12d82d2e"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/b7.spec.ts",
+      "sourceBlob": "8dd2a4648f7f1a9c9f40a2e4b9aaf5a95eca3cd1",
+      "resolvedBlob": "8dd2a4648f7f1a9c9f40a2e4b9aaf5a95eca3cd1"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/c1.spec.ts",
+      "sourceBlob": "740a83588555c6d6af8c52e44b9097b54fd435b6",
+      "resolvedBlob": "740a83588555c6d6af8c52e44b9097b54fd435b6"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "apps/web/src/project-collections-acceptance/c2.spec.ts",
+      "sourceBlob": "18f4ec7bfd49d595f4e29afd568d358d95f3b900",
+      "resolvedBlob": "18f4ec7bfd49d595f4e29afd568d358d95f3b900"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/web/src/uiStateStore.test.ts",
+      "invariant": "AI8",
+      "resolvedBlob": "d0dda3c765087a7dd4f95e7148dbadb5a34cbd93"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "apps/web/src/uiStateStore.ts",
+      "invariant": "AI9",
+      "resolvedBlob": "0298d6e6efc4e882881c8be9ecd6e3d8a21941b6"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "apps/web/vite.config.ts",
+      "sourcePatchId": "22395531989271f003fa318bd888edc8468a21e4",
+      "resolvedBlob": "3c538c02e58e8c2d20c995d820e225c48978419d"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "docs/user/thread-sidebar.md",
+      "sourcePatchId": "ee9eea473c192064f37c4b648f28e8a6c332a086",
+      "resolvedBlob": "99ea9b11b9a2dcc2751103ed96cdfae7bdaae1d6"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "package.json",
+      "invariant": "AI10",
+      "resolvedBlob": "8cc3b9fcbfc96fbd11963b1c80a4db35f420597d"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/client-runtime/package.json",
+      "sourcePatchId": "4adfb883b9b42b92dce9037c80984fe0f0df12ed",
+      "resolvedBlob": "81b591eb3358a3df89aa52e350281f8186522078"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollectionIdentity.test.ts",
+      "sourceBlob": "8fa24b8dac3c840ea1f25d8481a95749eab62141",
+      "resolvedBlob": "8fa24b8dac3c840ea1f25d8481a95749eab62141"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollectionIdentity.ts",
+      "sourceBlob": "542dba95270af59c9cf66a20ff89e4d5f8cebcbd",
+      "resolvedBlob": "542dba95270af59c9cf66a20ff89e4d5f8cebcbd"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollections.test.ts",
+      "sourceBlob": "8f048fc3d9a2e2fc9a5f1d61aa682a4f086f7bdf",
+      "resolvedBlob": "8f048fc3d9a2e2fc9a5f1d61aa682a4f086f7bdf"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollections.ts",
+      "sourceBlob": "e7a0067d5aba3b46e1a056c85f13c1df304af334",
+      "resolvedBlob": "e7a0067d5aba3b46e1a056c85f13c1df304af334"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollectionsSync.test.ts",
+      "sourceBlob": "5695d4bf56b1598de40df04cc99e82de9b5de32a",
+      "resolvedBlob": "5695d4bf56b1598de40df04cc99e82de9b5de32a"
+    },
+    {
+      "disposition": "clean",
+      "status": "A",
+      "path": "packages/client-runtime/src/state/projectCollectionsSync.ts",
+      "sourceBlob": "dcff20eec2f906063313649b7c45c068bf0de1dc",
+      "resolvedBlob": "dcff20eec2f906063313649b7c45c068bf0de1dc"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/client-runtime/src/state/projectGrouping.ts",
+      "sourcePatchId": "5b31407482008055982b4942df15a61a90d72f40",
+      "resolvedBlob": "1c787091f7494e9cc954acea703a858990db78e1"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "packages/client-runtime/src/state/sharedSettings.test.ts",
+      "invariant": "AI11",
+      "resolvedBlob": "52a8fb67e5d346fb4486128f3e29abf58c34d83d"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "packages/client-runtime/src/state/sharedSettings.ts",
+      "invariant": "AI12",
+      "resolvedBlob": "dfd379509b0d801cdb2b4160c838f29384a8b691"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/contracts/src/environment.test.ts",
+      "sourcePatchId": "87540b33e347c0e00be9a34c101d1399973b4271",
+      "resolvedBlob": "a2d9514595c2508e6ea4de2331cf13e25b71d99e"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/contracts/src/environment.ts",
+      "sourcePatchId": "e6145d37e516424201b45b2333fe629a9a4e762b",
+      "resolvedBlob": "b6ce28bacc31f2baf990c3543a37aa16f9d0096d"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/contracts/src/settings.test.ts",
+      "sourcePatchId": "052f73cb47e99ff4fe54b373b551fea5aa566c85",
+      "resolvedBlob": "cbffc515953e2741e90125ad719c5205293b90c9"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/contracts/src/settings.ts",
+      "sourcePatchId": "2c478a70a25a6df30d523e90914e5c9e71ad7cc9",
+      "resolvedBlob": "f49d9bcfdc50c96bb3be99256443139a2dda16ed"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/shared/src/serverSettings.test.ts",
+      "sourcePatchId": "1638bd3c76d7d6fab3ce09b134fed8c93bb80c1f",
+      "resolvedBlob": "f103f44f6034c6ad7f7c188d09850abb2a14e611"
+    },
+    {
+      "disposition": "clean",
+      "status": "M",
+      "path": "packages/shared/src/serverSettings.ts",
+      "sourcePatchId": "4a7152e1d5af19d1d1a1b8cbcbd01148294e0a73",
+      "resolvedBlob": "901cb36a0d789db7800fdcc18682b6f7b19dba6a"
+    },
+    {
+      "disposition": "adapt",
+      "status": "M",
+      "path": "pnpm-lock.yaml",
+      "invariant": "AI13",
+      "resolvedBlob": "c32805505af3c378c3fa4a22dc6762b539b78ec7"
+    }
+  ],
+  "acceptanceCommand": "pnpm run test:project-collections-acceptance"
+}
