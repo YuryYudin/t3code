@@ -57,11 +57,45 @@ def fetchUpstream(String commit = '') {
     }
 }
 
+// The ops branch carries only this automation. Stages run it from a product checkout with
+// these files laid on top, so the scripts' product imports and paths resolve as before.
+def stashOps() {
+    dir("${env.WORKSPACE}@fork-ops") {
+        deleteDir()
+        checkout scm
+        stash name: 'fork-ops', includes: 'Jenkinsfile,docs/**,scripts/**'
+    }
+}
+
+def overlayOps() {
+    unstash 'fork-ops'
+    // Gate status checks and the release prepare see only the product tree.
+    sh 'git ls-files --others --exclude-standard -- Jenkinsfile docs scripts >> .git/info/exclude'
+}
+
+def checkoutForkWorkspace(boolean fullClean = false) {
+    checkout([
+        $class: 'GitSCM',
+        branches: [[name: 'refs/heads/main']],
+        userRemoteConfigs: [[url: 'git@github.com:YuryYudin/t3code.git', credentialsId: 'github-pockeo-ssh']],
+    ])
+    sh(fullClean ? 'git clean -ffdx' : 'git clean -fdx -e node_modules -- Jenkinsfile docs scripts')
+    overlayOps()
+}
+
+// An out-of-cycle source may live on any pushed branch, not only main.
+def fetchSourceRef() {
+    if (!(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) return
+    sshagent(credentials: ['github-pockeo-ssh']) {
+        sh "git cat-file -e '${params.SOURCE_REF}^{commit}' 2>/dev/null || git fetch --no-tags origin '${params.SOURCE_REF}'"
+    }
+}
+
 def prepareCandidate(Map resolved, String slug) {
     def candidateRef = "refs/heads/fork-release/candidate-${slug}"
     node('built-in') {
         stage("${slug}: Prepare") {
-            checkout scm
+            checkoutForkWorkspace()
             sh 'git clean -fd'
             fetchUpstream(resolved.target.commit)
             withCredentials([string(credentialsId: 't3code-bootstrap-source-sha', variable: 'BOOTSTRAP_SOURCE_SHA')]) {
@@ -76,8 +110,8 @@ def prepareCandidate(Map resolved, String slug) {
 
 def integrationArgs(Map resolved) {
     def kind = resolved.candidateKind ?: 'integration'
-    def observed = kind == 'stable' ? resolved.observedMainSha : resolved.observedIntegrationSha
-    return "--kind ${kind} --source ${resolved.candidateSourceSha} --target ${resolved.target.commit} --observed ${observed}"
+    // Both lanes replay main onto their target, so main is the observed input for each.
+    return "--kind ${kind} --source ${resolved.candidateSourceSha} --target ${resolved.target.commit} --observed ${resolved.observedMainSha}"
 }
 
 def isUserAbort(Throwable failure) {
@@ -89,7 +123,7 @@ def isUserAbort(Throwable failure) {
 def requestIntegrationRepair(Map resolved, String feedback = '') {
     node('built-in') {
         stage('Automatic integration repair') {
-            checkout scm
+            checkoutForkWorkspace()
             def feedbackArg = ''
             if (feedback) {
                 unstash feedback
@@ -109,11 +143,17 @@ def requestIntegrationRepair(Map resolved, String feedback = '') {
                 string(credentialsId: 't3code-jenkins-model-selection', variable: 'T3CODE_JENKINS_MODEL_SELECTION'),
             ]) {
                 sh "node scripts/fork-integration.ts request ${integrationArgs(resolved)} ${feedbackArg}"
-            }
-            timeout(time: 35, unit: 'MINUTES') {
-                waitUntil(initialRecurrencePeriod: 5000, quiet: true) {
-                    sh "node scripts/fork-integration.ts finish ${integrationArgs(resolved)} > .fork-integration.json"
-                    return readJsonScalar('.fork-integration.json', 'status') != 'waiting'
+                try {
+                    timeout(time: 35, unit: 'MINUTES') {
+                        waitUntil(initialRecurrencePeriod: 5000, quiet: true) {
+                            sh "node scripts/fork-integration.ts finish ${integrationArgs(resolved)} > .fork-integration.json"
+                            return readJsonScalar('.fork-integration.json', 'status') != 'waiting'
+                        }
+                    }
+                } catch (error) {
+                    // A turn Jenkins stopped waiting for must not keep running into later repairs.
+                    sh(returnStatus: true, script: "node scripts/fork-integration.ts stop ${integrationArgs(resolved)}")
+                    throw error
                 }
             }
         }
@@ -125,7 +165,7 @@ def prepareIntegration(Map resolved, String slug) {
     def status
     def alreadyCurrent = false
     node('built-in') {
-        checkout scm
+        checkoutForkWorkspace()
         sh 'git clean -fd'
         fetchUpstream(resolved.target.commit)
         sshagent(credentials: ['github-pockeo-ssh']) {
@@ -163,7 +203,7 @@ def ensureIntegrationBundle(Map resolved, String slug, String candidateRef) {
 def bundleIntegration(Map resolved, String slug, String candidateRef) {
     def valid = false
     node('built-in') {
-        checkout scm
+        checkoutForkWorkspace()
         def status = sh(returnStatus: true, script: "node scripts/fork-integration.ts bundle ${integrationArgs(resolved)} --output '${env.WORKSPACE}/candidate.bundle' --ref ${candidateRef} > .fork-integration.json 2> .fork-quality.log")
         valid = status == 0
         if (valid) {
@@ -183,7 +223,7 @@ def withWorkflowLock(Closure body) {
         while (!acquired) {
             def owner
             node('built-in') {
-                checkout scm
+                checkoutForkWorkspace()
                 sh "mkdir -p '${env.FORK_RELEASE_STATE_DIR}'"
                 sh "flock '${env.FORK_RELEASE_STATE_DIR}/workflow.guard' node scripts/fork-integration.ts lock --operation acquire --owner '${runId}' > .fork-lock.json"
                 acquired = readJsonScalar('.fork-lock.json', 'acquired') == 'true'
@@ -201,7 +241,7 @@ def withWorkflowLock(Closure body) {
     } finally {
         if (acquired) {
             node('built-in') {
-                checkout scm
+                checkoutForkWorkspace()
                 sh "flock '${env.FORK_RELEASE_STATE_DIR}/workflow.guard' node scripts/fork-integration.ts lock --operation release --owner '${runId}'"
             }
         }
@@ -354,6 +394,7 @@ def buildLinux(String slug, String candidateRef, String version) {
     node('linux') {
         stage("${slug}: Linux x64 + CLI/WSL runtime") {
             checkoutCandidate("candidate-${slug}", candidateRef)
+            overlayOps()
             withEnv([
                 'CC=clang-15',
                 'CXX=clang++-15',
@@ -402,6 +443,7 @@ def runQuality(String slug, String candidateRef) {
     node('linux') {
         stage("${slug}: Feature + release gates") {
             checkoutCandidate("candidate-${slug}", candidateRef)
+            overlayOps()
             installWorkspace()
             sh 'git config --local status.showUntrackedFiles all; echo .fork-quality.log >> .git/info/exclude'
             try {
@@ -410,17 +452,11 @@ def runQuality(String slug, String candidateRef) {
                 exec > >(tee .fork-quality.log) 2>&1
                 node scripts/fork-release.ts verify-bootstrap
                 corepack pnpm exec vp run --filter ./scripts typecheck
-                corepack pnpm run test:project-collections-acceptance
-                corepack pnpm exec vp test run packages/client-runtime/src/state/projectGrouping.test.ts
-                corepack pnpm exec vp test run apps/web/src/composerDraftStore.test.ts apps/web/src/lib/crossWindowStorage.test.ts apps/web/src/terminalUiStateStore.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/rightPanelStore.test.ts
-                corepack pnpm exec vp test run apps/web/src/connection/storage.test.ts packages/client-runtime/src/connection/registry.test.ts apps/desktop/src/app/DesktopConnectionCatalogStore.test.ts
-                corepack pnpm exec vp test run packages/shared/src/cliRelease.test.ts apps/server/src/cli/update.test.ts apps/server/src/cloud/pinnedRuntime.test.ts apps/server/src/cloud/selfUpdate.test.ts scripts/install.test.ts apps/web/src/state/npmRelease.test.ts apps/web/src/components/sidebar/updateEverything.logic.test.ts
-                corepack pnpm run test:fork-release-acceptance
-                corepack pnpm exec vp test run scripts/linux-glibc.test.ts
-                corepack pnpm exec vp test run scripts/fork-integration.test.ts apps/desktop/src/window/DesktopWindow.test.ts apps/desktop/src/window/DesktopApplicationMenu.test.ts apps/desktop/src/ipc/methods/window.test.ts
-                if [[ -f apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts ]]; then
-                    corepack pnpm exec vp test run apps/server/src/orchestration-v2/MaintenanceDispatch.test.ts
-                fi
+                # The product branch lists the tests that guard each fork feature.
+                test -f scripts/fork-gate-tests.txt
+                gate_tests=$(grep -v '^[[:space:]]*#' scripts/fork-gate-tests.txt)
+                corepack pnpm exec vp test run $gate_tests
+                corepack pnpm exec vp test run scripts/fork-release.test.ts scripts/fork-integration.test.ts
                 for project in packages/contracts packages/shared packages/client-runtime apps/server apps/web apps/mobile apps/desktop; do
                     echo "Type check: $project"
                     corepack pnpm exec vp run --filter "./$project" typecheck
@@ -548,8 +584,7 @@ def buildAndroid(String slug, String candidateRef, String version) {
 
 def reportIncident(Map resolved, String failureClass, String summary) {
     node('built-in') {
-        checkout scm
-        sh 'git clean -ffdx'
+        checkoutForkWorkspace(true)
         withCredentials([
             string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
@@ -572,8 +607,7 @@ def recoverIncidents(Map resolved) {
         ? "--released-upstream-version ${resolved.target.version} --released-source-sha ${resolved.candidateSourceSha}"
         : ''
     node('built-in') {
-        checkout scm
-        sh 'git clean -ffdx'
+        checkoutForkWorkspace(true)
         withCredentials([
             string(credentialsId: 'github-incident-token', variable: 'GITHUB_TOKEN'),
             string(credentialsId: 't3code-jenkins-token', variable: 'T3CODE_JENKINS_TOKEN'),
@@ -587,9 +621,9 @@ def recoverIncidents(Map resolved) {
 }
 
 def queueIntegrationFollowup(Map resolved) {
-    if (env.BRANCH_NAME != 'main' || params.DRY_RUN || params.ACTION == 'validate-only') return
+    if (env.BRANCH_NAME != 'ops' || params.DRY_RUN || params.ACTION == 'validate-only') return
     node('built-in') {
-        checkout scm
+        checkoutForkWorkspace()
         def upstreamHead = sh(returnStdout: true, script: 'git ls-remote https://github.com/pingdotgg/t3code.git refs/heads/main | cut -f1').trim()
         def mainHead
         sshagent(credentials: ['github-pockeo-ssh']) {
@@ -597,7 +631,7 @@ def queueIntegrationFollowup(Map resolved) {
         }
         if (upstreamHead != resolved.target.commit || mainHead != resolved.candidateSourceSha) {
             echo 'New source inputs arrived during verification; queueing one integration follow-up.'
-            build job: 't3code/main', wait: false, parameters: [
+            build job: 't3code/ops', wait: false, parameters: [
                 string(name: 'ACTION', value: 'sync-upstream'),
                 string(name: 'SOURCE_REF', value: ''),
                 string(name: 'UPSTREAM_REF', value: ''),
@@ -632,9 +666,8 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         while (!qualityPassed) {
             qualityPassed = runQuality(slug, candidateRef)
             if (qualityPassed && managed) {
-                def observedMobile = publishRelease ? resolved.observedMainSha : resolved.observedIntegrationSha
-                if (observedMobile == '0000000000000000000000000000000000000000') observedMobile = resolved.target.commit
-                qualityPassed = checkMobileNative(slug, candidateRef, observedMobile)
+                // Main is in every candidate bundle; for nightly this asks what upstream changed since the release.
+                qualityPassed = checkMobileNative(slug, candidateRef, resolved.observedMainSha)
             }
             if (!qualityPassed) {
                 if (!managed) error('Candidate quality checks failed; see the gate log.')
@@ -644,7 +677,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         }
         if (managed) {
             node('built-in') {
-                checkout scm
+                checkoutForkWorkspace()
                 sh "node scripts/fork-integration.ts quality ${integrationArgs(resolved)}"
             }
         }
@@ -659,6 +692,7 @@ def runCandidate(Map resolved, String slug, boolean publishRelease) {
         node('built-in') {
             stage("${slug}: Assemble + verify") {
                 checkoutCandidate("candidate-${slug}", candidateRef)
+                overlayOps()
                 unstash "artifacts-mac-${slug}"
                 unstash "artifacts-linux-${slug}"
                 unstash "artifacts-windows-${slug}"
@@ -731,7 +765,7 @@ pipeline {
     }
 
     triggers {
-        cron(env.BRANCH_NAME == 'main' ? 'H 2 * * *' : '')
+        cron(env.BRANCH_NAME == 'ops' ? 'H 2 * * *' : '')
     }
 
     parameters {
@@ -751,8 +785,13 @@ pipeline {
         stage('Resolve and execute') {
             steps {
                 script {
-                    if (params.ACTION == 'auto' && env.BRANCH_NAME != 'main') {
-                        echo 'Scheduled fork tracking runs only on main.'
+                    if (params.ACTION == 'auto' && env.BRANCH_NAME != 'ops') {
+                        echo 'Scheduled fork tracking runs only on the ops branch.'
+                        return
+                    }
+                    // A branch scan only registers the job and its parameters; it never starts a cycle.
+                    if (params.ACTION == 'auto' && currentBuild.getBuildCauses('jenkins.branch.BranchIndexingCause')) {
+                        echo 'Branch indexing registered this job; scheduled and requested builds do the work.'
                         return
                     }
                     if (params.ACTION == 'apple-account-check') {
@@ -765,15 +804,21 @@ pipeline {
                     if (params.SOURCE_REF && params.SOURCE_REF != 'HEAD' && !(params.SOURCE_REF ==~ /[0-9a-f]{40}/)) {
                         error('SOURCE_REF must be HEAD or a full lowercase commit SHA.')
                     }
+                    if (params.UPSTREAM_REF && (params.ACTION != 'validate-only' || !(params.UPSTREAM_REF ==~ /[0-9a-f]{40}|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?/))) {
+                        error('UPSTREAM_REF requires validate-only and a full commit SHA or a release tag such as v0.1.12.')
+                    }
                     if (params.EXPECTED_UPSTREAM_VERSION && (params.ACTION != 'out-of-cycle' || !(params.EXPECTED_UPSTREAM_VERSION ==~ /[0-9]+\.[0-9]+\.[0-9]+/))) {
                         error('EXPECTED_UPSTREAM_VERSION requires out-of-cycle and an exact upstream version.')
+                    }
+                    node('built-in') {
+                        stashOps()
                     }
                     withWorkflowLock {
                     Map nightly
                     Map stable
                     node('built-in') {
-                        checkout scm
-                        sh 'git clean -ffdx'
+                        checkoutForkWorkspace(true)
+                        fetchSourceRef()
                         fetchUpstream()
                         installWorkspace()
                         withCredentials([
