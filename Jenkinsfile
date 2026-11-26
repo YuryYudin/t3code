@@ -323,6 +323,8 @@ def buildMac(String slug, String candidateRef, String version, boolean publishRe
             try {
                 retry(count: 2, conditions: [agent(), nonresumable()]) {
                     checkoutCandidate("candidate-${slug}", candidateRef)
+                    // The signing setup runs scripts/ensure-apple-developer-id-g2.py from ops.
+                    overlayOps()
                     withEnv([
                         "PATH=/Users/jenkins/.nvm/versions/node/v24.14.0/bin:/Users/jenkins/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${env.PATH}",
                         'RUSTUP_TOOLCHAIN=stable',
