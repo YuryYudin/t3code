@@ -11,7 +11,9 @@ import {
   ZERO_SHA,
   dispatchRepair,
   integrationGit,
+  repairThreadId,
   shareCheckout,
+  stopRepair,
   verifiedIntegrationCurrent,
   workflowLock,
 } from "./lib/fork-integration.ts";
@@ -97,31 +99,25 @@ describe.skipIf(NodeChildProcess.spawnSync("setfacl", ["--version"]).status !== 
   },
 );
 
-describe("persistent integration", () => {
-  it("preserves a resolved merge through new upstream and main commits", () => {
+describe("nightly candidates", () => {
+  it("skips verified inputs and replays a verified resolution onto new upstream and main", () => {
     const f = fixture();
     expect(f.integration.prepare(f.repo).conflicts).toEqual(["feature.txt"]);
     f.integration.request();
     f.integration.accepted(f.integration.read().requests[0]!.id, 1);
-    const first = f.repair(f.integration);
+    f.repair(f.integration);
+    expect(verifiedIntegrationCurrent(f.stateDir, f.inputs, "integration")).toBe(false);
     f.integration.markQuality();
     f.integration.markVerified("build/1");
-    expect(
-      verifiedIntegrationCurrent(f.stateDir, f.repo, { ...f.inputs, observed: first.head }),
-    ).toBe(false); // candidate not yet in source clone
-    f.git(["fetch", first.checkout, `${first.head}:refs/heads/integration`]);
-    expect(
-      verifiedIntegrationCurrent(f.stateDir, f.repo, { ...f.inputs, observed: first.head }),
-    ).toBe(true);
+    expect(verifiedIntegrationCurrent(f.stateDir, f.inputs, "integration")).toBe(true);
+    expect(verifiedIntegrationCurrent(f.stateDir, f.inputs, "stable")).toBe(false);
     f.git(["checkout", "--detach", f.target]);
     const target = f.commit("upstream.txt", "next upstream\n");
     f.git(["checkout", "--detach", f.source]);
     const source = f.commit("fork.txt", "new fork change\n");
-    const next = new Integration(
-      f.stateDir,
-      { source, target, observed: first.head },
-      NodePath.join(f.root, "workers"),
-    );
+    const nextInputs = { source, target, observed: ZERO_SHA };
+    expect(verifiedIntegrationCurrent(f.stateDir, nextInputs, "integration")).toBe(false);
+    const next = new Integration(f.stateDir, nextInputs, NodePath.join(f.root, "workers"));
     const second = next.prepare(f.repo);
     expect(second.status).toBe("prepared");
     expect(second.requests).toHaveLength(0);
@@ -132,35 +128,6 @@ describe("persistent integration", () => {
     expect(NodeFS.existsSync(NodePath.join(second.checkout, "upstream.txt"))).toBe(true);
     next.assertCandidate();
   });
-  it("takes canonical maintenance files from main without spending an agent attempt", () => {
-    const f = fixture();
-    NodeChildProcess.spawnSync("git", ["merge", "--no-commit", f.source], { cwd: f.repo });
-    f.commit("feature.txt", "upstream plus fork\n");
-    const observed = f.commit("docs/operations/fork-releases.md", "old integration notes\n");
-    f.git(["checkout", "--detach", f.source]);
-    const source = f.commit(
-      "docs/operations/fork-releases.md",
-      "canonical automation instructions\n",
-    );
-    const next = new Integration(
-      f.stateDir,
-      { ...f.inputs, source, observed },
-      NodePath.join(f.root, "workers"),
-    );
-    const candidate = next.prepare(f.repo);
-    expect(candidate.status).toBe("prepared");
-    expect(candidate.requests).toHaveLength(0);
-    expect(
-      NodeFS.readFileSync(
-        NodePath.join(candidate.checkout, "docs/operations/fork-releases.md"),
-        "utf8",
-      ),
-    ).toBe("canonical automation instructions\n");
-    expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "feature.txt"), "utf8")).toBe(
-      "upstream plus fork\n",
-    );
-  });
-
   it("preserves meaningful blank context lines in upstream dependency patches", () => {
     const f = fixture();
     const patch = "--- a/file\n+++ b/file\n@@ -1,2 +1,2 @@\n \n-old\n+new\n";
@@ -249,8 +216,10 @@ describe("persistent integration", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
     const commands: string[] = [];
+    const threads = new Set<string>();
     const dispatch = async (payload: Record<string, unknown>) => {
       commands.push(String(payload.type));
+      threads.add(String(payload.threadId));
       return 1;
     };
     const first = await dispatchRepair(
@@ -259,6 +228,15 @@ describe("persistent integration", () => {
       { instanceId: "codex", model: "test" },
       dispatch,
     );
+    const nightlyThread = repairThreadId(f.integration.read());
+    expect(nightlyThread).toMatch(/^t3-fork-repair-nightly-[0-9a-f]{16}$/);
+    const stable = new Integration(
+      f.stateDir,
+      f.inputs,
+      NodePath.join(f.root, "workers"),
+      "stable",
+    );
+    expect(repairThreadId(stable.prepare(f.repo))).not.toBe(nightlyThread);
     const resumed = new Integration(f.stateDir, f.inputs, NodePath.join(f.root, "workers"));
     expect(resumed.prepare(f.repo).status).toBe("needs-repair");
     expect((await dispatchRepair(resumed, "project", {}, dispatch)).id).toBe(first.id);
@@ -266,40 +244,21 @@ describe("persistent integration", () => {
     f.repair(resumed);
     await dispatchRepair(resumed, "project", {}, dispatch, "test failed");
     f.repair(resumed);
-    expect(() => resumed.request()).toThrow(/exhausted 2 attempts/);
-    expect(resumed.read().requests).toHaveLength(2);
-    const final = await dispatchRepair(resumed, "project", {}, dispatch, "still failed");
-    expect((await dispatchRepair(resumed, "project", {}, dispatch, "still failed")).id).toBe(
+    await dispatchRepair(resumed, "project", {}, dispatch, "still failed");
+    f.repair(resumed);
+    const final = await dispatchRepair(resumed, "project", {}, dispatch, "failed again");
+    expect((await dispatchRepair(resumed, "project", {}, dispatch, "failed again")).id).toBe(
       final.id,
     );
-    expect(commands.filter((c) => c === "thread.turn.start")).toHaveLength(3);
+    expect(commands.filter((c) => c === "thread.turn.start")).toHaveLength(4);
     f.repair(resumed);
-    expect(() => resumed.request("failed again")).toThrow(/exhausted 3 attempts/);
-    expect(resumed.read().requests).toHaveLength(3);
+    expect(() => resumed.request("failed once more")).toThrow(/exhausted 3 attempts .* at quality/);
+    expect(resumed.read().requests).toHaveLength(4);
+    await stopRepair(resumed, dispatch);
+    expect(commands.at(-1)).toBe("thread.session.stop");
+    expect([...threads]).toEqual([nightlyThread]);
   });
 
-  it("reserves a quality feedback repair after conflicts in both integration merges", () => {
-    const f = fixture();
-    f.git(["checkout", "--detach", f.base]);
-    const observed = f.commit("feature.txt", "previous integration feature\n");
-    const next = new Integration(
-      f.stateDir,
-      { ...f.inputs, observed },
-      NodePath.join(f.root, "workers"),
-    );
-    expect(next.prepare(f.repo).merging).toBe("source");
-    next.request();
-    expect(f.repair(next, "fork source integrated\n").merging).toBe("target");
-    next.request();
-    expect(f.repair(next).status).toBe("prepared");
-    expect(next.read().requests).toHaveLength(2);
-    expect(next.request("The upstream service needs a test fixture").request.attempt).toBe(3);
-    f.repair(next, "tested upstream compatibility\n");
-    next.assertCandidate();
-    next.markQuality();
-    next.markVerified("build/feedback-passed");
-    expect(next.read().status).toBe("verified");
-  });
   it("does not treat dispatch acceptance as repair completion", () => {
     const f = fixture();
     const state = f.integration.prepare(f.repo);
@@ -321,7 +280,8 @@ describe("persistent integration", () => {
     const f = fixture();
     const state = f.integration.prepare(f.repo);
     const { request } = f.integration.request();
-    integrationGit(state.checkout, ["reset", "--hard", f.target]);
+    // A replay's frozen HEAD is the upstream target; moving anywhere else is a change.
+    integrationGit(state.checkout, ["reset", "--hard", f.source]);
     atomicWriteJson(NodePath.join(state.checkout, ".fork-repair-complete.json"), {
       requestId: request.id,
       status: "completed",
@@ -340,30 +300,7 @@ describe("persistent integration", () => {
     f.integration.markVerified("build/passed");
     expect(NodeFS.existsSync(NodePath.join(f.stateDir, "verified-rerere"))).toBe(true);
   });
-  it("exports the final tested resolution after feedback changed the original repair", () => {
-    const f = fixture();
-    f.integration.prepare(f.repo);
-    f.integration.request();
-    f.repair(f.integration, "initial repair\n");
-    f.integration.request("The feature gate rejected that repair");
-    f.repair(f.integration, "final tested repair\n");
-    expect(NodeFS.existsSync(NodePath.join(f.stateDir, "verified-rerere"))).toBe(false);
-    f.integration.markQuality();
-    f.integration.markVerified("build/passed");
-    f.git(["checkout", "--detach", f.target]);
-    const target = f.commit("later.txt", "next upstream\n");
-    const next = new Integration(
-      f.stateDir,
-      { ...f.inputs, target },
-      NodePath.join(f.root, "workers"),
-    );
-    expect(next.prepare(f.repo).status).toBe("prepared");
-    expect(NodeFS.readFileSync(NodePath.join(next.read().checkout, "feature.txt"), "utf8")).toBe(
-      "final tested repair\n",
-    );
-  });
-
-  it("reuses a validated Git resolution when a fresh merge meets the same conflict", () => {
+  it("reuses a validated Git resolution when a fresh replay meets the same conflict", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
     f.integration.request();
@@ -393,7 +330,7 @@ describe("persistent integration", () => {
 });
 
 describe("interrupted state transitions", () => {
-  it("recovers a committed merge journal when checkout reset was interrupted", () => {
+  it("recovers a committed replay journal when checkout reset was interrupted", () => {
     const f = fixture();
     f.integration.prepare(f.repo);
     f.integration.request();
@@ -421,7 +358,7 @@ describe("interrupted state transitions", () => {
     const resumed = new Integration(f.stateDir, f.inputs, undefined, "stable").prepare(f.repo);
     expect(resumed.status).toBe("needs-repair");
     expect(resumed.conflicts).toEqual(["feature.txt"]);
-    expect(resumed.replay?.index).toBe(0);
+    expect(resumed.replay.index).toBe(0);
   });
 });
 
@@ -582,32 +519,6 @@ describe("stable candidate repair", () => {
     expect(stable.read().status).toBe("needs-repair");
     expect(() => stable.request()).toThrow(/exhausted 12 source repairs/);
     expect(stable.read().requests).toHaveLength(STABLE_SOURCE_REPAIR_LIMIT);
-  });
-
-  it("replays historical automation using the frozen source without repair attempts", () => {
-    const f = fixture();
-    f.git(["checkout", "--detach", f.source]);
-    f.commit("Jenkinsfile", "old automation\n");
-    f.commit("Jenkinsfile", "intermediate automation\n");
-    const source = f.commit("Jenkinsfile", "current reviewed automation\n");
-    f.git(["checkout", "--detach", f.target]);
-    const target = f.commit("Jenkinsfile", "new upstream automation\n");
-    const stable = new Integration(
-      f.stateDir,
-      { ...f.inputs, source, target },
-      NodePath.join(f.root, "workers"),
-      "stable",
-    );
-    expect(stable.prepare(f.repo).conflicts).toEqual(["feature.txt"]);
-    stable.request();
-    const candidate = f.repair(stable);
-    stable.assertCandidate();
-    expect(candidate.status).toBe("prepared");
-    expect(candidate.requests).toHaveLength(1);
-    expect(candidate.replay?.index).toBe(4);
-    expect(NodeFS.readFileSync(NodePath.join(candidate.checkout, "Jenkinsfile"), "utf8")).toBe(
-      "current reviewed automation\n",
-    );
   });
 
   it("replays every fork patch onto the exact stable target without merge commits", () => {

@@ -5,9 +5,10 @@ import * as NodePath from "node:path";
 import {
   Integration,
   dispatchRepair,
+  stopRepair,
   verifiedIntegrationCurrent,
   workflowLock,
-  shareCheckout,
+  type Dispatch,
 } from "./lib/fork-integration.ts";
 import { assertAbsoluteStateDirectory } from "./lib/fork-release.ts";
 
@@ -22,14 +23,22 @@ function flag(name: string, fallback?: string): string {
 function output(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
+function t3Dispatch(): Dispatch {
+  const base = flag("base-url", process.env.T3CODE_JENKINS_BASE_URL).replace(/\/$/, "");
+  const token = flag("token", process.env.T3CODE_JENKINS_TOKEN);
+  return async (payload) => {
+    const response = await fetch(`${base}/api/orchestration/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) throw new Error(`T3 repair dispatch rejected with HTTP ${response.status}.`);
+    const receipt = (await response.json()) as { sequence: number };
+    return receipt.sequence;
+  };
+}
 async function main() {
-  if (command === "share") {
-    const checkout = flag("checkout");
-    if (NodeFS.realpathSync(checkout) !== NodeFS.realpathSync(process.cwd()))
-      throw new Error("Sharing is limited to the current repair checkout.");
-    shareCheckout(checkout, Number(flag("uid")));
-    return output({ status: "shared" });
-  }
   const stateDir = assertAbsoluteStateDirectory(
     flag("state-dir", process.env.FORK_RELEASE_STATE_DIR),
   );
@@ -56,14 +65,12 @@ async function main() {
       });
     }
     case "current":
-      return output({ current: verifiedIntegrationCurrent(stateDir, process.cwd(), inputs) });
+      return output({ current: verifiedIntegrationCurrent(stateDir, inputs, kind) });
     case "prepare": {
       const projectRoot = flag("project-root", process.env.FORK_REPAIR_PROJECT_ROOT);
       return output(integration.prepare(process.cwd(), NodeFS.statSync(projectRoot).uid));
     }
     case "request": {
-      const base = flag("base-url", process.env.T3CODE_JENKINS_BASE_URL).replace(/\/$/, "");
-      const token = flag("token", process.env.T3CODE_JENKINS_TOKEN);
       const projectId = flag("project-id", process.env.T3CODE_JENKINS_PROJECT_ID);
       const modelSelection: unknown = JSON.parse(
         flag("model-selection", process.env.T3CODE_JENKINS_MODEL_SELECTION),
@@ -74,22 +81,14 @@ async function main() {
         integration,
         projectId,
         modelSelection,
-        async (payload) => {
-          const response = await fetch(`${base}/api/orchestration/dispatch`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(60000),
-          });
-          if (!response.ok)
-            throw new Error(`T3 repair dispatch rejected with HTTP ${response.status}.`);
-          const receipt = (await response.json()) as { sequence: number };
-          return receipt.sequence;
-        },
+        t3Dispatch(),
         feedback,
       );
       return output({ requestId: request.id, attempt: request.attempt });
     }
+    case "stop":
+      await stopRepair(integration, t3Dispatch());
+      return output({ status: "stopped" });
     case "finish":
       return output(integration.finish() ?? { status: "waiting" });
     case "bundle":

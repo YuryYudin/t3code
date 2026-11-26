@@ -9,19 +9,6 @@ export const ZERO_SHA = "0".repeat(40);
 export const REPAIR_LIMIT = 2;
 export const STABLE_SOURCE_REPAIR_LIMIT = 12;
 export const STABLE_QUALITY_REPAIR_LIMIT = 3;
-export const AUTOMATION_PATHS = [
-  "Jenkinsfile",
-  "scripts/diagnose-apple-notarization.ts",
-  "docs/operations/fork-releases.md",
-  "scripts/fork-release.test.ts",
-  "scripts/fork-integration.test.ts",
-  "scripts/fork-release.ts",
-  "scripts/lib/fork-release.ts",
-  "scripts/fork-integration.ts",
-  "scripts/lib/fork-integration.ts",
-  "scripts/fork-release-bootstrap.json",
-  "scripts/fork-release-bootstrap/collections-v0.0.40.patch",
-];
 export interface IntegrationInputs {
   readonly source: string;
   readonly target: string;
@@ -39,7 +26,7 @@ export interface RepairRequest {
 export interface IntegrationState {
   readonly schemaVersion: 1;
   readonly kind: "integration" | "stable";
-  readonly replay?: {
+  readonly replay: {
     readonly commits: ReadonlyArray<string>;
     readonly index: number;
     readonly pending?: string;
@@ -49,8 +36,6 @@ export interface IntegrationState {
   readonly checkout: string;
   readonly shareWithUid?: number;
   readonly head: string;
-  readonly merged: ReadonlyArray<"source" | "target">;
-  readonly merging?: "source" | "target" | undefined;
   readonly status: "preparing" | "needs-repair" | "prepared" | "verified";
   readonly conflicts: ReadonlyArray<string>;
   readonly requests: ReadonlyArray<RepairRequest>;
@@ -78,14 +63,25 @@ const LOCKFILE = "pnpm-lock.yaml";
 function regenerateLockfileWithPnpm(checkout: string): void {
   run("corepack", ["pnpm", "install", "--lockfile-only", "--ignore-scripts"], checkout);
 }
+// The repair worker can write these checkouts, so Jenkins never runs their hooks or monitors.
+function gitConfig(cwd: string): string[] {
+  return [
+    "-c",
+    `safe.directory=${cwd}`,
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+  ];
+}
 export function integrationGit(cwd: string, args: ReadonlyArray<string>): string {
-  return run("git", ["-c", `safe.directory=${cwd}`, ...args], cwd);
+  return run("git", [...gitConfig(cwd), ...args], cwd);
 }
 function ancestor(cwd: string, older: string, newer: string): boolean {
   return (
     NodeChildProcess.spawnSync(
       "git",
-      ["-c", `safe.directory=${cwd}`, "merge-base", "--is-ancestor", older, newer],
+      [...gitConfig(cwd), "merge-base", "--is-ancestor", older, newer],
       { cwd },
     ).status === 0
   );
@@ -129,6 +125,16 @@ export function shareCheckout(checkout: string, uid: number): void {
   }
 }
 
+/** The worker runs this as itself; shareCheckout is the same grant from Jenkins' side. */
+function shareCommand(checkout: string, uid: number | undefined): string {
+  if (!Number.isSafeInteger(uid)) throw new Error("Jenkins UID is unavailable.");
+  const quoted = `'${checkout.replaceAll("'", "'\\''")}'`;
+  return [
+    `find ${quoted} -name node_modules -prune -o -user "$(id -u)" ! -type l -exec setfacl -m u:${uid}:rwX {} +`,
+    `find ${quoted} -name node_modules -prune -o -user "$(id -u)" -type d -exec setfacl -m d:u:${uid}:rwx,d:u:"$(id -u)":rwx {} +`,
+  ].join(" && ");
+}
+
 export class Integration {
   readonly journal: string;
   readonly statePath: string;
@@ -169,6 +175,12 @@ export class Integration {
     // by this transaction; never clean another job's or the user's checkout.
     NodeFS.rmSync(NodePath.dirname(checkout), { recursive: true, force: true });
     NodeFS.mkdirSync(this.workspaceRoot, { recursive: true, mode: 0o700 });
+    // /var/tmp is shared: refuse a root another account created or redirected.
+    const root = NodeFS.lstatSync(this.workspaceRoot);
+    if (!root.isDirectory() || root.uid !== process.getuid?.())
+      throw new Error(
+        `Repair workspace ${this.workspaceRoot} is not a directory this account owns.`,
+      );
     NodeFS.mkdirSync(NodePath.dirname(checkout), { recursive: true, mode: 0o700 });
     run("git", ["clone", "--no-hardlinks", "--no-checkout", repository, checkout]);
     integrationGit(checkout, [
@@ -189,29 +201,25 @@ export class Integration {
     const cache = NodePath.join(this.stateDir, "verified-rerere");
     if (NodeFS.existsSync(cache))
       NodeFS.cpSync(cache, NodePath.join(checkout, ".git", "rr-cache"), { recursive: true });
-    const head =
-      this.kind === "stable"
-        ? this.inputs.target
-        : this.inputs.observed === ZERO_SHA
-          ? this.inputs.source
-          : this.inputs.observed;
+    const head = this.inputs.target;
     const boundary = integrationGit(checkout, [
       "merge-base",
       this.inputs.source,
       this.inputs.target,
     ]);
-    const commits =
-      this.kind === "stable"
-        ? integrationGit(checkout, ["rev-list", "--reverse", `${boundary}..${this.inputs.source}`])
-            .split("\n")
-            .filter(Boolean)
-        : [];
+    const commits = integrationGit(checkout, [
+      "rev-list",
+      "--reverse",
+      `${boundary}..${this.inputs.source}`,
+    ])
+      .split("\n")
+      .filter(Boolean);
     for (const commit of commits) {
       if (
         integrationGit(checkout, ["rev-list", "--parents", "-n", "1", commit]).split(" ").length !==
         2
       )
-        throw new Error("Stable source patch range contains a merge commit.");
+        throw new Error("Fork source patch range contains a merge commit.");
     }
     integrationGit(checkout, ["checkout", "--detach", head]);
     if (shareWithUid !== undefined && shareWithUid !== process.getuid?.()) {
@@ -224,13 +232,12 @@ export class Integration {
       this.save({
         schemaVersion: 1,
         kind: this.kind,
-        ...(this.kind === "stable" ? { replay: { commits, index: 0 } } : {}),
+        replay: { commits, index: 0 },
         id,
         inputs: this.inputs,
         checkout,
         ...(shareWithUid === undefined ? {} : { shareWithUid }),
         head,
-        merged: [],
         status: "preparing",
         conflicts: [],
         requests: [],
@@ -241,38 +248,12 @@ export class Integration {
     let state = initial;
     if (state.status !== "preparing") return state;
     if (integrationGit(state.checkout, ["rev-parse", "HEAD"]) !== state.head) {
-      NodeChildProcess.spawnSync(
-        "git",
-        ["-c", `safe.directory=${state.checkout}`, "cherry-pick", "--quit"],
-        { cwd: state.checkout },
-      );
+      NodeChildProcess.spawnSync("git", [...gitConfig(state.checkout), "cherry-pick", "--quit"], {
+        cwd: state.checkout,
+      });
       integrationGit(state.checkout, ["reset", "--hard", state.head]);
     }
-    if (state.kind === "stable") return this.advanceStable(state);
-    for (const merging of ["source", "target"] as const) {
-      if (state.merged.includes(merging)) continue;
-      const incoming = state.inputs[merging];
-      if (ancestor(state.checkout, incoming, state.head)) {
-        state = this.save({ ...state, merged: [...state.merged, merging] });
-        continue;
-      }
-      // Persist intent before Git: resume an interrupted merge in place.
-      state = this.save({ ...state, merging });
-      const mergeHead = NodePath.join(state.checkout, ".git", "MERGE_HEAD");
-      if (!NodeFS.existsSync(mergeHead)) {
-        const result = NodeChildProcess.spawnSync(
-          "git",
-          ["-c", `safe.directory=${state.checkout}`, "merge", "--no-ff", "--no-commit", incoming],
-          { cwd: state.checkout, encoding: "utf8" },
-        );
-        if (result.status !== 0 && !NodeFS.existsSync(mergeHead))
-          throw new Error(`Integration merge failed: ${result.stderr || result.stdout}`);
-      }
-      const conflicts = this.reconcileLockfile(state, this.resolveAutomationConflicts(state));
-      if (conflicts.length) return this.save({ ...state, status: "needs-repair", conflicts });
-      state = this.commitMerge(state);
-    }
-    return this.save({ ...state, status: "prepared", merging: undefined });
+    return this.advanceReplay(state);
   }
   private reconcileLockfile(state: IntegrationState, conflicts: string[]): string[] {
     if (conflicts.length !== 1 || conflicts[0] !== LOCKFILE) return conflicts;
@@ -290,25 +271,9 @@ export class Integration {
     if (integrationGit(state.checkout, ["diff", "--cached", "--name-only", "--", LOCKFILE]))
       this.regenerateLockfileFromTarget(state);
   }
-  private resolveAutomationConflicts(state: IntegrationState): string[] {
-    // Historical automation revisions do not override the reviewed frozen source,
-    // and must not spend repair attempts intended for application compatibility.
-    for (const path of unresolved(state.checkout).filter((path) =>
-      AUTOMATION_PATHS.includes(path),
-    )) {
-      if (
-        integrationGit(state.checkout, ["ls-tree", "--name-only", state.inputs.source, "--", path])
-      ) {
-        integrationGit(state.checkout, ["checkout", state.inputs.source, "--", path]);
-      } else {
-        integrationGit(state.checkout, ["rm", "-f", "--", path]);
-      }
-    }
-    return unresolved(state.checkout);
-  }
-  private advanceStable(initial: IntegrationState): IntegrationState {
+  private advanceReplay(initial: IntegrationState): IntegrationState {
     let state = initial;
-    while (state.replay && state.replay.index < state.replay.commits.length) {
+    while (state.replay.index < state.replay.commits.length) {
       const commit = state.replay.commits[state.replay.index]!;
       const cherryPickHead = NodePath.join(state.checkout, ".git", "CHERRY_PICK_HEAD");
       if (
@@ -319,7 +284,7 @@ export class Integration {
         state = this.save({ ...state, replay: { ...state.replay, pending: commit } });
         const result = NodeChildProcess.spawnSync(
           "git",
-          ["-c", `safe.directory=${state.checkout}`, "cherry-pick", "--no-commit", commit],
+          [...gitConfig(state.checkout), "cherry-pick", "--no-commit", commit],
           { cwd: state.checkout, encoding: "utf8" },
         );
         if (
@@ -327,17 +292,17 @@ export class Integration {
           !unresolved(state.checkout).length &&
           !NodeFS.existsSync(NodePath.join(state.checkout, ".git", "MERGE_MSG"))
         )
-          throw new Error(`Stable replay failed: ${result.stderr || result.stdout}`);
+          throw new Error(`Fork replay failed: ${result.stderr || result.stdout}`);
       }
-      const conflicts = this.reconcileLockfile(state, this.resolveAutomationConflicts(state));
+      const conflicts = this.reconcileLockfile(state, unresolved(state.checkout));
       if (conflicts.length) return this.save({ ...state, status: "needs-repair", conflicts });
-      state = this.commitStable(state);
+      state = this.commitReplay(state);
     }
     return this.save({ ...state, status: "prepared" });
   }
-  private commitStable(state: IntegrationState): IntegrationState {
+  private commitReplay(state: IntegrationState): IntegrationState {
     const replay = state.replay;
-    if (!replay?.pending) throw new Error("Missing stable replay patch.");
+    if (!replay.pending) throw new Error("Missing replay patch.");
     this.reconcileStagedLockfile(state);
     integrationGit(state.checkout, [
       "diff",
@@ -362,7 +327,7 @@ export class Integration {
       const message = integrationGit(state.checkout, ["show", "-s", "--format=%B", replay.pending]);
       const result = NodeChildProcess.spawnSync(
         "git",
-        ["-c", `safe.directory=${state.checkout}`, "commit-tree", tree, "-p", state.head],
+        [...gitConfig(state.checkout), "commit-tree", tree, "-p", state.head],
         {
           cwd: state.checkout,
           input: `${message}\n`,
@@ -391,7 +356,7 @@ export class Integration {
         },
       );
       if (result.status !== 0) throw new Error(result.stderr);
-      head = assertFullSha(result.stdout.trim(), "Stable replay candidate");
+      head = assertFullSha(result.stdout.trim(), "Replay candidate");
     }
     integrationGit(state.checkout, ["rerere"]);
     state = this.save({
@@ -401,59 +366,8 @@ export class Integration {
       conflicts: [],
       status: "preparing",
     });
-    NodeChildProcess.spawnSync(
-      "git",
-      ["-c", `safe.directory=${state.checkout}`, "cherry-pick", "--quit"],
-      { cwd: state.checkout },
-    );
-    integrationGit(state.checkout, ["reset", "--hard", head]);
-    return state;
-  }
-  private commitMerge(state: IntegrationState): IntegrationState {
-    if (!state.merging) throw new Error("Missing pending merge.");
-    const mergeHead = integrationGit(state.checkout, ["rev-parse", "MERGE_HEAD"]);
-    if (mergeHead !== state.inputs[state.merging])
-      throw new Error("Repair changed the merge target.");
-    this.reconcileStagedLockfile(state);
-    integrationGit(state.checkout, [
-      "diff",
-      "--cached",
-      "--check",
-      state.inputs.target,
-      "--",
-      ".",
-      ":(exclude,glob)**/*.patch",
-      ":(exclude).repos",
-    ]);
-    const tree = integrationGit(state.checkout, ["write-tree"]);
-    const result = NodeChildProcess.spawnSync(
-      "git",
-      [
-        "-c",
-        `safe.directory=${state.checkout}`,
-        "commit-tree",
-        tree,
-        "-p",
-        state.head,
-        "-p",
-        mergeHead,
-      ],
-      {
-        cwd: state.checkout,
-        input: `Merge ${state.merging} ${mergeHead} into fork integration\n`,
-        encoding: "utf8",
-      },
-    );
-    if (result.status !== 0) throw new Error(result.stderr);
-    const head = assertFullSha(result.stdout.trim(), "Merged candidate");
-    integrationGit(state.checkout, ["rerere"]);
-    state = this.save({
-      ...state,
-      head,
-      merged: [...state.merged, state.merging],
-      merging: undefined,
-      conflicts: [],
-      status: "preparing",
+    NodeChildProcess.spawnSync("git", [...gitConfig(state.checkout), "cherry-pick", "--quit"], {
+      cwd: state.checkout,
     });
     integrationGit(state.checkout, ["reset", "--hard", head]);
     return state;
@@ -462,37 +376,21 @@ export class Integration {
     let state = this.read();
     const previous = state.requests.at(-1);
     if (previous && !previous.completed) return { state, request: previous };
-    // Both source and upstream merges can need repair before tests run. Keep
-    // one extra request for quality feedback on the completed candidate.
-    let repairLimit =
-      feedback.trim() && state.status === "prepared" ? REPAIR_LIMIT + 1 : REPAIR_LIMIT;
-    const stage =
-      state.kind === "stable"
-        ? state.replay?.pending
-          ? `replay:${state.replay.pending}`
-          : "quality"
-        : undefined;
-    let used = state.requests.length;
-    if (stage !== undefined) {
-      // Advancing to another patch is progress, not a retry of the same failure.
-      // Legacy requests count against the current stage rather than resetting
-      // an exhausted journal when the controller loads this version.
-      used = state.requests.filter(
-        (request) => request.stage === undefined || request.stage === stage,
-      ).length;
-      repairLimit = stage === "quality" ? STABLE_QUALITY_REPAIR_LIMIT : REPAIR_LIMIT;
-      if (
-        stage !== "quality" &&
-        state.requests.filter((request) => request.stage !== "quality").length >=
-          STABLE_SOURCE_REPAIR_LIMIT
-      )
-        throw new Error(
-          `Automatic stable replay exhausted ${STABLE_SOURCE_REPAIR_LIMIT} source repairs for input ${state.id}; unchanged retries will reuse this incident.`,
-        );
-    }
+    const stage = state.replay.pending ? `replay:${state.replay.pending}` : "quality";
+    // Advancing to another patch is progress, not a retry of the same failure.
+    const used = state.requests.filter((request) => request.stage === stage).length;
+    const repairLimit = stage === "quality" ? STABLE_QUALITY_REPAIR_LIMIT : REPAIR_LIMIT;
+    if (
+      stage !== "quality" &&
+      state.requests.filter((request) => request.stage !== "quality").length >=
+        STABLE_SOURCE_REPAIR_LIMIT
+    )
+      throw new Error(
+        `Automatic replay exhausted ${STABLE_SOURCE_REPAIR_LIMIT} source repairs for input ${state.id}; unchanged retries will reuse this incident.`,
+      );
     if (used >= repairLimit)
       throw new Error(
-        `Automatic repair exhausted ${repairLimit} attempts for input ${state.id}${stage ? ` at ${stage}` : ""}; unchanged retries will reuse this incident.`,
+        `Automatic repair exhausted ${repairLimit} attempts for input ${state.id} at ${stage}; unchanged retries will reuse this incident.`,
       );
     if (!["needs-repair", "prepared"].includes(state.status))
       throw new Error("Candidate does not need repair.");
@@ -509,19 +407,19 @@ export class Integration {
     const attempt = state.requests.length + 1;
     const id = `fork-repair:${state.id}:${attempt}`;
     const message = [
-      `Candidate policy: ${state.kind === "stable" ? "linear replay onto the exact official stable release; never merge or use the integration tip" : "persistent development integration merges"}.`,
+      `Candidate policy: linear replay of the fork commits onto ${state.kind === "stable" ? "the exact official stable release" : "the current upstream main"}; never merge.`,
       "Perform this authorized automatic fork maintenance repair now, then return a completion receipt. Do not delegate or ask for confirmation.",
       `Work ONLY in ${state.checkout}. This is a disposable shared checkout. The user's project directory and live T3 data must not be changed.`,
-      `Frozen source main: ${state.inputs.source}; upstream target: ${state.inputs.target}; observed integration: ${state.inputs.observed}; HEAD must remain ${state.head}.`,
+      `Frozen source main: ${state.inputs.source}; upstream target: ${state.inputs.target}; HEAD must remain ${state.head}.`,
       `Use git -c safe.directory=${state.checkout} for Git commands in this checkout. Do not create commits, reset HEAD, abort a merge, change remotes, push, release, or alter Jenkins/signing credentials. Jenkins creates commits and promotes only after its gates pass.`,
       "Preserve upstream changes and fork Collections on web/desktop/mobile, multi-window support, remote connections, and fork update identity. Read both sides of each conflict; do not resolve application files wholesale with ours/theirs. Preserve independent upstream and fork tests. For dependency changes align React and react-test-renderer and regenerate pnpm-lock.yaml after resolving manifests. Preserve upstream dependency .patch assets and read-only .repos references byte for byte; their whitespace is part of the upstream snapshot. Exclude **/*.patch and .repos when running git diff --check.",
       `Unresolved paths: ${state.conflicts.join(", ") || "none; repair the gate failure below"}.`,
-      `Protected automation files must exactly match the frozen source: ${AUTOMATION_PATHS.join(", ")}. Do not weaken tests or verification gates.`,
+      "Do not weaken tests or verification gates.",
       "Run only focused checks relevant to the repair when tools are already available. Do not install the entire workspace just to run checks; Jenkins owns dependency installation, repository-wide checks, and native builds. If local test tooling is unavailable, finish the source resolution and return the receipt so Jenkins can supply gate feedback. Do not start browsers, dev servers, devices, or touch live ~/.t3/userdata.",
       feedback
         ? `Jenkins installed the workspace dependencies in this checkout before this feedback attempt. Run the failing focused tests locally and iterate until they pass, including follow-on errors that the first missing mock export may have hidden. Run the relevant scoped type checks for production changes. Parser checks alone are not sufficient when the test runner is available.\nJenkins gate feedback:\n${feedback.slice(-16000)}`
-        : "Inspect the merge diff and relevant upstream commits before adapting the fork.",
-      `Before returning the receipt, run node scripts/fork-integration.ts share --checkout ${state.checkout} --uid ${process.getuid?.()} from this checkout. It grants Jenkins access only to files you own here, excluding dependencies and symlink targets.`,
+        : "Inspect the conflicting fork patch and the relevant upstream commits before adapting the fork.",
+      `Before returning the receipt, grant Jenkins access to the files you created or changed here, skipping dependencies and symlinks: ${shareCommand(state.checkout, process.getuid?.())}`,
       `Stage all intended tracked repairs, ensure no unresolved paths or unstaged edits remain, then write ${NodePath.join(state.checkout, ".fork-repair-complete.json")} atomically with exactly {"requestId":${JSON.stringify(id)},"status":"completed"}. Create the receipt with mode 0644 so Jenkins can read it. This receipt is the last filesystem operation; finish the turn immediately afterward. If unable to resolve, write the same receipt with status "failed" and a concise detail. Never fabricate success.`,
     ].join("\n\n");
     const request = {
@@ -579,8 +477,7 @@ export class Integration {
       ...state,
       requests: state.requests.map((r) => (r.id === request.id ? { ...r, completed: true } : r)),
     };
-    if (state.replay?.pending) state = this.commitStable(state);
-    else if (state.merging) state = this.commitMerge(state);
+    if (state.replay.pending) state = this.commitReplay(state);
     else {
       const tree = integrationGit(state.checkout, ["write-tree"]);
       const head = integrationGit(state.checkout, [
@@ -600,24 +497,17 @@ export class Integration {
     const state = this.read();
     if (state.status !== "prepared" && state.status !== "verified")
       throw new Error("Integration candidate is incomplete.");
-    const parents =
-      state.kind === "stable"
-        ? [state.inputs.target]
-        : [state.inputs.source, state.inputs.target, state.inputs.observed];
     if (
-      state.kind === "stable" &&
-      (state.replay?.index !== state.replay?.commits.length ||
-        integrationGit(state.checkout, [
-          "rev-list",
-          "--merges",
-          `${state.inputs.target}..${state.head}`,
-        ]))
+      state.replay.index !== state.replay.commits.length ||
+      integrationGit(state.checkout, [
+        "rev-list",
+        "--merges",
+        `${state.inputs.target}..${state.head}`,
+      ])
     )
-      throw new Error("Stable candidate must replay every fork patch with linear history.");
-    for (const input of parents) {
-      if (input !== ZERO_SHA && !ancestor(state.checkout, input, state.head))
-        throw new Error("Integration candidate lost an input parent.");
-    }
+      throw new Error("Candidate must replay every fork patch with linear history.");
+    if (!ancestor(state.checkout, state.inputs.target, state.head))
+      throw new Error("Candidate lost its upstream target.");
     const boundary = integrationGit(state.checkout, [
       "merge-base",
       state.inputs.source,
@@ -661,17 +551,6 @@ export class Integration {
       ])
     )
       throw new Error("Repair changed upstream vendored references.");
-    if (
-      integrationGit(state.checkout, [
-        "diff",
-        "--name-only",
-        state.inputs.source,
-        state.head,
-        "--",
-        ...AUTOMATION_PATHS,
-      ])
-    )
-      throw new Error("Repair changed protected automation source.");
     if (integrationGit(state.checkout, ["status", "--porcelain"]))
       throw new Error("Integration candidate is dirty.");
   }
@@ -692,72 +571,6 @@ export class Integration {
     integrationGit(state.checkout, ["bundle", "create", path, ...refs]);
     return state;
   }
-  private persistVerifiedResolutions(state: IntegrationState): void {
-    if (state.kind !== "integration") return;
-    const range =
-      state.inputs.observed === ZERO_SHA ? state.head : `${state.inputs.observed}..${state.head}`;
-    const merges = integrationGit(state.checkout, [
-      "rev-list",
-      "--first-parent",
-      "--min-parents=2",
-      range,
-    ])
-      .split("\n")
-      .filter(Boolean);
-    const merge = merges.find(
-      (commit) =>
-        integrationGit(state.checkout, ["rev-parse", `${commit}^2`]) === state.inputs.target,
-    );
-    if (!merge) return;
-    // Reconstruct the actual conflict preimages, then record the final tested
-    // blobs. Feedback may have changed the original resolution or cleared its
-    // private cache, so exporting that earlier cache is insufficient.
-    const temporary = NodeFS.mkdtempSync(NodePath.join(this.journal, "verified-cache-"));
-    const scratch = NodePath.join(temporary, "checkout");
-    try {
-      run("git", ["clone", "--no-hardlinks", "--no-checkout", state.checkout, scratch]);
-      integrationGit(scratch, ["config", "user.name", "T3 Code maintenance"]);
-      integrationGit(scratch, ["config", "user.email", "maintenance@tapnetix.com"]);
-      integrationGit(scratch, ["config", "rerere.enabled", "true"]);
-      integrationGit(scratch, [
-        "checkout",
-        "--detach",
-        integrationGit(state.checkout, ["rev-parse", `${merge}^1`]),
-      ]);
-      const result = NodeChildProcess.spawnSync(
-        "git",
-        ["merge", "--no-ff", "--no-commit", state.inputs.target],
-        { cwd: scratch, encoding: "utf8" },
-      );
-      const conflicts = unresolved(scratch);
-      if (result.status !== 0 && !conflicts.length)
-        throw new Error("Could not reconstruct verified merge resolutions.");
-      for (const path of conflicts) {
-        const exists =
-          NodeChildProcess.spawnSync("git", ["cat-file", "-e", `${state.head}:${path}`], {
-            cwd: scratch,
-          }).status === 0;
-        integrationGit(
-          scratch,
-          exists ? ["checkout", state.head, "--", path] : ["rm", "--force", "--", path],
-        );
-      }
-      integrationGit(scratch, ["rerere"]);
-      const cache = NodePath.join(scratch, ".git", "rr-cache");
-      if (NodeFS.existsSync(cache)) {
-        for (const entry of NodeFS.readdirSync(cache)) {
-          const directory = NodePath.join(cache, entry);
-          if (NodeFS.readdirSync(directory).some((name) => name.startsWith("postimage"))) {
-            NodeFS.cpSync(directory, NodePath.join(this.stateDir, "verified-rerere", entry), {
-              recursive: true,
-            });
-          }
-        }
-      }
-    } finally {
-      NodeFS.rmSync(temporary, { recursive: true, force: true });
-    }
-  }
   markQuality(): void {
     const state = this.read();
     this.assertCandidate();
@@ -768,12 +581,9 @@ export class Integration {
     const state = this.read();
     if (state.qualitySha !== state.head)
       throw new Error("Candidate has no passing quality receipt.");
-    this.persistVerifiedResolutions(state);
-    if (state.kind === "stable") {
-      const cache = NodePath.join(state.checkout, ".git", "rr-cache");
-      if (NodeFS.existsSync(cache))
-        NodeFS.cpSync(cache, NodePath.join(this.stateDir, "verified-rerere"), { recursive: true });
-    }
+    const cache = NodePath.join(state.checkout, ".git", "rr-cache");
+    if (NodeFS.existsSync(cache))
+      NodeFS.cpSync(cache, NodePath.join(this.stateDir, "verified-rerere"), { recursive: true });
     this.save({ ...state, status: "verified", verifiedBuild: build });
     atomicWriteJson(NodePath.join(this.stateDir, `${state.kind}-success.json`), {
       inputs: state.inputs,
@@ -782,21 +592,29 @@ export class Integration {
     });
   }
 }
+/** These exact inputs already produced a candidate that passed every gate. */
 export function verifiedIntegrationCurrent(
   stateDir: string,
-  repository: string,
   inputs: IntegrationInputs,
+  kind: IntegrationState["kind"],
 ): boolean {
-  const path = NodePath.join(stateDir, "integration-success.json");
-  if (!NodeFS.existsSync(path)) return false;
-  const receipt = readJsonFile<{ candidate: string }>(path);
-  return (
-    receipt.candidate === inputs.observed &&
-    ancestor(repository, inputs.source, inputs.observed) &&
-    ancestor(repository, inputs.target, inputs.observed)
-  );
+  const integration = new Integration(stateDir, inputs, undefined, kind);
+  return NodeFS.existsSync(integration.statePath) && integration.read().status === "verified";
 }
 export type Dispatch = (payload: Record<string, unknown>) => Promise<number>;
+/**
+ * One thread per candidate: attempts on the same inputs keep their context, and a turn
+ * still running for another lane or an older target never blocks a new repair.
+ */
+export function repairThreadId(state: Pick<IntegrationState, "kind" | "id">): string {
+  return `t3-fork-repair-${state.kind === "stable" ? "stable" : "nightly"}-${state.id.slice(0, 16)}`;
+}
+function repairThreadTitle(state: Pick<IntegrationState, "kind" | "inputs">): string {
+  const target = state.inputs.target.slice(0, 10);
+  return state.kind === "stable"
+    ? `Fork repair: stable ${target}`
+    : `Fork repair: nightly ${target}`;
+}
 export async function dispatchRepair(
   integration: Integration,
   projectId: string,
@@ -805,15 +623,15 @@ export async function dispatchRepair(
   feedback = "",
 ): Promise<RepairRequest> {
   const { state, request } = integration.request(feedback);
-  const threadId = "t3-fork-maintenance-integration";
+  const threadId = repairThreadId(state);
   // Persisted request IDs let a restarted Jenkins build reuse the same turn.
   if (request.receiptSequence !== undefined) return request;
   await dispatch({
     type: "thread.create",
-    commandId: "fork-maintenance:create",
+    commandId: `fork-maintenance:create:${threadId}`,
     threadId,
     projectId,
-    title: "Automatic fork maintenance",
+    title: repairThreadTitle(state),
     modelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -849,6 +667,18 @@ export async function dispatchRepair(
   });
   integration.accepted(request.id, sequence);
   return request;
+}
+/** Ends the candidate's repair turn so a timed-out wait leaves nothing running. */
+export async function stopRepair(integration: Integration, dispatch: Dispatch): Promise<void> {
+  const state = integration.read();
+  const request = state.requests.at(-1);
+  if (!request) return;
+  await dispatch({
+    type: "thread.session.stop",
+    commandId: `${request.id}:stop-after-wait`,
+    threadId: repairThreadId(state),
+    createdAt: new Date().toISOString(),
+  });
 }
 export function workflowLock(
   stateDir: string,
