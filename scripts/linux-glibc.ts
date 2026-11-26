@@ -62,11 +62,15 @@ export async function scanGlibcNeeds(appOutDir: string): Promise<{
       if (!isElf) continue;
       elfCount++;
       try {
-        // readelf inspects either release architecture without executing the binary.
-        const { stdout, stderr } = await readelf("readelf", ["--wide", "--version-info", file], {
-          env: { ...process.env, LC_ALL: "C" },
-          maxBuffer: 16 * 1024 * 1024,
-        });
+        // Runtime ABI requirements do not need the separate debug files Electron omits.
+        const { stdout, stderr } = await readelf(
+          "readelf",
+          ["--wide", "--version-info", "--debug-dump=no-follow-links", file],
+          {
+            env: { ...process.env, LC_ALL: "C" },
+            maxBuffer: 16 * 1024 * 1024,
+          },
+        );
         if (stderr.trim()) throw new Error(stderr.trim());
         const required = parseGlibcNeeds(stdout);
         if (required && compareVersions(required, GLIBC_BUILD_CEILING) > 0) {
